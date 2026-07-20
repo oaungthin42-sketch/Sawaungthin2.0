@@ -193,16 +193,6 @@ export const initModels = async () => {
 };
 
 export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
-    console.log("[AI] MOCK TRANSLATION ENABLED for test.");
-    const translated = originalTranscript.map(c => ({
-        index: c.index,
-        text: c.text,
-        timestamp: c.timestamp,
-        is_dialogue: c.is_dialogue || false
-    }));
-    fs.writeFileSync(cachePath, JSON.stringify(translated, null, 2));
-    return translated;
-
     try {
         if (cachePath && fs.existsSync(cachePath)) {
             try {

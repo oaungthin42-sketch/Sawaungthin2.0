@@ -504,7 +504,7 @@ export const processRecapPipeline = async (jobId) => {
                 // Natural continuation with potential speed adjustment, pad with clone of last frame if video ends early
                 const filter = `[0:v]trim=start=${s_start}:end=${s_end},setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
                 
-                const segFile = path.join(cacheDir, `seg_${i}.mp4`);
+                const segFile = path.join(cacheDir, `seg_${i}.ts`);
                 
                 if (!fs.existsSync(segFile)) {
                     const args = [
@@ -515,6 +515,7 @@ export const processRecapPipeline = async (jobId) => {
                         '-c:v', 'libx264',
                         '-preset', 'ultrafast',
                         '-crf', '28',
+                        '-f', 'mpegts',
                         '-y', segFile
                     ];
                     await runFFmpeg(args, tmpDir);
@@ -539,7 +540,7 @@ export const processRecapPipeline = async (jobId) => {
 
             let validSegments = [];
             for (let i = 0; i < state.timeline.length; i++) {
-                const segFile = path.join(cacheDir, `seg_${i}.mp4`);
+                const segFile = path.join(cacheDir, `seg_${i}.ts`);
                 if (!fs.existsSync(segFile)) {
                     throw new Error(`Segment file is missing: ${segFile}`);
                 }
@@ -662,7 +663,7 @@ export const processRecapPipeline = async (jobId) => {
                 if (fs.existsSync(ttsChunksDir)) fs.rmSync(ttsChunksDir, { recursive: true, force: true });
                 
                 try {
-                    const segFiles = fs.readdirSync(cacheDir).filter(f => f.startsWith('seg_') && f.endsWith('.mp4'));
+                    const segFiles = fs.readdirSync(cacheDir).filter(f => f.startsWith('seg_') && f.endsWith('.ts'));
                     for (const sf of segFiles) {
                         filesToRemove.push(path.join(cacheDir, sf));
                     }
