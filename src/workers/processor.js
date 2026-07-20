@@ -352,20 +352,11 @@ export const processRecapPipeline = async (jobId) => {
                 if (!Number.isFinite(chunk_orig_end)) chunk_orig_end = chunk_orig_start;
                 
                 if (chunk_orig_end <= chunk_orig_start) {
-                    let recovered_end = -1;
-                    for (let j = i + 1; j < authTimeline.length; j++) {
-                        if (Number.isFinite(authTimeline[j].orig_start) && authTimeline[j].orig_start > chunk_orig_start) {
-                            recovered_end = authTimeline[j].orig_start;
-                            break;
-                        }
-                    }
-                    if (recovered_end !== -1) {
-                        chunk_orig_end = recovered_end;
-                        console.log(`[AI] Recovered invalid scene boundary for chunk ${i}: start=${chunk_orig_start}, new_end=${chunk_orig_end}`);
-                    } else {
+                    chunk_orig_end = chunk_orig_start + Math.max(0.1, chunk.final_dur || 1.0);
+                    if (chunk_orig_end > state.originalVideoDuration) {
                         chunk_orig_end = state.originalVideoDuration;
-                        console.log(`[AI] Recovered invalid scene boundary for chunk ${i}: start=${chunk_orig_start}, new_end=video_end(${chunk_orig_end})`);
                     }
+                    console.log(`[AI] Recovered invalid scene boundary for chunk ${i}: start=${chunk_orig_start}, new_end=${chunk_orig_end} (based on chunk dur)`);
                 }
                 
                 if (chunk_orig_end - chunk_orig_start < 0.05) {
@@ -558,6 +549,7 @@ export const processRecapPipeline = async (jobId) => {
                 }
                 const safePath = segFile.replace(/\\/g, '/').replace(/'/g, "'\\''");
                 validSegments.push(`file '${safePath}'`);
+                validSegments.push(`duration ${state.timeline[i].target_dur.toFixed(6)}`);
             }
             
             const concatContent = validSegments.join('\n');

@@ -1,0 +1,166 @@
+        for (let i = 0; i < chunks.length; i++) {
+            chunkDurs.push(parseFloat(await getDuration(chunks[i])));
+        }
+
+        if (isDialogueStyle) {
+            // Group dialogue chunks that are close together (LOCAL CONVERSATION GROUP)
+            const groups = [];
+            let currentGroup = [0];
+            for (let i = 1; i < chunks.length; i++) {
+                let gap = 0;
+                if (originalTranscript[i] && originalTranscript[i-1] && originalTranscript[i].timestamp && originalTranscript[i-1].timestamp) {
+                    gap = originalTranscript[i].timestamp[0] - originalTranscript[i-1].timestamp[1];
+                }
+                if (gap > 2.0) { // Gap > 2s breaks the group
+                    groups.push(currentGroup);
+                    currentGroup = [i];
+                } else {
+                    currentGroup.push(i);
+                }
+            }
+            if (currentGroup.length > 0) groups.push(currentGroup);
+
+            let prevEnd = 0;
+
+            for (const group of groups) {
+                const firstIdx = group[0];
+                const lastIdx = group[group.length - 1];
+                
+                let groupOrigStart = originalTranscript[firstIdx] && originalTranscript[firstIdx].timestamp ? originalTranscript[firstIdx].timestamp[0] : 0;
+                
+                let nextGroupStart = groupOrigStart + 10; // Fallback
+                if (lastIdx + 1 < originalTranscript.length && originalTranscript[lastIdx + 1] && originalTranscript[lastIdx + 1].timestamp) {
+                    nextGroupStart = originalTranscript[lastIdx + 1].timestamp[0];
+                } else if (originalTranscript[lastIdx] && originalTranscript[lastIdx].timestamp) {
+                    nextGroupStart = originalTranscript[lastIdx].timestamp[1] + 2.0; // Assume 2 seconds margin after last chunk
+                }
+                let hardBoundaryEnd = nextGroupStart;
+                
+                let totalTTSDur = 0;
+                let totalOrigGaps = 0;
+                for (let k = 0; k < group.length; k++) {
+                    totalTTSDur += chunkDurs[group[k]];
+                    if (k < group.length - 1) {
+                        let origGap = 0;
+                        if (originalTranscript[group[k+1]] && originalTranscript[group[k]] && originalTranscript[group[k+1]].timestamp && originalTranscript[group[k]].timestamp) {
+                            origGap = originalTranscript[group[k+1]].timestamp[0] - originalTranscript[group[k]].timestamp[1];
+                        }
+                        if (origGap > 0) totalOrigGaps += origGap;
+                    }
+                }
+                
+                let availableTime = hardBoundaryEnd - groupOrigStart;
+                let speed = 1.0;
+                let gapsScale = 1.0;
+                
+                if (totalTTSDur + totalOrigGaps > availableTime) {
+                    let timeWithoutGaps = totalTTSDur;
+                    if (timeWithoutGaps + totalOrigGaps * 0.3 <= availableTime) {
+                        gapsScale = (availableTime - timeWithoutGaps) / totalOrigGaps;
+                    } else {
+                        gapsScale = 0.2; // Keep at least small pauses
+                        let remainingForTTS = availableTime - (totalOrigGaps * gapsScale);
+                        if (remainingForTTS < totalTTSDur && remainingForTTS > 0) {
+                            speed = totalTTSDur / remainingForTTS;
+                        }
+                    }
+                }
+                
+                if (speed > 1.35) speed = 1.35; // Controlled maximum tempo
+                
+                let currentTimelineTime = groupOrigStart;
+                
+                for (let k = 0; k < group.length; k++) {
+                    const i = group[k];
+                    let origStart = originalTranscript[i] && originalTranscript[i].timestamp ? originalTranscript[i].timestamp[0] : currentTimelineTime;
+                    let origEnd = originalTranscript[i] && originalTranscript[i].timestamp ? originalTranscript[i].timestamp[1] : currentTimelineTime + chunkDurs[i];
+                    let origDur = origEnd - origStart;
+                    
+                    // If we have extra room before the chunk, align to its original start
+                    if (currentTimelineTime < origStart) {
+                        currentTimelineTime = origStart;
+                    }
+                    
+                    // But currentTimelineTime cannot be earlier than prevEnd (prevent voice overlap)
+                    if (currentTimelineTime < prevEnd) {
+                        currentTimelineTime = prevEnd;
+                    }
+                    
+                    let gapBefore = currentTimelineTime - prevEnd;
+                    if (gapBefore > 0.02) {
+                        const gapPath = path.join(ttsDir, `gap_${i}.wav`);
+                        await runFFmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', gapBefore.toFixed(3), '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', gapPath], ttsDir);
+                        processedChunks.push(gapPath);
+                        try {
+                            let gapDur = parseFloat(await getDuration(gapPath));
+                            console.log(`[AI-DIAGNOSTIC] Gap Before Chunk ${i} | Intended Dur: ${gapBefore.toFixed(3)} | Actual Dur: ${gapDur.toFixed(3)} | Timeline: ${(runningAudioTime).toFixed(2)}->${(runningAudioTime + gapBefore).toFixed(2)}`);
+                        } catch(e) {}
+                        prevEnd += gapBefore;
+                    }
+                    
+                    let finalDur = chunkDurs[i];
+                    let finalChunkPath = chunks[i];
+                    
+                    if (speed > 1.02) {
+                        finalChunkPath = path.join(ttsDir, `chunk_adj_${String(i).padStart(4, '0')}.wav`);
+                        await runFFmpeg(['-i', chunks[i], '-filter:a', `atempo=${speed.toFixed(3)}`, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', finalChunkPath], ttsDir);
+                        finalDur = chunkDurs[i] / speed;
+                        console.log(`[AI] Dialogue Group Chunk ${i} tempo adjusted by ${speed.toFixed(2)}x (Group Stable Speed)`);
+                    } else {
+                        // Moderate per-chunk adjustment if only this chunk is long but the group is fine
+                        if (finalDur > origDur + 0.1) {
+                             let localSpeed = finalDur / origDur;
+                             if (localSpeed > 1.25) localSpeed = 1.25;
+                             if (localSpeed > 1.02) {
+                                 finalChunkPath = path.join(ttsDir, `chunk_adj_${String(i).padStart(4, '0')}.wav`);
+                                 await runFFmpeg(['-i', chunks[i], '-filter:a', `atempo=${localSpeed.toFixed(3)}`, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', finalChunkPath], ttsDir);
+                                 finalDur = chunkDurs[i] / localSpeed;
+                                 console.log(`[AI] Dialogue Local Chunk ${i} tempo adjusted by ${localSpeed.toFixed(2)}x`);
+                             }
+                        }
+                    }
+                    
+                    processedChunks.push(finalChunkPath);
+                    
+                    authoritativeTimeline.push({
+                        chunk_index: i,
+                        orig_start: origStart,
+                        orig_end: origEnd,
+                        orig_dur: origDur,
+                        final_audio_start: runningAudioTime + gapBefore,
+                        final_audio_end: runningAudioTime + gapBefore + finalDur,
+                        final_dur: finalDur,
+                        text: translatedTranscript[i] ? translatedTranscript[i].text : ""
+                    });
+                    
+                    let statDur = 0, statSize = 0, codec = 'none', sampleRate = 0, channels = 0;
+                    try {
+                        statDur = parseFloat(await getDuration(finalChunkPath));
+                        statSize = fs.statSync(finalChunkPath).size;
+                        const details = await getAudioDetails(finalChunkPath);
+                        codec = details.codec;
+                        sampleRate = details.sampleRate;
+                        channels = details.channels;
+                    } catch(e) {}
+                    console.log(`[AI-DIAGNOSTIC] Chunk ${i} | Orig: ${origStart.toFixed(2)}->${origEnd.toFixed(2)} (dur: ${origDur.toFixed(2)}) | TTS: ${path.basename(finalChunkPath)} (size: ${statSize}, dur: ${statDur.toFixed(2)}, format: ${codec}, ${sampleRate}Hz, ${channels}ch) | Final Timeline: ${(runningAudioTime + gapBefore).toFixed(2)}->${(runningAudioTime + gapBefore + finalDur).toFixed(2)}`);
+                    
+                    runningAudioTime += gapBefore + finalDur;
+                    
+                    prevEnd += finalDur;
+                    
+                    // Calculate next target time based on scaled natural gaps
+                    if (k < group.length - 1) {
+                        let nextOrigStart = originalTranscript[group[k+1]] && originalTranscript[group[k+1]].timestamp ? originalTranscript[group[k+1]].timestamp[0] : 0;
+                        let origGap = nextOrigStart - origEnd;
+                        if (origGap < 0) origGap = 0;
+                        currentTimelineTime = prevEnd + (origGap * gapsScale);
+                    }
+                }
+            }
+        } else {
+            // Narration style preserves original successful behavior
+            for (let i = 0; i < chunks.length; i++) {
+                const rawChunk = chunks[i];
+                let actualGapBefore = 0;
+                let actualFinalDur = chunkDurs[i];
+                let chunkDur = chunkDurs[i];

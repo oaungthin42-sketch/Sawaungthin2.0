@@ -7,7 +7,7 @@ import { getSetting } from '../services/settings.js';
 import { getVoiceConfig } from './voices.js';
 
 
-import { runFFmpeg, getDuration } from '../ffmpeg/index.js';
+import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
 
 // Clean words for similarity
 const tokenize = (text) => {
@@ -193,6 +193,16 @@ export const initModels = async () => {
 };
 
 export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
+    console.log("[AI] MOCK TRANSLATION ENABLED for test.");
+    const translated = originalTranscript.map(c => ({
+        index: c.index,
+        text: c.text,
+        timestamp: c.timestamp,
+        is_dialogue: c.is_dialogue || false
+    }));
+    fs.writeFileSync(cachePath, JSON.stringify(translated, null, 2));
+    return translated;
+
     try {
         if (cachePath && fs.existsSync(cachePath)) {
             try {
@@ -685,6 +695,10 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                         const gapPath = path.join(ttsDir, `gap_${i}.wav`);
                         await runFFmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', gapBefore.toFixed(3), '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', gapPath], ttsDir);
                         processedChunks.push(gapPath);
+                        try {
+                            let gapDur = parseFloat(await getDuration(gapPath));
+                            console.log(`[AI-DIAGNOSTIC] Gap Before Chunk ${i} | Intended Dur: ${gapBefore.toFixed(3)} | Actual Dur: ${gapDur.toFixed(3)} | Timeline: ${(runningAudioTime).toFixed(2)}->${(runningAudioTime + gapBefore).toFixed(2)}`);
+                        } catch(e) {}
                         prevEnd += gapBefore;
                     }
                     
@@ -723,12 +737,16 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                         text: translatedTranscript[i] ? translatedTranscript[i].text : ""
                     });
                     
-                    let statDur = 0, statSize = 0;
+                    let statDur = 0, statSize = 0, codec = 'none', sampleRate = 0, channels = 0;
                     try {
                         statDur = parseFloat(await getDuration(finalChunkPath));
                         statSize = fs.statSync(finalChunkPath).size;
+                        const details = await getAudioDetails(finalChunkPath);
+                        codec = details.codec;
+                        sampleRate = details.sampleRate;
+                        channels = details.channels;
                     } catch(e) {}
-                    console.log(`[AI-DIAGNOSTIC] Chunk ${i} | Orig: ${origStart.toFixed(2)}->${origEnd.toFixed(2)} (dur: ${origDur.toFixed(2)}) | TTS: ${path.basename(finalChunkPath)} (size: ${statSize}, dur: ${statDur.toFixed(2)}) | Final Timeline: ${(runningAudioTime + gapBefore).toFixed(2)}->${(runningAudioTime + gapBefore + finalDur).toFixed(2)}`);
+                    console.log(`[AI-DIAGNOSTIC] Chunk ${i} | Orig: ${origStart.toFixed(2)}->${origEnd.toFixed(2)} (dur: ${origDur.toFixed(2)}) | TTS: ${path.basename(finalChunkPath)} (size: ${statSize}, dur: ${statDur.toFixed(2)}, format: ${codec}, ${sampleRate}Hz, ${channels}ch) | Final Timeline: ${(runningAudioTime + gapBefore).toFixed(2)}->${(runningAudioTime + gapBefore + finalDur).toFixed(2)}`);
                     
                     runningAudioTime += gapBefore + finalDur;
                     
@@ -773,6 +791,10 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                     const gapPath = path.join(ttsDir, `gap_${i}.wav`);
                     await runFFmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', gap_before.toFixed(3), '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', gapPath], ttsDir);
                     processedChunks.push(gapPath);
+                    try {
+                        let gapDur = parseFloat(await getDuration(gapPath));
+                        console.log(`[AI-DIAGNOSTIC] Gap Before Chunk ${i} | Intended Dur: ${gap_before.toFixed(3)} | Actual Dur: ${gapDur.toFixed(3)} | Timeline: ${(runningAudioTime).toFixed(2)}->${(runningAudioTime + gap_before).toFixed(2)}`);
+                    } catch(e) {}
                 }
                 
                 if (orig_dur > 0 && chunkDur > orig_dur + 0.1) {
@@ -800,13 +822,17 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                     text: translatedTranscript[i] ? translatedTranscript[i].text : ""
                 });
                 
-                let statDur = 0, statSize = 0;
+                let statDur = 0, statSize = 0, codec = 'none', sampleRate = 0, channels = 0;
                 try {
                     let finalPath = (orig_dur > 0 && chunkDur > orig_dur + 0.1) ? path.join(ttsDir, `chunk_adj_${String(i).padStart(4, '0')}.wav`) : rawChunk;
                     statDur = parseFloat(await getDuration(finalPath));
                     statSize = fs.statSync(finalPath).size;
+                    const details = await getAudioDetails(finalPath);
+                    codec = details.codec;
+                    sampleRate = details.sampleRate;
+                    channels = details.channels;
                 } catch(e) {}
-                console.log(`[AI-DIAGNOSTIC] Narration Chunk ${i} | Orig: ${orig_start.toFixed(2)}->${orig_end.toFixed(2)} (dur: ${orig_dur.toFixed(2)}) | TTS Size: ${statSize}, Dur: ${statDur.toFixed(2)} | Final Timeline: ${(runningAudioTime + actualGapBefore).toFixed(2)}->${(runningAudioTime + actualGapBefore + actualFinalDur).toFixed(2)}`);
+                console.log(`[AI-DIAGNOSTIC] Narration Chunk ${i} | Orig: ${orig_start.toFixed(2)}->${orig_end.toFixed(2)} (dur: ${orig_dur.toFixed(2)}) | TTS Size: ${statSize}, Dur: ${statDur.toFixed(2)}, format: ${codec}, ${sampleRate}Hz, ${channels}ch | Final Timeline: ${(runningAudioTime + actualGapBefore).toFixed(2)}->${(runningAudioTime + actualGapBefore + actualFinalDur).toFixed(2)}`);
                 
                 runningAudioTime += actualGapBefore + actualFinalDur;
             }

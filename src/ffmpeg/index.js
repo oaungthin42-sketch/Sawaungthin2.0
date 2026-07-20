@@ -28,6 +28,21 @@ export const getDuration = (file) => new Promise((resolve, reject) => {
     });
 });
 
+export const getAudioDetails = (file) => new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(file, (err, meta) => {
+        if (err) return resolve({ codec: 'unknown', sampleRate: 0, channels: 0 });
+        let aStream = null;
+        if (meta.streams) {
+            aStream = meta.streams.find(s => s.codec_type === 'audio');
+        }
+        if (aStream) {
+            resolve({ codec: aStream.codec_name, sampleRate: aStream.sample_rate, channels: aStream.channels });
+        } else {
+            resolve({ codec: 'none', sampleRate: 0, channels: 0 });
+        }
+    });
+});
+
 export const getStreamsDuration = (file) => new Promise((resolve, reject) => {
     ffmpeg.ffprobe(file, (err, meta) => {
         if (err) return reject(err);
