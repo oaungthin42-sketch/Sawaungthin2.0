@@ -519,7 +519,7 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                             throw new Error(`Edge TTS returned 0 bytes for chunk ${i}.`);
                         }
                         
-                        const tempMp3 = chunkPath.replace('.wav', '.wav');
+                        const tempMp3 = chunkPath.replace('.wav', '_source.mp3');
                         fs.writeFileSync(tempMp3, buffer);
                         await runFFmpeg(['-i', tempMp3, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', chunkPath], ttsDir);
                         fs.unlinkSync(tempMp3);
