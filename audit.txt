@@ -1,0 +1,53 @@
+1. For every call to createTimelineSegment(), show exactly where the values start and end come from:
+
+Call 1 (Filler gap before narration):
+createTimelineSegment(current_time, n_start, gapIdx, "", true);
+- start: comes from `current_time`, which is updated at the end of each iteration to the previous `n_end`.
+- end: comes from `n_start`.
+
+Call 2 (Narration segment):
+createTimelineSegment(n_start, n_end, sIdx, narration.text, false);
+- start: comes from `n_start`, which is derived from `narration.timestamp[0]` and then clamped.
+- end: comes from `n_end`, which is derived from `narration.timestamp[1]` (or `n_start + 2`) and then clamped.
+
+Call 3 (Final gap after narrations):
+createTimelineSegment(current_time, state.audioDuration, assigned_scenes[N_narrations-1], "", true);
+- start: comes from `current_time` (the `n_end` of the final narration segment).
+- end: comes from `state.audioDuration`.
+
+2. Can start and end ever become equal?
+Yes. 
+Code path:
+- If Whisper outputs a timestamp `narration.timestamp[0]` that is `>= state.audioDuration`, then `Math.min(state.audioDuration, n_start)` makes it `state.audioDuration`.
+- Since `current_time` could be `state.audioDuration` as well, `n_start` becomes exactly `state.audioDuration`.
+- For the last segment (`i === N_narrations - 1`), the code forces `n_end = state.audioDuration;`.
+- Thus, `n_start === n_end === state.audioDuration`, making `start` and `end` equal when `createTimelineSegment` is called.
+
+3. Can end become smaller than start?
+Yes.
+Code path:
+- If a Whisper timestamp is very close to `state.audioDuration`, `n_start + 0.1` can exceed `state.audioDuration`.
+- The code calculates: `n_end = Math.max(n_start + 0.1, Math.min(state.audioDuration, n_end));` which can result in `n_end > state.audioDuration` (e.g. if `n_start` is `state.audioDuration - 0.05`, `n_start + 0.1` is `state.audioDuration + 0.05`, so `n_end` becomes `state.audioDuration + 0.05`).
+- This makes `current_time` exceed `state.audioDuration`.
+- In the next iteration (if it's the final narration `i === N_narrations - 1`), `n_start` evaluates to `current_time` (which is `> state.audioDuration`).
+- But the code forces `n_end = state.audioDuration;`.
+- As a result, `n_end` (which is `state.audioDuration`) is strictly smaller than `n_start` (which is `> state.audioDuration`).
+
+4. Is end clamped using: audioDuration, scene end, or Whisper timestamp? Show the exact order.
+For narration segments, `n_end` is clamped in this exact order:
+1. Whisper timestamp (initial value: `narration.timestamp[1]`)
+2. `audioDuration` (upper bound via `Math.min(state.audioDuration, n_end)`)
+3. Lower bound enforcement `n_start + 0.1` (via `Math.max(n_start + 0.1, ...)`), which can actually override and exceed `audioDuration`.
+4. Next chunk's Whisper timestamp `next_start` (via `Math.min(n_end, Math.max(n_start + 0.1, next_start))`) if not the last segment.
+5. Forced to `audioDuration` (via `n_end = state.audioDuration;`) if it is the final segment.
+(Scene end is not used for clamping the narration/audio time, only for the video `v_end`).
+
+5. Before target_dur = end - start is calculated, what transformations have already been applied?
+Inside `createTimelineSegment()`, none. `target_dur = end - start;` is the very first operation. All transformations to `start` and `end` are applied in the `for` loop *before* the function is called.
+
+6. Is there any place that modifies start or end before createTimelineSegment() is called?
+Yes, in the `for` loop before calling the function:
+- `n_start = Math.max(current_time, Math.min(state.audioDuration, n_start));`
+- `n_end = Math.max(n_start + 0.1, Math.min(state.audioDuration, n_end));`
+- `n_end = Math.min(n_end, Math.max(n_start + 0.1, next_start));` (if `i < N_narrations - 1`)
+- `n_end = state.audioDuration;` (if `i === N_narrations - 1`)

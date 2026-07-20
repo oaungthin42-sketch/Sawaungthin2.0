@@ -1,0 +1,726 @@
+import fs from 'fs';
+import path from 'path';
+import { updateJob, getJob } from '../services/jobManager.js';
+import { getDuration, extractWav, detectScenes, runFFmpeg } from '../ffmpeg/index.js';
+import { transcribeWav, computeSimilarity, transcribeOriginalVideoWithGroq, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
+import { formatTime, cleanupFiles } from '../utils/index.js';
+
+// Pipeline steps
+const STEPS = {
+    UPLOAD: 'Upload',
+    EXTRACT_VIDEO_WAV: 'Extract Video Audio',
+    EXTRACT_AUDIO_WAV: 'Extract Narration Audio',
+    DETECT_SCENES: 'Detect Scenes',
+    TRANSCRIPT_ORIGINAL: 'Transcript Original',
+    TRANSLATE_BURMESE: 'Translate Burmese',
+    GENERATE_TTS: 'Generate TTS Audio',
+    TRANSCRIPT_NARRATION: 'Transcript Narration',
+    SEMANTIC_MATCHING: 'Semantic Matching',
+    TIMELINE_BUILDER: 'Timeline Builder',
+    SUBTITLE_BUILDER: 'Subtitle Builder',
+    SEGMENT_BUILDER: 'Segment Builder',
+    CONCAT: 'Concat Segments',
+    EXPORT: 'Export Final',
+    CLEANUP: 'Cleanup'
+};
+
+const STEPS_ORDER = Object.values(STEPS);
+
+const hasCompletedStep = (currentStep, targetStep) => {
+    const currentIdx = STEPS_ORDER.indexOf(currentStep);
+    const targetIdx = STEPS_ORDER.indexOf(targetStep);
+    return currentIdx > targetIdx;
+};
+
+export const processRecapPipeline = async (jobId) => {
+    let job = getJob(jobId);
+    if (!job || !job.videoPath || !job.audioPath) throw new Error("Invalid job data");
+
+    const tmpDir = path.join(process.cwd(), 'src', 'tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const outDir = path.join(process.cwd(), 'public', 'output');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+    const cacheDir = path.join(process.cwd(), 'data', 'cache', jobId);
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+
+    const statePath = path.join(cacheDir, 'state.json');
+    let state = {};
+    if (fs.existsSync(statePath)) {
+        try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
+    }
+
+    const saveState = () => fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+    const advanceStep = (step, progress, statusText) => {
+        state.currentStep = step;
+        saveState();
+        updateJob(jobId, { currentStep: step, progress, status: statusText });
+        job = getJob(jobId); // refresh
+    };
+
+    try {
+        console.log(`[Job ${jobId}] Pipeline started. Current Step: ${job.currentStep || STEPS.UPLOAD}`);
+
+        // 1. EXTRACT VIDEO WAV
+        const videoWavPath = path.join(cacheDir, 'video.wav');
+        if (!hasCompletedStep(job.currentStep, STEPS.EXTRACT_VIDEO_WAV)) {
+            advanceStep(STEPS.EXTRACT_VIDEO_WAV, 5, 'Extracting Original Audio');
+            if (!fs.existsSync(videoWavPath)) {
+                await extractWav(job.videoPath, videoWavPath);
+            }
+            state.originalVideoDuration = await getDuration(job.videoPath);
+            saveState();
+        }
+
+        // 2. EXTRACT AUDIO WAV
+        const audioWavPath = path.join(cacheDir, 'audio.wav');
+        if (!hasCompletedStep(job.currentStep, STEPS.EXTRACT_AUDIO_WAV)) {
+            advanceStep(STEPS.EXTRACT_AUDIO_WAV, 10, 'Preparing Narration Audio');
+            if (!fs.existsSync(audioWavPath)) {
+                await extractWav(job.audioPath, audioWavPath);
+            }
+            state.audioDuration = await getDuration(audioWavPath);
+            saveState();
+        }
+
+        // 3. DETECT SCENES
+        const sceneCache = path.join(cacheDir, 'scenes.json');
+        if (!hasCompletedStep(job.currentStep, STEPS.DETECT_SCENES)) {
+            advanceStep(STEPS.DETECT_SCENES, 15, 'Detecting Video Scenes');
+            state.scenes = await detectScenes(job.videoPath, sceneCache);
+            saveState();
+        }
+
+        // 4. TRANSCRIPT ORIGINAL
+        const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
+        if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
+            advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Video Audio');
+            state.originalTranscript = await transcribeOriginalVideoWithGroq(videoWavPath, vidTranscriptCache);
+            
+            // Compatibility validation for originalTranscript
+            if (!Array.isArray(state.originalTranscript) || state.originalTranscript.length === 0) {
+                throw new Error("Pipeline Error: originalTranscript is empty or invalid after Groq transcription.");
+            }
+            
+            let prevEnd = -1;
+            for (let i = 0; i < state.originalTranscript.length; i++) {
+                const chunk = state.originalTranscript[i];
+                if (!chunk.timestamp || chunk.timestamp.length !== 2) throw new Error(`Pipeline Error: Invalid timestamp structure at chunk ${i}`);
+                if (!chunk.text) throw new Error(`Pipeline Error: Empty text at chunk ${i}`);
+                
+                const start = chunk.timestamp[0];
+                const end = chunk.timestamp[1];
+                
+                if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error(`Pipeline Error: Non-finite timestamp at chunk ${i}`);
+                if (start < 0) throw new Error(`Pipeline Error: Negative start timestamp at chunk ${i}`);
+                if (end <= start) throw new Error(`Pipeline Error: end <= start at chunk ${i}`);
+                
+                // Allow some overlap/out of order if Whisper was weird, but ensure it's not absurdly beyond duration
+                if (state.originalVideoDuration && start > state.originalVideoDuration + 60) {
+                    throw new Error(`Pipeline Error: Timestamp wildly exceeds audio duration at chunk ${i}`);
+                }
+            }
+            
+            saveState();
+        }
+
+        
+        // 4.5. TRANSLATE TO BURMESE
+        const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
+        if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
+            advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
+            state.translatedTranscript = await translateWithGemini(state.originalTranscript, translatedTranscriptCache);
+            
+            // Validation
+            if (!Array.isArray(state.translatedTranscript) || state.translatedTranscript.length === 0) {
+                throw new Error("Pipeline Error: translatedTranscript is empty or invalid after Gemini translation.");
+            }
+            if (state.translatedTranscript.length !== state.originalTranscript.length) {
+                throw new Error("Pipeline Error: translatedTranscript length mismatch.");
+            }
+            for (let i = 0; i < state.translatedTranscript.length; i++) {
+                const chunk = state.translatedTranscript[i];
+                if (!chunk || typeof chunk.text !== 'string' || chunk.text.trim() === '' || !chunk.timestamp) {
+                    throw new Error(`Pipeline Error: Invalid translated chunk at index ${i}`);
+                }
+                if (chunk.timestamp[0] !== state.originalTranscript[i].timestamp[0] ||
+                    chunk.timestamp[1] !== state.originalTranscript[i].timestamp[1]) {
+                    throw new Error(`Pipeline Error: Timestamp mismatch at index ${i}`);
+                }
+            }
+            saveState();
+        }
+
+        // 4.5 GENERATE TTS
+        const ttsAudioCache = path.join(cacheDir, 'narration_tts.wav');
+        if (!hasCompletedStep(job.currentStep, STEPS.GENERATE_TTS)) {
+            advanceStep(STEPS.GENERATE_TTS, 35, 'Generating Burmese TTS Audio');
+            state.ttsAudioPath = await generateNarrationTTS(state.translatedTranscript, ttsAudioCache);
+            saveState();
+        }
+
+// 5. TRANSCRIPT NARRATION
+        const audTranscriptCache = path.join(cacheDir, 'tts_transcript.json');
+        if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_NARRATION)) {
+            advanceStep(STEPS.TRANSCRIPT_NARRATION, 40, 'Transcribing Narration Audio');
+            
+            const ttsAudioPath = state.ttsAudioPath;
+            if (!ttsAudioPath || !fs.existsSync(ttsAudioPath)) {
+                throw new Error("Pipeline Error: TTS audio file is missing.");
+            }
+            const stats = fs.statSync(ttsAudioPath);
+            if (stats.size === 0) {
+                throw new Error("Pipeline Error: TTS audio file is zero bytes.");
+            }
+            
+            const duration = await getDuration(ttsAudioPath);
+            if (!Number.isFinite(duration) || duration <= 0) {
+                throw new Error("Pipeline Error: TTS audio has invalid or missing audio stream.");
+            }
+            
+            // Invalidate cache if TTS audio size changed
+            const metaPath = path.join(cacheDir, 'tts_transcript_meta.json');
+            let cacheValid = false;
+            if (fs.existsSync(metaPath) && fs.existsSync(audTranscriptCache)) {
+                try {
+                    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+                    if (meta.size === stats.size && meta.duration === duration) {
+                        cacheValid = true;
+                    }
+                } catch(e) {}
+            }
+            if (!cacheValid && fs.existsSync(audTranscriptCache)) {
+                fs.unlinkSync(audTranscriptCache);
+            }
+            
+            state.narrationTranscript = await transcribeWav(ttsAudioPath, audTranscriptCache, 'my');
+            
+            if (!Array.isArray(state.narrationTranscript) || state.narrationTranscript.length === 0) {
+                throw new Error("Pipeline Error: Narration transcription produced zero segments or invalid array.");
+            }
+            
+            let lastStart = -1;
+            const normalizedTranscript = [];
+            
+            for (let i = 0; i < state.narrationTranscript.length; i++) {
+                const chunk = state.narrationTranscript[i];
+                if (!chunk || !Array.isArray(chunk.timestamp) || chunk.timestamp.length !== 2) {
+                    throw new Error(`Pipeline Error: Invalid chunk timestamp format at index ${i}`);
+                }
+                
+                let start = Number(chunk.timestamp[0]);
+                let end = Number(chunk.timestamp[1]);
+                const text = typeof chunk.text === 'string' ? chunk.text.trim() : "";
+                
+                if (text === "") continue;
+                
+                if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0) {
+                    throw new Error(`Pipeline Error: Invalid timestamp values at index ${i}`);
+                }
+                
+                if (end > duration) {
+                    const diff = end - duration;
+                    if (diff > 0.5) {
+                        throw new Error(`Pipeline Error: Chunk end time (${end}) exceeds audio duration (${duration}) by too much.`);
+                    }
+                    end = duration;
+                }
+                
+                if (start >= end) {
+                    throw new Error(`Pipeline Error: Start time (${start}) is >= end time (${end}) after clamping at index ${i}`);
+                }
+                
+                if (start < lastStart) {
+                    throw new Error(`Pipeline Error: Timestamps are not chronological at index ${i}`);
+                }
+                
+                lastStart = start;
+                
+                normalizedTranscript.push({
+                    timestamp: [start, end],
+                    text: text
+                });
+            }
+            
+            if (normalizedTranscript.length === 0) {
+                throw new Error("Pipeline Error: Narration transcription is empty after normalization.");
+            }
+            
+            state.narrationTranscript = normalizedTranscript;
+            state.audioDuration = duration;
+            fs.writeFileSync(metaPath, JSON.stringify({ size: stats.size, duration: duration }));
+            
+            saveState();
+        }
+
+        if (!state.narrationTranscript || state.narrationTranscript.length === 0) {
+            throw new Error("Narration transcription produced zero segments. Pipeline stopped before timeline generation.");
+        }
+
+        // 6. SEMANTIC MATCHING & 7. TIMELINE BUILDER
+        if (!hasCompletedStep(job.currentStep, STEPS.TIMELINE_BUILDER)) {
+            advanceStep(STEPS.SEMANTIC_MATCHING, 55, 'Semantic & Chronological Matching');
+            
+            const sceneTexts = state.scenes.map(() => "");
+            for (const chunk of state.originalTranscript) {
+                const start = chunk.timestamp[0];
+                let sIdx = 0;
+                for (let i = 0; i < state.scenes.length; i++) {
+                    if (start >= state.scenes[i]) sIdx = i;
+                    else break;
+                }
+                if (chunk.text) sceneTexts[sIdx] += chunk.text + " ";
+            }
+            
+            const timeline = [];
+            let last_v_end = 0;
+            
+            // Add initial padding segment if there is a gap before the first narration
+            if (state.narrationTranscript.length > 0 && state.narrationTranscript[0].timestamp[0] > 0) {
+                let initial_gap = state.narrationTranscript[0].timestamp[0];
+                timeline.push({
+                    segment_index: 'init',
+                    start_time: 0,
+                    end_time: initial_gap,
+                    target_dur: initial_gap,
+                    scene_start: 0,
+                    scene_end: initial_gap,
+                    speed: 1.0,
+                    narration_text: "[Intro Silence]"
+                });
+                last_v_end = initial_gap;
+            }
+
+            const N_narrations = state.narrationTranscript.length;
+            const M_scenes = state.scenes.length;
+
+            if (N_narrations > 0) {
+                // Precompute similarity matrix: sim[i][j] is similarity between narration i and scene j
+                const sim = [];
+                for (let i = 0; i < N_narrations; i++) {
+                    sim[i] = [];
+                    const narrationText = state.narrationTranscript[i].text || "";
+                    for (let j = 0; j < M_scenes; j++) {
+                        const sText = sceneTexts[j].trim();
+                        if (sText && narrationText) {
+                            sim[i][j] = await computeSimilarity(sText, narrationText);
+                        } else {
+                            sim[i][j] = 0;
+                        }
+                    }
+                }
+
+                // DP state: dp[i][j] stores the best score for prefix 0..i ending with narration i mapped to scene j
+                const dp = [];
+                const parent = [];
+                for (let i = 0; i < N_narrations; i++) {
+                    dp[i] = new Array(M_scenes).fill(-Infinity);
+                    parent[i] = new Array(M_scenes).fill(-1);
+                }
+
+                // Initialize dp[0][j] for first narration
+                for (let j = 0; j < M_scenes; j++) {
+                    // Encourage starting early in the movie and discourage skipping too far initially
+                    // Penalty aligned with transition penalty (-0.1 per scene skipped)
+                    const startPenalty = 0.1 * j;
+                    dp[0][j] = sim[0][j] - startPenalty;
+                    parent[0][j] = -1;
+                }
+
+                // Fill DP table with chronological constraints
+                for (let i = 1; i < N_narrations; i++) {
+                    for (let j_curr = 0; j_curr < M_scenes; j_curr++) {
+                        const currentSim = sim[i][j_curr];
+                        for (let j_prev = 0; j_prev < M_scenes; j_prev++) {
+                            let transition_score = 0;
+                            if (j_curr === j_prev) {
+                                // Perfect continuation: same scene
+                                transition_score = 0.4;
+                            } else if (j_curr === j_prev + 1) {
+                                // Transition to next adjacent scene
+                                transition_score = 0.2;
+                            } else if (j_curr > j_prev) {
+                                // Skipping forward: penalty proportional to scenes skipped
+                                const scenesSkipped = j_curr - j_prev - 1;
+                                transition_score = -0.2 * scenesSkipped;
+                            } else {
+                                // Going backward: extremely severe penalty to enforce chronological story flow
+                                const scenesBackward = j_prev - j_curr;
+                                transition_score = -10.0 - 2.0 * scenesBackward;
+                            }
+
+                            const score = dp[i-1][j_prev] + currentSim + transition_score;
+                            if (score >= dp[i][j_curr]) {
+                                dp[i][j_curr] = score;
+                                parent[i][j_curr] = j_prev;
+                            }
+                        }
+                    }
+                }
+
+                // Find the best ending scene for the last narration
+                let best_j = 0;
+                let best_final_score = -Infinity;
+                for (let j = 0; j < M_scenes; j++) {
+                    if (dp[N_narrations - 1][j] >= best_final_score) {
+                        best_final_score = dp[N_narrations - 1][j];
+                        best_j = j;
+                    }
+                }
+
+                // Backtrack to find the optimal scene index sequence
+                const assigned_scenes = new Array(N_narrations);
+                let curr = best_j;
+                for (let i = N_narrations - 1; i >= 0; i--) {
+                    assigned_scenes[i] = curr;
+                    curr = parent[i][curr];
+                }
+
+                state.mapping = [];
+
+                let current_time = 0;
+
+                const createTimelineSegment = (start, end, sIdx, text, isFiller = false, nIdx = -1) => {
+                    if (!Number.isInteger(sIdx) || !Number.isFinite(sIdx) || sIdx < 0 || sIdx >= state.scenes.length) {
+                        throw new Error(`Pipeline Error: Invalid scene index (scene index: ${sIdx}, narration index: ${nIdx}, start: ${start}, end: ${end}, target duration: ${end - start})`);
+                    }
+                    let target_dur = end - start;
+                    if (target_dur <= 0.001) return;
+
+                    const before = timeline.length;
+
+                    let v_start;
+                    let prev_sIdx = timeline.length > 0 ? timeline[timeline.length - 1].matched_scene_index : sIdx;
+                    
+                    if (timeline.length > 0) {
+                        const prev_v_end = timeline[timeline.length - 1].scene_end;
+                        const is_same_scene = (sIdx === prev_sIdx);
+                        const is_next_scene = (sIdx === prev_sIdx + 1);
+                        const is_close_to_prev_end = Math.abs(prev_v_end - state.scenes[sIdx]) < 2.0;
+
+                        if (is_same_scene || (is_next_scene && is_close_to_prev_end) || isFiller) {
+                            v_start = prev_v_end;
+                        } else {
+                            v_start = state.scenes[sIdx];
+                        }
+                    } else {
+                        v_start = state.scenes[sIdx];
+                    }
+
+                    v_start = Math.max(0, Math.min(state.originalVideoDuration - 0.1, v_start));
+
+                    const scene_end_time = sIdx < M_scenes - 1 
+                        ? state.scenes[sIdx+1] 
+                        : state.originalVideoDuration;
+                    
+                    const desired_orig_dur = scene_end_time - v_start;
+                    let v_end;
+                    let speed = 1.0;
+
+                    if (desired_orig_dur > 0.1) {
+                        const req_speed = desired_orig_dur / target_dur;
+                        if (req_speed >= 0.95 && req_speed <= 1.05) {
+                            v_end = scene_end_time;
+                            speed = req_speed;
+                        } else {
+                            v_end = v_start + target_dur;
+                            speed = 1.0;
+                        }
+                    } else {
+                        v_end = v_start + target_dur;
+                        speed = 1.0;
+                    }
+
+                    v_end = Math.max(v_start + 0.1, Math.min(state.originalVideoDuration, v_end));
+
+                    timeline.push({
+                        segment_index: timeline.length,
+                        start_time: start,
+                        end_time: end,
+                        target_dur: target_dur,
+                        scene_start: v_start,
+                        scene_end: v_end,
+                        speed: speed,
+                        narration_text: text,
+                        matched_scene_index: sIdx
+                    });
+
+                    const after = timeline.length;
+                    if (after !== before + 1) {
+                        throw new Error(`Pipeline Error: Timeline push failed (narration index: ${nIdx}, scene index: ${sIdx}, start: ${start}, end: ${end}, target duration: ${target_dur})`);
+                    }
+
+                    if (target_dur <= 0 || !Number.isFinite(v_start) || !Number.isFinite(v_end) || v_end <= v_start || start < 0 || end < start) {
+                        throw new Error(`Pipeline Error: Invalid timeline entry (narration index: ${nIdx}, scene index: ${sIdx}, start: ${start}, end: ${end}, target duration: ${target_dur})`);
+                    }
+
+                    if (process.env.DEBUG === 'true') {
+                        console.log(`Narration ${nIdx}: start=${start}, end=${end}, scene index=${sIdx}, scene start=${v_start}, scene end=${v_end}, target duration=${target_dur}, speed=${speed}`);
+                    }
+                };
+
+                // Construct timeline using the optimal scene index path
+                for (let i = 0; i < N_narrations; i++) {
+                    const narration = state.narrationTranscript[i];
+                    let n_start = narration.timestamp[0];
+                    let n_end = narration.timestamp[1] || (n_start + 2);
+                    
+                    // Clamp to audio bounds
+                    n_start = Math.max(current_time, Math.min(state.audioDuration, n_start));
+                    n_end = Math.max(n_start + 0.1, Math.min(state.audioDuration, n_end));
+                    
+                    // Constrain by next chunk start (if any), to avoid overlapping
+                    if (i < N_narrations - 1) {
+                        const next_start = state.narrationTranscript[i+1].timestamp[0];
+                        n_end = Math.min(n_end, Math.max(n_start + 0.1, next_start));
+                    }
+                    if (i === N_narrations - 1) {
+                         n_end = state.audioDuration;
+                    }
+
+                    if (assigned_scenes.length !== N_narrations) {
+                        throw new Error(`Pipeline Error: assigned_scenes.length (${assigned_scenes.length}) !== N_narrations (${N_narrations}, start: ${n_start}, end: ${n_end}, target duration: ${n_end - n_start})`);
+                    }
+                    const sIdx = assigned_scenes[i];
+
+                    // Check for gap (silence before this chunk)
+                    if (n_start > current_time) {
+                        const gapIdx = i > 0 ? assigned_scenes[i-1] : sIdx;
+                        createTimelineSegment(current_time, n_start, gapIdx, "", true, i);
+                    }
+
+                    createTimelineSegment(n_start, n_end, sIdx, narration.text, false, i);
+                    current_time = n_end;
+                    
+                    if (timeline.length === 0) {
+                        throw new Error("Pipeline Error: Timeline is empty before mapping.");
+                    }
+                    state.mapping.push({
+                        narration_index: i,
+                        narration_text: narration.text,
+                        narration_start: n_start,
+                        narration_end: n_end,
+                        matched_scene_index: sIdx,
+                        matched_scene_start: timeline[timeline.length-1].scene_start,
+                        matched_scene_text: sceneTexts[sIdx] ? sceneTexts[sIdx].trim() : "Continued Scene",
+                        similarity_score: Math.max(0, sim[i][sIdx]),
+                        speed: timeline[timeline.length-1].speed
+                    });
+                }
+                
+                // If there's a final gap to the end of the audio duration
+                if (current_time < state.audioDuration) {
+                    createTimelineSegment(current_time, state.audioDuration, assigned_scenes[N_narrations-1], "", true, N_narrations-1);
+                }
+            }
+
+            state.timeline = timeline;
+            
+            // Validation and Auto Repair
+            for (let i = 0; i < timeline.length; i++) {
+                const t = timeline[i];
+                if (i > 0) {
+                    const prev = timeline[i-1];
+                    // Auto repair small gaps/overlaps (< 0.02s)
+                    if (Math.abs(t.start_time - prev.end_time) < 0.02) {
+                        t.start_time = prev.end_time;
+                        t.target_dur = t.end_time - t.start_time;
+                    } else if (t.start_time !== prev.end_time) {
+                        throw new Error(`Validation failed: Unrepairable gap/overlap between segment ${i-1} and ${i} (${t.start_time - prev.end_time}).`);
+                    }
+                }
+                if (t.target_dur <= 0) {
+                    throw new Error(`Validation failed: Segment ${i} has zero or negative duration (${t.target_dur}).`);
+                }
+                if (t.matched_scene_index !== undefined && (t.matched_scene_index < 0 || t.matched_scene_index >= M_scenes)) {
+                    throw new Error(`Validation failed: Invalid scene index ${t.matched_scene_index}.`);
+                }
+            }
+            
+            if (timeline.length > 0) {
+                // Auto-repair final boundary
+                const last = timeline[timeline.length - 1];
+                if (Math.abs(last.end_time - state.audioDuration) < 0.02) {
+                    last.end_time = state.audioDuration;
+                    last.target_dur = last.end_time - last.start_time;
+                }
+                
+                let total_timeline_duration = last.end_time;
+                if (Math.abs(total_timeline_duration - state.audioDuration) > 0.01) {
+                    throw new Error(`Validation failed: Total timeline duration (${total_timeline_duration}) does not match narration duration (${state.audioDuration}).`);
+                }
+            }
+            
+            saveState();
+            advanceStep(STEPS.TIMELINE_BUILDER, 70, 'Timeline Built');
+        }
+
+        // 8. SUBTITLE BUILDER
+        if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BUILDER)) {
+            advanceStep(STEPS.SUBTITLE_BUILDER, 75, 'Adjusting Subtitle Timing');
+            
+            let srt = '';
+            state.narrationTranscript.forEach((chunk, index) => {
+                let start = chunk.timestamp[0];
+                let end = chunk.timestamp[1] || start + 2; 
+                srt += `${index + 1}\n`;
+                srt += `${formatTime(start)} --> ${formatTime(end)}\n`;
+                srt += `${chunk.text.trim()}\n\n`;
+            });
+            
+            state.srtFile = path.join(cacheDir, 'subs.srt');
+            fs.writeFileSync(state.srtFile, srt);
+            saveState();
+        }
+
+        // 9. SEGMENT BUILDER
+        if (!hasCompletedStep(job.currentStep, STEPS.SEGMENT_BUILDER)) {
+            advanceStep(STEPS.SEGMENT_BUILDER, 80, 'Building Video Segments');
+            for (let i = 0; i < state.timeline.length; i++) {
+                updateJob(jobId, { progress: 80 + (10 * (i / state.timeline.length)) });
+                const t = state.timeline[i];
+                
+                const s_start = t.scene_start.toFixed(3);
+                const s_end = t.scene_end.toFixed(3);
+                const speed = t.speed || 1.0;
+                const target_dur = t.target_dur.toFixed(3);
+                
+                // Natural continuation with potential speed adjustment, pad with clone of last frame if video ends early
+                const filter = `[0:v]trim=start=${s_start}:end=${s_end},setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
+                
+                const segFile = path.join(cacheDir, `seg_${i}.mp4`);
+                
+                if (!fs.existsSync(segFile)) {
+                    const args = [
+                        '-i', path.resolve(job.videoPath),
+                        '-filter_complex', filter,
+                        '-map', '[v]',
+                        '-t', target_dur,
+                        '-c:v', 'libx264',
+                        '-preset', 'ultrafast',
+                        '-crf', '28',
+                        '-y', segFile
+                    ];
+                    await runFFmpeg(args, tmpDir);
+                }
+            }
+            advanceStep(STEPS.SEGMENT_BUILDER, 90, 'Segments Built');
+        }
+
+        // 10. CONCAT
+        if (!hasCompletedStep(job.currentStep, STEPS.CONCAT)) {
+            advanceStep(STEPS.CONCAT, 92, 'Concatenating Segments');
+            
+            if (!state.timeline || state.timeline.length === 0) {
+                throw new Error("Pipeline Error: Cannot generate concat.txt from an empty timeline.");
+            }
+
+            for (const t of state.timeline) {
+                if (!Number.isFinite(t.scene_start) || !Number.isFinite(t.scene_end) || !Number.isFinite(t.target_dur)) {
+                    throw new Error(`Pipeline Error: Invalid timeline entry for concat (scene_start: ${t.scene_start}, scene_end: ${t.scene_end}, target_dur: ${t.target_dur})`);
+                }
+            }
+
+            let validSegments = [];
+            for (let i = 0; i < state.timeline.length; i++) {
+                const segFile = path.join(cacheDir, `seg_${i}.mp4`);
+                if (!fs.existsSync(segFile)) {
+                    throw new Error(`Segment file is missing: ${segFile}`);
+                }
+                const stats = fs.statSync(segFile);
+                if (stats.size === 0) {
+                    throw new Error(`Segment file is empty (0 bytes): ${segFile}`);
+                }
+                const safePath = segFile.replace(/\\/g, '/').replace(/'/g, "'\\''");
+                validSegments.push(`file '${safePath}'`);
+            }
+            
+            const concatContent = validSegments.join('\n');
+            const concatFile = path.join(cacheDir, 'concat.txt');
+            fs.writeFileSync(concatFile, concatContent);
+            state.concatFile = concatFile;
+            saveState();
+        }
+
+        // 11. EXPORT
+        const finalFileName = `${jobId}_final.mp4`;
+        const finalFileTmp = path.join(tmpDir, finalFileName);
+        const finalOutPath = path.join(outDir, `${jobId}.mp4`);
+        
+        if (!hasCompletedStep(job.currentStep, STEPS.EXPORT)) {
+            advanceStep(STEPS.EXPORT, 94, 'Exporting Final Video');
+            
+            if (!state.timeline || state.timeline.length === 0) {
+                throw new Error("Pipeline Error: Cannot spawn FFmpeg without a timeline.");
+            }
+            if (!state.concatFile || !fs.existsSync(state.concatFile)) {
+                throw new Error("Pipeline Error: concat.txt does not exist.");
+            }
+            const concatTxtContent = fs.readFileSync(state.concatFile, 'utf8');
+            if (!concatTxtContent || concatTxtContent.trim().length === 0) {
+                throw new Error("Pipeline Error: concat.txt is empty.");
+            }
+            
+            // Escape path for FFmpeg subtitles filter: replace backslashes, escape colons
+            const escapedSrtPath = path.resolve(state.srtFile).replace(/\\/g, '/').replace(/:/g, '\\:');
+            
+            const finalArgs = [
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
+                '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
+                '-vf', `subtitles=${escapedSrtPath}:force_style='FontSize=16,Alignment=2,MarginV=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=1'`,
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-crf', '28',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-pix_fmt', 'yuv420p',
+                '-shortest',
+                '-movflags', '+faststart',
+                '-y', finalFileTmp
+            ];
+            
+            await runFFmpeg(finalArgs, tmpDir, (pct) => {
+                updateJob(jobId, { progress: 94 + (pct * 0.05) });
+            });
+            
+            fs.renameSync(finalFileTmp, finalOutPath);
+            advanceStep(STEPS.EXPORT, 99, 'Export Complete');
+        }
+
+        updateJob(jobId, {
+            status: 'complete',
+            progress: 100,
+            currentStep: 'Done',
+            result: {
+                metadata: { duration: state.originalVideoDuration, finalDuration: state.audioDuration },
+                scenes: state.scenes,
+                originalTranscript: state.originalTranscript,
+                narrationTranscript: state.narrationTranscript,
+                mapping: state.mapping,
+                timeline: state.timeline,
+                videoUrl: `/output/${jobId}.mp4`
+            }
+        });
+
+        console.log(`[Job ${jobId}] Completed successfully.`);
+
+    } catch (err) {
+        console.error(`[Job ${jobId}] Error:`, err);
+        updateJob(jobId, { status: 'error', error: err.message });
+    } finally {
+        // ALWAYS CLEANUP
+        advanceStep(STEPS.CLEANUP, 100, 'Cleaning up temporary files');
+        try {
+            if (fs.existsSync(cacheDir)) {
+                fs.rmSync(cacheDir, { recursive: true, force: true });
+            }
+            if (job && job.videoPath && fs.existsSync(job.videoPath)) fs.unlinkSync(job.videoPath);
+            if (job && job.audioPath && fs.existsSync(job.audioPath)) fs.unlinkSync(job.audioPath);
+        } catch (cleanupErr) {
+            console.error(`[Job ${jobId}] Cleanup Error:`, cleanupErr);
+        }
+    }
+};

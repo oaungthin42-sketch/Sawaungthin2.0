@@ -1,0 +1,124 @@
+# END-TO-END PIPELINE READ-ONLY AUDIT REPORT
+
+## 1. PROJECT STRUCTURE
+- `src/workers/processor.js`: The central orchestrator. Handles file preparation, invokes AI, executes scene matching, builds the timeline, and drives FFmpeg video rendering.
+- `src/ai/transcribe.py`: Python script executing `faster-whisper` for transcription.
+- `src/ai/index.js`: Node.js wrappers spawning `transcribe.py` and parsing outputs.
+- `src/ffmpeg/index.js`: Reusable wrappers for FFmpeg operations (`getDuration`, `extractWav`, `detectScenes`, `runFFmpeg`).
+- `src/routes/api.js`: Express routes handling file uploads (Multer) and job status retrieval.
+- `src/services/jobManager.js` & `src/services/queue.js`: SQLite-backed job persistence and 1-concurrency queue.
+- `src/App.tsx`: React frontend, handling uploads, polling job status, and displaying the mapping/video.
+
+## 2. CURRENT END-TO-END PIPELINE
+Upload (`api.js`) -> `queue.js` -> `processor.js`
+1. `EXTRACT_VIDEO_WAV`: `extractWav(job.videoPath)`
+2. `EXTRACT_AUDIO_WAV`: `extractWav(job.audioPath)`
+3. `DETECT_SCENES`: `detectScenes(job.videoPath)`
+4. `TRANSCRIPT_ORIGINAL`: `transcribeWav(video.wav)`
+5. `TRANSCRIPT_NARRATION`: `transcribeWav(audio.wav)`
+6. `SEMANTIC_MATCHING`: Computes DP matrix linking `narrationTranscript` chunks to `scenes`.
+7. `TIMELINE_BUILDER`: Converts DP map to sequence of video segments via `createTimelineSegment()`.
+8. `SUBTITLE_BUILDER`: Converts `narrationTranscript` to `subs.srt`.
+9. `SEGMENT_BUILDER`: Uses FFmpeg to trim/tpad/speed original video scenes.
+10. `CONCAT`: Generates `concat.txt`.
+11. `EXPORT`: Concatenates video segments, muxes narration audio, burns subtitles.
+
+## 3. CURRENT TRANSCRIPTION SYSTEM
+- Call site: `src/ai/index.js` spawns `src/ai/transcribe.py`.
+- Transcribed Input: Both the extracted original video audio (`video.wav`) and user-uploaded narration audio (`audio.wav`).
+- Model: `faster-whisper` "tiny" model running on CPU (`compute_type='int8'`).
+- Language: Forced to Burmese (`'my'`).
+- Settings: `vad_filter=True`, `temperature=0.0`.
+- Timestamp format: `[start, end]` (seconds).
+- Data structure: `[ { timestamp: [start, end], text: "..." } ]`.
+- Downstream: Used in `computeSimilarity`, `TIMELINE_BUILDER`, and `SUBTITLE_BUILDER`.
+
+## 4. CURRENT TRANSLATION SYSTEM
+- Does not currently exist. Both tracks are transcribed directly as Burmese.
+
+## 5. CURRENT TTS SYSTEM
+- Does not currently exist. The narration audio is currently uploaded manually by the user.
+
+## 6. CURRENT TIMESTAMP SYSTEM
+- Source: Whisper provides base `timestamp: [start, end]` for each text chunk.
+- Format: Float in seconds.
+- Calculation & Modification: In `processor.js`, `n_start` and `n_end` are extracted from Whisper output. They are strictly clamped using `Math.max` and `Math.min` to ensure they fall within the bounds of `state.audioDuration` and do not overlap with adjacent chunks (`next_start`).
+- Timeline passing: Passed directly into `createTimelineSegment(start, end, ...)`.
+
+## 7. CURRENT SCENE MATCHING SYSTEM
+- Extraction: `select='gt(scene,0.2)'` filter via FFmpeg.
+- Timestamps: Returns an array of start times for each scene.
+- Text: Aggregates `originalTranscript` chunks that fall into the scene's time window.
+- Algorithm: O(N * M) Dynamic Programming table where `sim[i][j]` is text similarity. Transitions are penalized for skipping scenes or reversing chronological order.
+- Result: Backtracks to populate `assigned_scenes`, containing the optimal `sIdx` for each narration chunk.
+
+## 8. CURRENT TIMELINE SYSTEM
+- `N_narrations` loop derives `n_start` and `n_end`.
+- `current_time` tracks the end of the previous segment.
+- Filler gaps are injected using `createTimelineSegment(..., isFiller=true)` if `n_start > current_time`.
+- `createTimelineSegment()`:
+  - Modifies `v_start` based on the previous segment's end to avoid jump cuts if adjacent.
+  - Computes `desired_orig_dur`.
+  - Adjusts `v_end` and `speed` (bounded 0.95x - 1.05x).
+  - Pushes to `timeline` array.
+- Causes of failures:
+  - Invalid NaN indexes if `assigned_scenes` evaluates to undefined.
+  - `start > end` if clamping logic overflows near `audioDuration`.
+  - Empty chunks if whisper returns identically equal `start` and `end`.
+
+## 9. CURRENT FFMPEG PIPELINE
+- `detectScenes`: Uses `null` format and regex parsing of `pts_time`.
+- Segment Generation: `trim=start=X:end=Y,setpts=Z,tpad=stop_mode=clone:stop_duration=D,scale=1080:1920,crop=1080:1920`.
+- Subtitles: `subtitles=subs.srt:force_style=...`.
+- Final Mux: `-f concat`, `-c:v libx264`, `-shortest`.
+- Failures: Missing segments, zero-byte segments, or out-of-bounds trim ranges.
+
+## 10. CURRENT UI AND PROGRESS SYSTEM
+- React frontend polling `/api/status/:jobId`.
+- Maps 10+ internal backend steps to visual percentage markers.
+- Features retry and reset states on failure.
+- Renders final video and detailed `state.mapping` debug interface on success.
+
+## 11. RESOURCE USAGE (2GB RAM SAFETY)
+- Uses `p-queue` with concurrency 1.
+- Models forced to `cpu_threads=1`, `num_workers=1`, `int8`.
+- Video processing iterates sequentially chunk-by-chunk in FFmpeg, avoiding parallel heavy encode streams.
+- Cleanup block unlinks `cacheDir` robustly in `finally`.
+
+## 12. ERROR HANDLING
+- `processor.js` is wrapped in try/catch. Unhandled exceptions flip job status to 'error' and halt processing.
+- `transcribe.py` catches exceptions and degrades `vad_filter` safely.
+- FFmpeg errors are captured via `stderr` and passed up to the Promise reject block.
+
+## 13. FILES THAT MUST NOT BE CHANGED
+- `src/ffmpeg/index.js`: Standard, battle-tested wrappers.
+- `src/services/jobManager.js` & `src/services/queue.js`: Stable SQLite DB logic.
+- `server.js`: Standard routing configuration.
+- `src/ai/transcribe.py`: Whisper logic is stable.
+
+## 14. FILES THAT MUST CHANGE
+- `src/routes/api.js`: Multer must drop the `audio` requirement.
+- `src/ai/index.js`: Must export new wrappers for Groq, Gemini, and ElevenLabs/TTS APIs.
+- `src/workers/processor.js`: The central orchestrator must insert the new steps (Groq -> Translate -> TTS -> Re-Transcribe) before `DETECT_SCENES` or `SEMANTIC_MATCHING`.
+- `src/App.tsx`: Form UI updated to accept 1 file instead of 2.
+
+## 15. DATA CONTRACTS
+- Whisper chunks: `[{timestamp: [s, e], text: "..."}]`
+- Timeline: `{start_time, end_time, target_dur, scene_start, scene_end, speed, narration_text, matched_scene_index}`
+- State Object: Contains `scenes`, `originalTranscript`, `narrationTranscript`, `timeline`, `mapping`.
+
+## 16. NEW ARCHITECTURE COMPATIBILITY
+The current architecture relies heavily on `state.narrationTranscript` possessing accurate `[start, end]` boundaries to map to video.
+By inserting the new steps and ending with **Whisper Re-Transcription of the TTS audio output**, the pipeline seamlessly fulfills the exact data contract expected by `TIMELINE_BUILDER`. The matching algorithm and timeline logic require zero modifications if fed this array format.
+
+## 17. MIGRATION RISKS
+- **API Latency & Timeouts**: Groq and Gemini may timeout on long movie texts.
+- **Duration Mismatches**: TTS audio generation may vary wildly in length compared to the original video scene duration, heavily taxing the FFmpeg `tpad=clone` filter for long static frames.
+- **Audio Clamping**: If TTS whisper transcription returns timestamps out of bounds, the timeline builder will generate 0-duration gaps and crash FFmpeg.
+
+## 18. FINAL RECOMMENDATION
+- **PHASE 1**: Leave `timeline builder`, `semantic matching`, and `FFmpeg` completely untouched.
+- **PHASE 2**: Update `api.js` and `App.tsx` for a single-file upload.
+- **PHASE 3**: Add API wrappers for Groq, Gemini, and TTS in `src/ai/index.js`.
+- **PHASE 4**: Modify `processor.js` to replace `TRANSCRIPT_NARRATION` with the sequential AI pipeline, concluding with Whisper re-transcription of the TTS file to populate `state.narrationTranscript`.
+- **PHASE 5**: Audit TTS generation duration and ensure FFmpeg handles large `target_dur` padding without OOM.

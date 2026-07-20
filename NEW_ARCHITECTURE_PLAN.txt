@@ -1,0 +1,211 @@
+A. FILE CHANGE MATRIX
+
+- `src/workers/processor.js` (A. MUST CHANGE)
+  - Current responsibility: Orchestrates the entire video processing pipeline.
+  - Why it must change: The sequence of AI operations (transcription, translation, TTS) replaces the manual dual-audio upload logic.
+  - Exact part to change: Steps 4 (TRANSCRIPT_ORIGINAL) and 5 (TRANSCRIPT_NARRATION) will be replaced by the sequential Groq -> Gemini -> TTS -> Whisper flow.
+  - Exact part to remain unchanged: DETECT_SCENES, SEMANTIC_MATCHING, TIMELINE_BUILDER, SUBTITLE_BUILDER, SEGMENT_BUILDER, CONCAT, EXPORT, and the cleanup logic.
+  - Callers affected: `queue.js` (no signature change), frontend polling (progress steps will change).
+
+- `src/ai/index.js` (A. MUST CHANGE)
+  - Current responsibility: Wraps python child processes for Whisper transcription.
+  - Why it must change: Needs new API wrappers for Groq, Gemini, and TTS.
+  - Exact part to change: Add exported functions `transcribeWithGroq`, `translateWithGemini`, and `generateTTS`.
+  - Exact part to remain unchanged: Existing `transcribeWav` (used for the final TTS re-transcription).
+
+- `src/routes/api.js` (A. MUST CHANGE)
+  - Current responsibility: Handles Multer file uploads for jobs.
+  - Why it must change: The new flow only requires the original video, not a separate narration audio file.
+  - Exact part to change: Remove the `audio` field requirement from the Multer upload fields and validation logic.
+  - Exact part to remain unchanged: `createJob` logic, status endpoints, retry endpoints.
+
+- `src/App.tsx` (A. MUST CHANGE)
+  - Current responsibility: Frontend UI for uploads, progress, and results.
+  - Why it must change: Needs to match the single-file upload API and the new status steps.
+  - Exact part to change: File input form (remove narration upload), progress bar step labels.
+  - Exact part to remain unchanged: Polling logic, error handling UI, result display, mapping debug UI.
+
+- `src/ffmpeg/index.js` (C. MUST REMAIN UNCHANGED)
+  - Current responsibility: Executes FFmpeg commands for extraction, scene detection, trimming, and concatenation.
+  - Why it must remain unchanged: Existing logic is stable and decoupled from how timestamps are generated.
+
+- `src/ai/transcribe.py` (C. MUST REMAIN UNCHANGED)
+  - Current responsibility: Faster-whisper transcription script.
+  - Why it must remain unchanged: It accurately provides the `{timestamp, text}` format required by the timeline builder.
+
+- `src/services/jobManager.js` & `src/services/queue.js` (C. MUST REMAIN UNCHANGED)
+  - Current responsibility: SQLite state and 1-concurrency queue.
+  - Why it must remain unchanged: Crucial for 2GB RAM safety.
+
+B. NEW ARCHITECTURE DIAGRAM
+
+USER UPLOADS ORIGINAL MOVIE VIDEO
+        ↓
+EXTRACT ORIGINAL VIDEO AUDIO (FFmpeg)
+        ↓
+GROQ TRANSCRIPTION (English)
+        ↓
+ORIGINAL TRANSCRIPT WITH TIMESTAMPS
+        ↓
+GEMINI BURMESE TRANSLATION (Translates the transcript)
+        ↓
+BURMESE TRANSLATED NARRATION TEXT
+        ↓
+TTS AUDIO GENERATION (Burmese Audio)
+        ↓
+GENERATED BURMESE TTS AUDIO
+        ↓
+EXISTING FASTER-WHISPER RE-TRANSCRIPTION (Generates timestamps)
+        ↓
+TTS AUDIO TIMESTAMPS (Burmese Transcript)
+        ↓
+EXISTING SEMANTIC SCENE MATCHING (Matches TTS Burmese against Translated Original Burmese)
+        ↓
+EXISTING TIMELINE BUILDER
+        ↓
+EXISTING FFmpeg SEGMENT GENERATION
+        ↓
+TTS AUDIO + VIDEO + SUBTITLES
+        ↓
+FINAL MOVIE RECAP VIDEO
+
+C. EXACT PROCESSOR.JS STAGE ORDER
+
+1. EXTRACT_VIDEO_WAV: `extractWav(job.videoPath)` -> Output: `video.wav`
+2. GROQ_TRANSCRIPTION: Transcribe `video.wav` -> Output: `originalTranscript` (English)
+3. GEMINI_TRANSLATION: Translate `originalTranscript` -> Output: `translatedOriginalTranscript` (Burmese). We will build `sceneTexts` from this so semantic matching works against the Burmese TTS.
+4. GENERATE_TTS: Generate audio from the translated text -> Output: `audio.wav` (TTS Audio)
+5. RE_TRANSCRIBE_TTS: Run existing `transcribeWav(audio.wav, 'my')` -> Output: `narrationTranscript` (Burmese chunks with timestamps)
+6. DETECT_SCENES: `detectScenes(job.videoPath)` -> Output: `scenes` array
+7. SEMANTIC_MATCHING: Map `narrationTranscript` to `scenes` (using the Burmese `translatedOriginalTranscript` for `sceneTexts`).
+8. TIMELINE_BUILDER: `createTimelineSegment()` converts DP to segment array.
+9. SUBTITLE_BUILDER: Generate `subs.srt` from `narrationTranscript`.
+10. SEGMENT_BUILDER: Render FFmpeg segments.
+11. CONCAT: Build `concat.txt`.
+12. EXPORT: Final muxing.
+
+D. DATA CONTRACTS
+
+1. Groq Original Transcript
+[ { "timestamp": [0.0, 4.5], "text": "Hello world" } ]
+
+2. Gemini Translated Narration
+To preserve structure for scene text building, Gemini should return an array mapping 1:1 to the Groq chunks:
+[ { "timestamp": [0.0, 4.5], "text": "မင်္ဂလာပါ ကမ္ဘာလောက" } ]
+The concatenated text of this array forms the payload sent to the TTS API.
+
+3. TTS Output
+- File path: `cacheDir/audio.wav` (or `.mp3`)
+- Format: Standard audio format natively supported by Whisper (PCM WAV preferred for speed, MP3 for size).
+
+4. Whisper TTS Transcript
+[ { "timestamp": [0.0, 3.2], "text": "မင်္ဂလာပါ ကမ္ဘာလောက" } ]
+Must be exactly the format returned by existing `transcribe.py`.
+
+E. TIMESTAMP AUTHORITY RULES
+
+The final timeline narration timestamps MUST come exclusively from:
+TTS AUDIO -> EXISTING FASTER-WHISPER -> TTS TRANSCRIPT TIMESTAMPS.
+
+Why: The Groq timestamps represent the timing of the original English audio in the video. The generated TTS audio will have a completely different duration and pacing. If we use Groq timestamps for the final video timeline, the video segments will be trimmed to the original English pacing, completely desynchronizing from the new Burmese TTS audio, leading to overlapping audio, clipped sentences, and catastrophic timeline corruption. The TTS audio dictates the new reality of the timeline duration.
+
+F. SCENE MATCHING COMPATIBILITY PLAN
+
+The existing matching relies on comparing `sceneTexts` against `narrationTranscript`.
+Since `narrationTranscript` will be Burmese (from the TTS Whisper re-transcription), `sceneTexts` MUST also be Burmese.
+- The `originalTranscript` from Groq is English.
+- We will use Gemini to translate the `originalTranscript` into a `translatedOriginalTranscript` (maintaining the Groq timestamps).
+- When `SEMANTIC_MATCHING` builds `sceneTexts`, it will map the `translatedOriginalTranscript` into the video scene buckets.
+- Then, the existing DP algorithm will compare Burmese TTS chunks against Burmese scene texts, preserving the exact intent of the original algorithm without modifying its logic.
+
+G. TIMELINE SAFETY PLAN
+
+Before `TIMELINE_BUILDER` loops and calls `createTimelineSegment()`, the following strict validations must be enforced:
+1. `!state.narrationTranscript || state.narrationTranscript.length === 0`: Throw "Empty TTS transcription."
+2. Iterate `narrationTranscript` and ensure `chunk.timestamp[0] >= 0` and `chunk.timestamp[1] > chunk.timestamp[0]`. Throw on failure.
+3. Ensure `assigned_scenes` exists, is an array, and `assigned_scenes.length === state.narrationTranscript.length`. Throw on failure.
+4. Ensure every index in `assigned_scenes` is an integer `>= 0` and `< state.scenes.length`. Throw on failure.
+5. Validate `state.audioDuration > 0`. Throw on failure.
+Failure triggers standard job error state. No silent patching.
+
+H. FFMPEG RISK PLAN
+
+- Minimum protections required:
+  - If `t.target_dur <= 0.001`, skip the segment early.
+  - If `t.scene_start >= t.scene_end`, clamp or throw an error to prevent FFmpeg `trim` failure.
+  - Verify zero-byte segments in the `CONCAT` step (already implemented, must remain).
+  - Use `tpad` to safely handle duration mismatches if the TTS audio requires a video segment longer than the original scene. (Already implemented in existing filter, must remain).
+
+I. TTS ABSTRACTION PLAN
+
+```javascript
+export const generateTTS = async (text, outputPath, options = {}) => {
+    // API Boundary: Accepts plain text and writes an audio file to outputPath.
+    // Implementation can use ElevenLabs, Google Cloud TTS, or OpenAI TTS.
+    // Must throw an Error if generation fails or file is not written.
+};
+```
+This isolates the provider. `processor.js` just calls `await generateTTS(fullBurmeseText, audioWavPath)`.
+
+J. API RETRY AND FAILURE PLAN
+
+- Wrappers in `src/ai/index.js` (Groq, Gemini, TTS) will implement a standard retry loop:
+  - Max retries: 3
+  - Exponential backoff: 2s, 4s, 8s.
+  - Catch Axios/Fetch errors, check status (429, 500, 503, 504 allow retry; 400, 401, 403 fail immediately).
+  - Throw final error to `processor.js` which catches it, sets job status to 'error', and executes the `finally` cleanup block to wipe temporary files.
+
+K. 2GB RAM PLAN
+
+- Keep `queue` concurrency at 1.
+- Stream TTS response directly to file (`responseType: 'stream'`) instead of buffering in memory.
+- Transcribe audio sequentially.
+- Do not use `Promise.all` for Groq/Gemini if payloads are massive; however, for a single video, sequential API calls are memory-safe.
+- Maintain `fs.rmSync(cacheDir)` in the `finally` block of `processor.js` to prevent disk/memory exhaustion across jobs.
+
+L. UI MIGRATION PLAN
+
+Backend Stages (`currentStep`):
+- `UPLOAD` (0%)
+- `EXTRACT_VIDEO_WAV` (5%)
+- `GROQ_TRANSCRIPTION` (15%)
+- `GEMINI_TRANSLATION` (25%)
+- `GENERATE_TTS` (35%)
+- `TRANSCRIPT_NARRATION` (45%)
+- `DETECT_SCENES` (50%)
+- `SEMANTIC_MATCHING` (55%)
+- `TIMELINE_BUILDER` (70%)
+- `SUBTITLE_BUILDER` (75%)
+- `SEGMENT_BUILDER` (90%)
+- `CONCAT` (92%)
+- `EXPORT` (99%)
+
+Frontend `App.tsx` adjusts progress logic to match these labels. Replaces dual file upload with single video upload.
+
+M. EXACT IMPLEMENTATION ORDER
+
+1. Add API provider wrappers (Groq, Gemini, TTS) in `src/ai/index.js` with retries.
+2. Define the TTS abstraction interface.
+3. Update `src/routes/api.js` to accept a single video file.
+4. Update `src/App.tsx` UI for single upload and new progress steps.
+5. Modify `src/workers/processor.js` to implement the new sequential flow, passing the correct data contracts between steps.
+6. Add the rigorous safety checks before `TIMELINE_BUILDER` in `processor.js`.
+7. Test end-to-end flow with a short sample video.
+8. Run final read-only audit to verify compliance.
+
+N. SYSTEMS THAT MUST REMAIN UNTOUCHED
+
+- SQLite job persistence (`jobManager.js`)
+- Queue concurrency (`queue.js`)
+- Scene detection (`detectScenes`)
+- Semantic similarity algorithm (`computeSimilarity`)
+- Dynamic programming matching (The DP loop in `processor.js`)
+- `createTimelineSegment()`
+- FFmpeg segment and muxing strategy
+
+O. MIGRATION RISKS AND MITIGATIONS
+
+- Risk: Groq transcript loses timestamps. Mitigation: Force verbose JSON response format in Groq API.
+- Risk: Gemini translation breaks chunk alignment. Mitigation: Pass Groq chunks as a JSON array to Gemini and require a strict JSON array response of equal length, or just concatenate the English text, translate it as one block, and run semantic matching at a broader level. (Preferred: map chunk by chunk via JSON).
+- Risk: TTS audio is much longer than the original video. Mitigation: Existing FFmpeg `tpad=stop_mode=clone` filter safely duplicates the last frame to cover the required duration.
+- Risk: Out-of-memory during TTS download. Mitigation: Use file streams for downloading TTS audio.

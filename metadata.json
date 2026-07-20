@@ -1,0 +1,6 @@
+{
+  "name": "Video-Audio Auto Sync",
+  "description": "A single-page web app that adjusts video playback speed to perfectly match an uploaded audio track.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
