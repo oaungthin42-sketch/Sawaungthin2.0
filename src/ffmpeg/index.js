@@ -143,13 +143,37 @@ export const runFFmpeg = (args, cwd, onProgress, timeoutMs = 600000) => {
         const child = spawn(ffmpegPath, args, { cwd });
         
         let timeoutTimer = null;
+        let isDone = false;
+
+        const cleanup = () => {
+            if (timeoutTimer) {
+                clearTimeout(timeoutTimer);
+                timeoutTimer = null;
+            }
+        };
+
+        const safeResolve = () => {
+            if (isDone) return;
+            isDone = true;
+            cleanup();
+            resolve();
+        };
+
+        const safeReject = (err) => {
+            if (isDone) return;
+            isDone = true;
+            cleanup();
+            reject(err);
+        };
+        
         if (timeoutMs) {
             timeoutTimer = setTimeout(() => {
                 console.error(`[FFmpeg] Timeout reached (${timeoutMs}ms), killing process...`);
                 child.kill('SIGKILL');
-                reject(new Error(`FFmpeg timed out after ${timeoutMs}ms.`));
+                safeReject(new Error(`FFmpeg timed out after ${timeoutMs}ms.`));
             }, timeoutMs);
         }
+        
         let duration = 0;
         let lastErrorOutput = '';
         
@@ -170,18 +194,22 @@ export const runFFmpeg = (args, cwd, onProgress, timeoutMs = 600000) => {
                 }
             }
         });
-        child.on('close', (code) => {
+
+        child.on('close', (code, signal) => {
             if (code === 0) {
-                resolve();
+                safeResolve();
+            } else if (code === null) {
+                console.error(`[FFmpeg] Process killed with signal ${signal}. Error: ${lastErrorOutput}`);
+                safeReject(new Error(`FFmpeg was killed with signal ${signal}. Log: ${lastErrorOutput}`));
             } else {
                 console.error(`[FFmpeg] Failed with code ${code}. Error: ${lastErrorOutput}`);
-                reject(new Error(`FFmpeg exited with code ${code}. Log: ${lastErrorOutput}`));
+                safeReject(new Error(`FFmpeg exited with code ${code}. Log: ${lastErrorOutput}`));
             }
         });
+
         child.on('error', (err) => {
-            
             console.error(`[FFmpeg] Process error:`, err);
-            reject(err);
+            safeReject(err);
         });
     });
 };

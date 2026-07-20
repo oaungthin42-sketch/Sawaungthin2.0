@@ -194,27 +194,32 @@ export const initModels = async () => {
 
 export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
     try {
-        if (cachePath && fs.existsSync(cachePath)) {
+        const style = getSetting('TRANSLATION_STYLE') || 'default_recap';
+        const naturalness = getSetting('BURMESE_NATURALNESS') || 'balanced';
+        const fingerprint = crypto.createHash('md5').update(originalTranscript.map(o => o.text).join('|')).digest('hex');
+        const metaPath = cachePath ? cachePath + '.meta.json' : null;
+        const currentMeta = { length: originalTranscript.length, style, naturalness, fingerprint };
+
+        if (cachePath && fs.existsSync(cachePath) && metaPath && fs.existsSync(metaPath)) {
             try {
-                const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-                if (Array.isArray(data) && data.length === originalTranscript.length) {
-                    let valid = true;
-                    for (let i = 0; i < data.length; i++) {
-                        if (!data[i] || !data[i].text || typeof data[i].text !== 'string' || data[i].text.trim() === '' || !Array.isArray(data[i].timestamp) || data[i].timestamp.length !== 2) {
-                            valid = false;
-                            break;
+                const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+                if (meta.length === currentMeta.length && meta.style === currentMeta.style && meta.naturalness === currentMeta.naturalness && meta.fingerprint === currentMeta.fingerprint) {
+                    const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+                    if (Array.isArray(data) && data.length === originalTranscript.length) {
+                        let valid = true;
+                        for (let i = 0; i < data.length; i++) {
+                            if (!data[i] || !data[i].text || typeof data[i].text !== 'string' || data[i].text.trim() === '' || !Array.isArray(data[i].timestamp) || data[i].timestamp.length !== 2) {
+                                valid = false;
+                                break;
+                            }
                         }
-                        if (data[i].timestamp[0] !== originalTranscript[i].timestamp[0] || data[i].timestamp[1] !== originalTranscript[i].timestamp[1]) {
-                            valid = false;
-                            break;
+                        if (valid) {
+                            console.log(`[AI] Loaded translated transcript from cache: ${cachePath}`);
+                            return data;
                         }
-                    }
-                    if (valid) {
-                        console.log(`[AI] Loaded translated transcript from cache: ${cachePath}`);
-                        return data;
                     }
                 }
-                console.warn("[AI] Translated transcript cache invalid, incomplete, or corrupted, translating again...");
+                console.warn("[AI] Translated transcript cache invalid (settings changed or corrupted), translating again...");
             } catch(e) {
                 console.warn("[AI] Translated transcript cache parse error, translating again...");
             }
@@ -389,6 +394,7 @@ export const translateWithGemini = async (originalTranscript, cachePath, apiKey 
         
         if (cachePath) {
             fs.writeFileSync(cachePath, JSON.stringify(translatedTranscript));
+            fs.writeFileSync(metaPath, JSON.stringify(currentMeta));
             console.log(`[AI] Saved translated transcript to cache: ${cachePath}`);
         }
         
@@ -460,12 +466,13 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
     try {
         const cacheDir = path.dirname(cachePath);
         const cacheMetaPath = cachePath + '.meta.json';
-        const currentMeta = { length: translatedTranscript.length, voice: edgeVoice, pitch, rate, voiceId };
+        const fingerprint = crypto.createHash('md5').update(translatedTranscript.map(o => o.text).join('|')).digest('hex');
+        const currentMeta = { length: translatedTranscript.length, voice: edgeVoice, pitch, rate, voiceId, fingerprint };
         
         if (fs.existsSync(cachePath) && fs.existsSync(cacheMetaPath)) {
             try {
                 const meta = JSON.parse(fs.readFileSync(cacheMetaPath, 'utf8'));
-                if (meta.length === currentMeta.length && meta.voice === currentMeta.voice && meta.pitch === currentMeta.pitch && meta.rate === currentMeta.rate && fs.statSync(cachePath).size > 0) {
+                if (meta.length === currentMeta.length && meta.voice === currentMeta.voice && meta.pitch === currentMeta.pitch && meta.rate === currentMeta.rate && meta.fingerprint === currentMeta.fingerprint && fs.statSync(cachePath).size > 0) {
                     console.log(`[AI] Loaded TTS audio from cache: ${cachePath}`);
                     return cachePath;
                 }

@@ -185,85 +185,12 @@ export const processRecapPipeline = async (jobId) => {
                 throw new Error("Pipeline Error: TTS audio has invalid or missing audio stream.");
             }
             
-            // Invalidate cache if TTS audio size changed
-            const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
-            const metaPath = path.join(cacheDir, 'tts_transcript_meta.json');
-            let cacheValid = false;
-            if (fs.existsSync(metaPath) && fs.existsSync(audTranscriptCache)) {
-                try {
-                    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-                    if (meta.size === stats.size && meta.duration === duration && meta.voiceId === voiceId) {
-                        cacheValid = true;
-                    }
-                } catch(e) {}
-            }
-            if (!cacheValid && fs.existsSync(audTranscriptCache)) {
-                fs.unlinkSync(audTranscriptCache);
-            }
-            
-            state.narrationTranscript = await transcribeWav(ttsAudioPath, audTranscriptCache, 'my');
-            
-            if (!Array.isArray(state.narrationTranscript) || state.narrationTranscript.length === 0) {
-                throw new Error("Pipeline Error: Narration transcription produced zero segments or invalid array.");
-            }
-            
-            let lastStart = -1;
-            const normalizedTranscript = [];
-            
-            for (let i = 0; i < state.narrationTranscript.length; i++) {
-                const chunk = state.narrationTranscript[i];
-                if (!chunk || !Array.isArray(chunk.timestamp) || chunk.timestamp.length !== 2) {
-                    throw new Error(`Pipeline Error: Invalid chunk timestamp format at index ${i}`);
-                }
-                
-                let start = Number(chunk.timestamp[0]);
-                let end = Number(chunk.timestamp[1]);
-                const text = typeof chunk.text === 'string' ? chunk.text.trim() : "";
-                
-                if (text === "") continue;
-                
-                if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0) {
-                    throw new Error(`Pipeline Error: Invalid timestamp values at index ${i}`);
-                }
-                
-                if (end > duration) {
-                    const diff = end - duration;
-                    if (diff > 0.5) {
-                        throw new Error(`Pipeline Error: Chunk end time (${end}) exceeds audio duration (${duration}) by too much.`);
-                    }
-                    end = duration;
-                }
-                
-                if (start >= end) {
-                    throw new Error(`Pipeline Error: Start time (${start}) is >= end time (${end}) after clamping at index ${i}`);
-                }
-                
-                if (start < lastStart) {
-                    throw new Error(`Pipeline Error: Timestamps are not chronological at index ${i}`);
-                }
-                
-                lastStart = start;
-                
-                normalizedTranscript.push({
-                    timestamp: [start, end],
-                    text: text
-                });
-            }
-            
-            if (normalizedTranscript.length === 0) {
-                throw new Error("Pipeline Error: Narration transcription is empty after normalization.");
-            }
-            
-            state.narrationTranscript = normalizedTranscript;
+            // We no longer run Whisper on the TTS audio because we generate an authoritative timeline.
             state.audioDuration = duration;
-            fs.writeFileSync(metaPath, JSON.stringify({ size: stats.size, duration: duration, voiceId: voiceId }));
-            
             saveState();
         }
 
-        if (!state.narrationTranscript || state.narrationTranscript.length === 0) {
-            throw new Error("Narration transcription produced zero segments. Pipeline stopped before timeline generation.");
-        }
+        // Narration transcript is now populated from authoritative timeline later.
 
         // 6. SEMANTIC MATCHING & 7. TIMELINE BUILDER
         if (!hasCompletedStep(job.currentStep, STEPS.TIMELINE_BUILDER)) {
@@ -497,17 +424,23 @@ export const processRecapPipeline = async (jobId) => {
                 }
                 
                 const s_start = t.scene_start.toFixed(3);
+                const source_dur = (t.scene_end - t.scene_start).toFixed(3);
                 const s_end = t.scene_end.toFixed(3);
                 const speed = t.speed || 1.0;
                 const target_dur = t.target_dur.toFixed(3);
                 
-                // Natural continuation with potential speed adjustment, pad with clone of last frame if video ends early
-                const filter = `[0:v]trim=start=${s_start}:end=${s_end},setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
+                // We use input seeking: -ss s_start -t source_dur -i video
+                // This means the input stream starts at PTS 0 for the extracted segment.
+                // We just need to adjust speed and pad to target_dur.
+                const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
                 
                 const segFile = path.join(cacheDir, `seg_${i}.ts`);
+                const segFileTmp = path.join(cacheDir, `seg_${i}.ts.tmp`);
                 
                 if (!fs.existsSync(segFile)) {
                     const args = [
+                        '-ss', s_start,
+                        '-t', source_dur,
                         '-i', path.resolve(job.videoPath),
                         '-filter_complex', filter,
                         '-map', '[v]',
@@ -516,10 +449,23 @@ export const processRecapPipeline = async (jobId) => {
                         '-preset', 'ultrafast',
                         '-crf', '28',
                         '-f', 'mpegts',
-                        '-y', segFile
+                        '-y', segFileTmp
                     ];
                     await runFFmpeg(args, tmpDir);
+                    
+                    if (fs.existsSync(segFileTmp) && fs.statSync(segFileTmp).size > 0) {
+                        fs.renameSync(segFileTmp, segFile);
+                    } else {
+                        if (fs.existsSync(segFileTmp)) fs.unlinkSync(segFileTmp);
+                        throw new Error(`Pipeline Error: Segment ${i} generation failed or produced 0 bytes.`);
+                    }
                 }
+                
+                try {
+                    const actualDur = await getDuration(segFile);
+                    const fileSize = fs.statSync(segFile).size;
+                    console.log(`[SEGMENT-DIAGNOSTIC] index: ${i} | scene: ${s_start}->${s_end} | source_dur: ${source_dur} | speed: ${speed.toFixed(4)} | target_dur: ${target_dur} | actual_file_dur: ${actualDur} | file_size: ${fileSize}`);
+                } catch(e) {}
             }
             advanceStep(STEPS.SEGMENT_BUILDER, 90, 'Segments Built');
         }
@@ -558,6 +504,12 @@ export const processRecapPipeline = async (jobId) => {
             fs.writeFileSync(concatFile, concatContent);
             state.concatFile = concatFile;
             saveState();
+            
+            let totalConcatExpected = 0;
+            for (const t of state.timeline) totalConcatExpected += t.target_dur;
+            console.log(`[CONCAT-DIAGNOSTIC]`);
+            console.log(`segment_count: ${state.timeline.length}`);
+            console.log(`expected_duration: ${totalConcatExpected.toFixed(3)}`);
         }
 
         // 11. EXPORT
@@ -608,17 +560,23 @@ export const processRecapPipeline = async (jobId) => {
             const vDur = finalDurs.videoDuration;
             const aDur = finalDurs.audioDuration;
             const diff = Math.abs(vDur - aDur);
-            console.log(`[SYNC] TTS Duration: ${state.audioDuration.toFixed(3)} seconds`);
-            console.log(`[SYNC] Timeline Duration: ${state.timeline.length > 0 ? state.timeline[state.timeline.length - 1].end_time.toFixed(3) : 0} seconds`);
-            console.log(`[SYNC] Final Video Duration: ${vDur.toFixed(3)} seconds`);
-            console.log(`[SYNC] Drift: ${diff.toFixed(3)} seconds`);
             
+            console.log(`[FINAL-SYNC-DIAGNOSTIC]`);
+            console.log(`video_duration: ${vDur.toFixed(3)}`);
+            console.log(`audio_duration: ${aDur.toFixed(3)}`);
+            console.log(`difference: ${diff.toFixed(3)}`);
+            console.log(`expected_audio_duration: ${state.audioDuration.toFixed(3)}`);
+            
+            let expected_video_duration = 0;
+            if (state.timeline && state.timeline.length > 0) {
+                expected_video_duration = state.timeline[state.timeline.length - 1].end_time;
+            }
+            console.log(`expected_video_duration: ${expected_video_duration.toFixed(3)}`);
+
             if (diff > 0.3) {
-                console.warn(`[Job ${jobId}] Warning: Final audio/video sync difference (${diff.toFixed(3)}s) exceeds 0.3s tolerance!`);
-                // For now just log, maybe throw if strictly required, but the prompt says:
-                // "If the difference is larger than the tolerance: ... log the exact video duration and audio duration. ... identify the cause. ... correct the timeline or final muxing behavior."
-                // I will add a final adjustment if the audio is truncated, but we are using '-shortest', so one stream is cut to the other.
-                // Wait, if we use '-shortest', they should match closely.
+                console.error(`[FINAL-SYNC-DIAGNOSTIC] ERROR: Final audio/video sync difference (${diff.toFixed(3)}s) exceeds 0.3s tolerance!`);
+                // fail safely with a clear diagnostic error if necessary
+                throw new Error(`Pipeline Error: Final A/V sync drift exceeded 0.3s (Video: ${vDur.toFixed(3)}s, Audio: ${aDur.toFixed(3)}s)`);
             }
             
             advanceStep(STEPS.EXPORT, 99, 'Export Complete');

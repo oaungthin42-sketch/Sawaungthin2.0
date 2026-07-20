@@ -173,36 +173,7 @@ def main():
             logging.info("Verification: faster-whisper is successfully installed inside the environment.")
         except ImportError as e:
             logging.error(f"ImportError while loading faster-whisper: {e}")
-            if is_production:
-                logging.error("Production environment detected. Raising ImportError to prevent dummy fallback.")
-                raise e
-            else:
-                logging.warning("Non-production environment. Returning dummy transcription for development preview.")
-                # Dummy output for local preview
-                # Mock generating exactly 70 chunks proportional to audio length
-                import wave
-                import contextlib
-                audio_len = 347.0
-                try:
-                    with contextlib.closing(wave.open(audio_path, 'r')) as f:
-                        frames = f.getnframes()
-                        rate = f.getframerate()
-                        audio_len = frames / float(rate)
-                except Exception:
-                    pass
-                
-                dummy = []
-                chunk_duration = audio_len / 70.0
-                for i in range(70):
-                    dummy.append({
-                        "timestamp": [i * chunk_duration, (i + 1) * chunk_duration - 0.01],
-                        "text": f"This is test sentence number {i}. The quick brown fox jumps over the lazy dog."
-                    })
-                sys.stdout.write(json.dumps(dummy) + '\n')
-                if cache_path:
-                    with open(cache_path, 'w') as f:
-                        f.write(json.dumps(dummy))
-                sys.exit(0)
+            raise e
 
         logging.info(f"Loading faster-whisper 'tiny' model from {os.environ['HF_HOME']}...")
         model = None
