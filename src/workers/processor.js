@@ -447,6 +447,7 @@ export const processRecapPipeline = async (jobId) => {
                         '-t', target_dur,
                         '-c:v', 'libx264',
                         '-preset', 'ultrafast',
+                        '-threads', '2',
                         '-crf', '28',
                         '-f', 'mpegts',
                         '-y', segFileTmp
