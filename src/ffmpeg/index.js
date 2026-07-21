@@ -48,13 +48,32 @@ export const getStreamsDuration = (file) => new Promise((resolve, reject) => {
         if (err) return reject(err);
         let vDur = 0;
         let aDur = 0;
+        let formatDur = 0;
+        
+        if (meta.format && meta.format.duration !== undefined && meta.format.duration !== 'N/A') {
+            const parsedFormatDur = parseFloat(meta.format.duration);
+            if (Number.isFinite(parsedFormatDur)) {
+                formatDur = parsedFormatDur;
+            }
+        }
+        
         if (meta.streams) {
             meta.streams.forEach(s => {
-                if (s.codec_type === 'video' && s.duration) vDur = parseFloat(s.duration);
-                if (s.codec_type === 'audio' && s.duration) aDur = parseFloat(s.duration);
+                if (s.codec_type === 'video' && s.duration && s.duration !== 'N/A') {
+                    const parsed = parseFloat(s.duration);
+                    if (Number.isFinite(parsed)) vDur = parsed;
+                }
+                if (s.codec_type === 'audio' && s.duration && s.duration !== 'N/A') {
+                    const parsed = parseFloat(s.duration);
+                    if (Number.isFinite(parsed)) aDur = parsed;
+                }
             });
         }
-        resolve({ videoDuration: vDur || meta.format.duration, audioDuration: aDur || meta.format.duration });
+        
+        resolve({
+            videoDuration: vDur > 0 ? vDur : formatDur,
+            audioDuration: aDur > 0 ? aDur : formatDur
+        });
     });
 });
 

@@ -432,7 +432,7 @@ export const processRecapPipeline = async (jobId) => {
                 // We use input seeking: -ss s_start -t source_dur -i video
                 // This means the input stream starts at PTS 0 for the extracted segment.
                 // We just need to adjust speed and pad to target_dur.
-                const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
+                const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
                 
                 const segFile = path.join(cacheDir, `seg_${i}.ts`);
                 const segFileTmp = path.join(cacheDir, `seg_${i}.ts.tmp`);
@@ -451,7 +451,12 @@ export const processRecapPipeline = async (jobId) => {
                         '-f', 'mpegts',
                         '-y', segFileTmp
                     ];
-                    await runFFmpeg(args, tmpDir);
+                    try {
+                        await runFFmpeg(args, tmpDir);
+                    } catch (err) {
+                        if (fs.existsSync(segFileTmp)) fs.unlinkSync(segFileTmp);
+                        throw err;
+                    }
                     
                     if (fs.existsSync(segFileTmp) && fs.statSync(segFileTmp).size > 0) {
                         fs.renameSync(segFileTmp, segFile);
