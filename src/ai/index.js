@@ -692,10 +692,18 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                         const gapPath = path.join(ttsDir, `gap_${i}.wav`);
                         await runFFmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', gapBefore.toFixed(3), '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', gapPath], ttsDir);
                         processedChunks.push(gapPath);
+                        let mathGap = gapBefore;
                         try {
                             let gapDur = parseFloat(await getDuration(gapPath));
-                            console.log(`[AI-DIAGNOSTIC] Gap Before Chunk ${i} | Intended Dur: ${gapBefore.toFixed(3)} | Actual Dur: ${gapDur.toFixed(3)} | Timeline: ${(runningAudioTime).toFixed(2)}->${(runningAudioTime + gapBefore).toFixed(2)}`);
-                        } catch(e) {}
+                            if (Number.isFinite(gapDur) && gapDur > 0) {
+                                gapBefore = gapDur;
+                            } else {
+                                throw new Error(`Invalid gap duration`);
+                            }
+                        } catch(e) {
+                            throw new Error(`Timeline Error: Cannot determine actual gap duration before chunk ${i}`);
+                        }
+                        console.log(`[AI-TIMELINE-DIAGNOSTIC] Gap Before Chunk ${i} | Math Dur: ${mathGap.toFixed(3)} | Actual Dur: ${gapBefore.toFixed(3)} | Diff: ${(mathGap - gapBefore).toFixed(3)}`);
                         prevEnd += gapBefore;
                     }
                     
@@ -722,6 +730,19 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                     }
                     
                     processedChunks.push(finalChunkPath);
+                    
+                    let mathDur = finalDur;
+                    try {
+                        let actualDur = parseFloat(await getDuration(finalChunkPath));
+                        if (Number.isFinite(actualDur) && actualDur > 0) {
+                            finalDur = actualDur;
+                        } else {
+                            throw new Error(`Invalid FFprobe duration for ${finalChunkPath}`);
+                        }
+                    } catch(e) {
+                        throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${i} (${e.message})`);
+                    }
+                    console.log(`[AI-TIMELINE-DIAGNOSTIC] Chunk ${i} | Orig: ${origStart.toFixed(2)}->${origEnd.toFixed(2)} | Math Dur: ${mathDur.toFixed(3)} | Actual Dur: ${finalDur.toFixed(3)} | Diff: ${(mathDur - finalDur).toFixed(3)} | Timeline: ${(runningAudioTime + gapBefore).toFixed(3)}->${(runningAudioTime + gapBefore + finalDur).toFixed(3)}`);
                     
                     authoritativeTimeline.push({
                         chunk_index: i,
@@ -788,10 +809,18 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                     const gapPath = path.join(ttsDir, `gap_${i}.wav`);
                     await runFFmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', gap_before.toFixed(3), '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', gapPath], ttsDir);
                     processedChunks.push(gapPath);
+                    let mathGap = actualGapBefore;
                     try {
                         let gapDur = parseFloat(await getDuration(gapPath));
-                        console.log(`[AI-DIAGNOSTIC] Gap Before Chunk ${i} | Intended Dur: ${gap_before.toFixed(3)} | Actual Dur: ${gapDur.toFixed(3)} | Timeline: ${(runningAudioTime).toFixed(2)}->${(runningAudioTime + gap_before).toFixed(2)}`);
-                    } catch(e) {}
+                        if (Number.isFinite(gapDur) && gapDur > 0) {
+                            actualGapBefore = gapDur;
+                        } else {
+                            throw new Error(`Invalid gap duration`);
+                        }
+                    } catch(e) {
+                        throw new Error(`Timeline Error: Cannot determine actual gap duration before chunk ${i}`);
+                    }
+                    console.log(`[AI-TIMELINE-DIAGNOSTIC] Gap Before Chunk ${i} | Math Dur: ${mathGap.toFixed(3)} | Actual Dur: ${actualGapBefore.toFixed(3)} | Diff: ${(mathGap - actualGapBefore).toFixed(3)}`);
                 }
                 
                 if (orig_dur > 0 && chunkDur > orig_dur + 0.1) {
@@ -807,6 +836,20 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                 } else {
                     processedChunks.push(rawChunk);
                 }
+                
+                let mathDur = actualFinalDur;
+                let finalChunkPath = processedChunks[processedChunks.length - 1];
+                try {
+                    let actualDur = parseFloat(await getDuration(finalChunkPath));
+                    if (Number.isFinite(actualDur) && actualDur > 0) {
+                        actualFinalDur = actualDur;
+                    } else {
+                        throw new Error(`Invalid FFprobe duration for ${finalChunkPath}`);
+                    }
+                } catch(e) {
+                    throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${i} (${e.message})`);
+                }
+                console.log(`[AI-TIMELINE-DIAGNOSTIC] Chunk ${i} | Orig: ${orig_start.toFixed(2)}->${orig_end.toFixed(2)} | Math Dur: ${mathDur.toFixed(3)} | Actual Dur: ${actualFinalDur.toFixed(3)} | Diff: ${(mathDur - actualFinalDur).toFixed(3)} | Timeline: ${(runningAudioTime + actualGapBefore).toFixed(3)}->${(runningAudioTime + actualGapBefore + actualFinalDur).toFixed(3)}`);
                 
                 authoritativeTimeline.push({
                     chunk_index: i,
@@ -866,6 +909,7 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
         let numChunks = processedChunks.filter(p => !path.basename(p).startsWith('gap_')).length;
         let numGaps = processedChunks.filter(p => path.basename(p).startsWith('gap_')).length;
         console.log(`[AI-DIAGNOSTIC] FINAL ASSEMBLY: Expected duration=${runningAudioTime.toFixed(2)}s | Actual duration=${duration}s | Audio chunks=${numChunks} | Silence gaps=${numGaps}`);
+        console.log(`[AI-TIMELINE-SUMMARY] chunks=${numChunks} | gaps=${numGaps} | authoritative_timeline_duration=${runningAudioTime.toFixed(3)}s`);
         
         console.log(`[TTS] Final audio duration: ${duration} seconds`);
         
