@@ -3,7 +3,7 @@ import path from 'path';
 import { updateJob, getJob, getJobKeys, clearJobKeys } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { transcribeWav, computeSimilarity, transcribeOriginalVideoWithAssemblyAI, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
+import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
 
 // Pipeline steps
@@ -101,11 +101,11 @@ export const processRecapPipeline = async (jobId) => {
         const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
             advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Video Audio');
-            state.originalTranscript = await transcribeOriginalVideoWithAssemblyAI(videoWavPath, vidTranscriptCache, assemblyApiKey);
+            try { state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache); } catch (err) { throw new Error(`Pipeline Error: Transcription Stage Failed.\nInput File: ${videoWavPath} (WAV audio)\nUnderlying Error: ${err.message}\nDiagnostic: faster-whisper executable or model unavailable in current environment.`); }
             
             // Compatibility validation for originalTranscript
             if (!Array.isArray(state.originalTranscript) || state.originalTranscript.length === 0) {
-                throw new Error("Pipeline Error: originalTranscript is empty or invalid after AssemblyAI transcription.");
+                throw new Error("Pipeline Error: originalTranscript is empty or invalid after Whisper transcription.");
             }
             
             let prevEnd = -1;
@@ -619,7 +619,7 @@ export const processRecapPipeline = async (jobId) => {
                                 '-filter_complex', `[0:a]atempo=${speed.toFixed(4)},apad[a]`,
                                 '-map', '[a]',
                                 '-t', target_dur,
-                                '-acodec', 'pcm_s16le',
+                                '-acodec', 'pcm_s16le', '-f', 'wav',
                                 '-ar', '44100',
                                 '-ac', '2',
                                 '-y', aSegFileTmp
@@ -638,7 +638,7 @@ export const processRecapPipeline = async (jobId) => {
                                     '-f', 'lavfi',
                                     '-i', 'anullsrc=r=44100:cl=stereo',
                                     '-t', target_dur,
-                                    '-acodec', 'pcm_s16le',
+                                    '-acodec', 'pcm_s16le', '-f', 'wav',
                                     '-y', aSegFileTmp
                                 ];
                                 await runFFmpeg(silArgs, tmpDir);
@@ -663,7 +663,7 @@ export const processRecapPipeline = async (jobId) => {
                     '-f', 'concat',
                     '-safe', '0',
                     '-i', aConcatFile,
-                    '-acodec', 'pcm_s16le',
+                    '-acodec', 'pcm_s16le', '-f', 'wav',
                     '-y', bgAudioPath
                 ];
                 await runFFmpeg(bgArgs, tmpDir);
@@ -678,7 +678,7 @@ export const processRecapPipeline = async (jobId) => {
                     '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
                     '-i', bgAudioPath,
                     '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                    '-filter_complex', `[1:a]volume='${duckingFilter}':eval=frame[bg_ducked];[bg_ducked][2:a]amix=inputs=2:duration=longest,loudnorm=I=-14:LRA=11:TP=-1.5[aout]`,
+                    '-filter_complex', `[1:a]volume='${duckingFilter}':eval=frame[bg_ducked];[bg_ducked]aresample=44100[bg_resampled];[2:a]aresample=44100[tts_resampled];[bg_resampled][tts_resampled]amix=inputs=2:duration=longest,loudnorm=I=-14:LRA=11:TP=-1.5[aout]`,
                     '-map', '0:v',
                     '-map', '[aout]',
                     '-c:v', 'copy',
