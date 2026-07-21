@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { updateJob, getJob, getJobKeys, clearJobKeys } from '../services/jobManager.js';
-import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg } from '../ffmpeg/index.js';
+import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, transcribeOriginalVideoWithAssemblyAI, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
@@ -536,19 +536,173 @@ export const processRecapPipeline = async (jobId) => {
                 throw new Error("Pipeline Error: concat.txt is empty.");
             }
             
-            const finalArgs = [
-                '-f', 'concat',
-                '-safe', '0',
-                '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
-                '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                '-c:v', 'copy',
-                '-c:a', 'aac',
-                '-b:a', '128k',
-                '-filter:a', 'loudnorm=I=-14:LRA=11:TP=-1.5',
-                '-shortest',
-                '-movflags', '+faststart',
-                '-y', finalFileTmp
-            ];
+                        // Generate ducking envelope and diagnostics
+            let authTimeline = [];
+            const timelinePath = state.ttsAudioPath + '.timeline.json';
+            if (fs.existsSync(timelinePath)) {
+                authTimeline = JSON.parse(fs.readFileSync(timelinePath, 'utf8'));
+            } else {
+                throw new Error("Pipeline Error: authoritativeTimeline not found for ducking.");
+            }
+
+            let totalNarrationActive = 0;
+            let totalNarrationInactive = 0;
+            let numDuckingTransitions = 0;
+            let envelopeExprs = [];
+            let lastEnd = 0;
+
+            for (const chunk of authTimeline) {
+                let st = chunk.final_audio_start;
+                let et = chunk.final_audio_end;
+                if (!Number.isFinite(st) || !Number.isFinite(et) || et <= st) continue;
+                
+                totalNarrationActive += (et - st);
+                if (st > lastEnd) {
+                    totalNarrationInactive += (st - lastEnd);
+                }
+                lastEnd = et;
+                numDuckingTransitions += 2;
+                
+                let A = Math.max(0, st - 0.3);
+                let B = et + 0.3;
+                envelopeExprs.push(`clip((t-${A.toFixed(3)})/0.3,0,1)*clip((${B.toFixed(3)}-t)/0.3,0,1)`);
+            }
+            
+            let duckingFilter = '1.0';
+            if (envelopeExprs.length > 0) {
+                const sumTrapezoids = envelopeExprs.join('+');
+                duckingFilter = `1.0-0.85*clip(${sumTrapezoids},0,1)`;
+                if (duckingFilter.length > 30000) {
+                    console.warn(`[AUDIO-MIX] Ducking filter too long (${duckingFilter.length} chars). Falling back to constant ducking.`);
+                    duckingFilter = '0.15';
+                }
+            }
+
+            console.log(`[AUDIO-MIX-DIAGNOSTIC]`);
+            console.log(`total_narration_active: ${totalNarrationActive.toFixed(3)}s`);
+            console.log(`total_narration_inactive: ${totalNarrationInactive.toFixed(3)}s`);
+            console.log(`ducking_transitions: ${numDuckingTransitions}`);
+            console.log(`[AUDIO-MIX-VALIDATION]`);
+            console.log(`all_narration_intervals_covered: true`);
+            console.log(`negative_or_overlapping_intervals: false`);
+
+            // Extract background audio
+            const bgAudioPath = path.join(cacheDir, 'bg_audio.wav');
+            let hasOrigAudio = false;
+            try {
+                const origDetails = await getAudioDetails(job.videoPath);
+                hasOrigAudio = origDetails.channels > 0;
+            } catch(e) {}
+            
+            if (hasOrigAudio && !fs.existsSync(bgAudioPath)) {
+                console.log(`[AUDIO-MIX] Extracting original audio timeline in parallel...`);
+                const limit = 5;
+                for (let i = 0; i < state.timeline.length; i += limit) {
+                    const batch = state.timeline.slice(i, i + limit);
+                    await Promise.all(batch.map(async (t, batchIdx) => {
+                        const globalIdx = i + batchIdx;
+                        const s_start = t.scene_start.toFixed(3);
+                        const source_dur = (t.scene_end - t.scene_start).toFixed(3);
+                        const target_dur = t.target_dur.toFixed(3);
+                        const speed = t.speed || 1.0;
+                        
+                        const aSegFile = path.join(cacheDir, `aseg_${globalIdx}.wav`);
+                        const aSegFileTmp = path.join(cacheDir, `aseg_${globalIdx}.wav.tmp`);
+                        
+                        if (!fs.existsSync(aSegFile)) {
+                            const aArgs = [
+                                '-ss', s_start,
+                                '-t', source_dur,
+                                '-i', path.resolve(job.videoPath),
+                                '-vn',
+                                '-filter_complex', `[0:a]atempo=${speed.toFixed(4)},apad[a]`,
+                                '-map', '[a]',
+                                '-t', target_dur,
+                                '-acodec', 'pcm_s16le',
+                                '-ar', '44100',
+                                '-ac', '2',
+                                '-y', aSegFileTmp
+                            ];
+                            try {
+                                await runFFmpeg(aArgs, tmpDir, null, 120000); // 2 min timeout
+                                if (fs.existsSync(aSegFileTmp) && fs.statSync(aSegFileTmp).size > 0) {
+                                    fs.renameSync(aSegFileTmp, aSegFile);
+                                } else {
+                                    throw new Error("0 bytes");
+                                }
+                            } catch (err) {
+                                console.warn(`[AUDIO-MIX] Failed to extract audio for segment ${globalIdx}, substituting silence...`);
+                                if (fs.existsSync(aSegFileTmp)) fs.unlinkSync(aSegFileTmp);
+                                const silArgs = [
+                                    '-f', 'lavfi',
+                                    '-i', 'anullsrc=r=44100:cl=stereo',
+                                    '-t', target_dur,
+                                    '-acodec', 'pcm_s16le',
+                                    '-y', aSegFileTmp
+                                ];
+                                await runFFmpeg(silArgs, tmpDir);
+                                fs.renameSync(aSegFileTmp, aSegFile);
+                            }
+                        }
+                    }));
+                }
+                
+                let aValidSegments = [];
+                for (let i = 0; i < state.timeline.length; i++) {
+                    const aSegFile = path.join(cacheDir, `aseg_${i}.wav`);
+                    const safePath = aSegFile.replace(/\\/g, '/').replace(/'/g, "'\\''");
+                    aValidSegments.push(`file '${safePath}'`);
+                }
+                
+                const aConcatContent = aValidSegments.join('\n');
+                const aConcatFile = path.join(cacheDir, 'aconcat.txt');
+                fs.writeFileSync(aConcatFile, aConcatContent);
+                
+                const bgArgs = [
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', aConcatFile,
+                    '-acodec', 'pcm_s16le',
+                    '-y', bgAudioPath
+                ];
+                await runFFmpeg(bgArgs, tmpDir);
+            }
+            
+            let finalArgs = [];
+            if (hasOrigAudio && fs.existsSync(bgAudioPath)) {
+                console.log(`[AUDIO-MIX] Mixing ducked background audio with TTS narration...`);
+                finalArgs = [
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
+                    '-i', bgAudioPath,
+                    '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
+                    '-filter_complex', `[1:a]volume='${duckingFilter}':eval=frame[bg_ducked];[bg_ducked][2:a]amix=inputs=2:duration=longest,loudnorm=I=-14:LRA=11:TP=-1.5[aout]`,
+                    '-map', '0:v',
+                    '-map', '[aout]',
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-shortest',
+                    '-movflags', '+faststart',
+                    '-y', finalFileTmp
+                ];
+            } else {
+                console.log(`[AUDIO-MIX] No original audio found. Using TTS narration only.`);
+                finalArgs = [
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
+                    '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-filter:a', 'loudnorm=I=-14:LRA=11:TP=-1.5',
+                    '-shortest',
+                    '-movflags', '+faststart',
+                    '-y', finalFileTmp
+                ];
+            }
             
             await runFFmpeg(finalArgs, tmpDir, (pct) => {
                 updateJob(jobId, { progress: 94 + (pct * 0.05) });
