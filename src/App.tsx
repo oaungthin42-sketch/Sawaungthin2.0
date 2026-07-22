@@ -266,6 +266,7 @@ function App() {
   };
 
   const startPolling = (id: string) => {
+    let pollErrors = 0;
     if (pollTimer) clearInterval(pollTimer);
 
     const interval = setInterval(async () => {
@@ -288,11 +289,15 @@ function App() {
           setProgressPct(job.progress || 0);
         }
       } catch (e) {
-         clearInterval(interval);
-         setStatus('error');
-         setErrorMsg('Polling failed');
+         console.warn('Polling error (transient)', e);
+         pollErrors++;
+         if (pollErrors > 20) {
+            clearInterval(interval);
+            setStatus('error');
+            setErrorMsg('Polling failed after multiple retries.');
+         }
       }
-    }, 2000);
+    }, 5000);
 
     setPollTimer(interval);
   };
