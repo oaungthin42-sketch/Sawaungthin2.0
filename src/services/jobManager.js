@@ -52,5 +52,5 @@ export const recoverStuckJobs = () => {
         WHERE status IN ('processing', 'pending', 'uploading')
     `);
     stmt.run();
-    console.log('[JobManager] Recovered stuck jobs by marking them as error.');
+    if(false){}
 };

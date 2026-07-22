@@ -54,12 +54,6 @@ export const transcribeWav = async (wavPath, cachePath) => {
 };
 
 export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
-    return originalTranscript.map(t => ({
-        timestamp: t.timestamp,
-        text: "Mock translated text"
-    }));
-}
-export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
     try {
         const style = getSetting('TRANSLATION_STYLE') || 'default_recap';
         const naturalness = getSetting('BURMESE_NATURALNESS') || 'balanced';
