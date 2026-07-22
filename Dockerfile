@@ -4,6 +4,7 @@ FROM node:20-bookworm-slim
 # Set production environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Install system dependencies: Python 3, venv, development tools, and ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -25,17 +25,30 @@ export const transcribeOriginalVideoWithAssemblyAI = async (audioPath, cachePath
 
 export const transcribeWav = async (wavPath, cachePath) => {
     if (cachePath && fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
-        return JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+        try {
+            const cachedData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+            const duration = await getDuration(wavPath);
+            let isValid = true;
+            for (const chunk of cachedData) {
+                if (chunk.timestamp[0] > duration + 60) {
+                    isValid = false;
+                    break;
+                }
+            }
+            if (isValid) {
+                return cachedData;
+            } else {
+                console.warn(`[Transcription] Cache rejected because timestamps exceed audio duration (duration: ${duration})`);
+                try { fs.unlinkSync(cachePath); } catch (e) {}
+            }
+        } catch(e) {
+            console.error("Failed to parse or validate transcription cache:", e);
+        }
     }
     const pyPath = path.join(__dirname, 'transcribe.py');
     return new Promise((resolve, reject) => {
-                return resolve([
-            { timestamp: [0, 5], text: "Test transcription part 1" },
-            { timestamp: [10, 15], text: "Test transcription part 2" },
-            { timestamp: [20, 25], text: "Test transcription part 3" },
-            { timestamp: [30, 35], text: "Test transcription part 4" },
-            { timestamp: [390, 395], text: "Test transcription part 5" }
-        ]);
+        const pyExec = fs.existsSync('/opt/venv/bin/python3') ? '/opt/venv/bin/python3' : 'python3';
+        const child = spawn(pyExec, [pyPath, wavPath, cachePath || '']);
         let out = '';
         let errStr = '';
         child.stdout.on('data', d => out += d);
