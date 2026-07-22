@@ -12,3 +12,13 @@ public/output/
 assets/
 *.mp4
 *.mp3
+-e venv/
+test_venv/
+*.pyc
+__pycache__/
+*.tmp
+patch_*.js
+fix_*.js
+test_*.js
+temp.txt
+

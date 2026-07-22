@@ -2,7 +2,10 @@
 import fs from 'fs';
 import { spawn } from 'child_process';
 import ffmpeg from 'fluent-ffmpeg';
-import ffmpegPath from 'ffmpeg-static';
+import _ffmpegPath from 'ffmpeg-static';
+import { execSync } from 'child_process';
+let ffmpegPath = _ffmpegPath;
+try { execSync('ffmpeg -version'); ffmpegPath = 'ffmpeg'; } catch (e) {}
 import ffprobePath from 'ffprobe-static';
 
 ffmpeg.setFfmpegPath(ffmpegPath);

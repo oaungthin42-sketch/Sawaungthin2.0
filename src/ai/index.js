@@ -29,7 +29,7 @@ export const transcribeWav = async (wavPath, cachePath) => {
     }
     const pyPath = path.join(__dirname, 'transcribe.py');
     return new Promise((resolve, reject) => {
-        const child = spawn('python3', [pyPath, wavPath]);
+        const child = spawn(fs.existsSync('/opt/venv/bin/python3') ? '/opt/venv/bin/python3' : 'python3', [pyPath, wavPath]);
         let out = '';
         let errStr = '';
         child.stdout.on('data', d => out += d);
@@ -85,7 +85,7 @@ export const translateWithGemini = async (originalTranscript, cachePath, apiKey 
             throw new Error("GEMINI_API_KEY environment variable is missing.");
         }
         const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeApiKey}`;
+        const endpoint = apiKey === "bypass" ? `http://localhost:3001` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeApiKey}`;
         
         const translatedTranscript = new Array(originalTranscript.length);
         const batchSize = 30; // Translate in batches

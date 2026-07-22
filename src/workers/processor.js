@@ -672,15 +672,25 @@ export const processRecapPipeline = async (jobId) => {
             let finalArgs = [];
             if (hasOrigAudio && fs.existsSync(bgAudioPath)) {
                 console.log(`[AUDIO-MIX] Mixing ducked background audio with TTS narration...`);
+                
+                const mixedAudioPath = path.join(cacheDir, 'mixed_audio.wav');
+                const mixArgs = [
+                    '-i', bgAudioPath,
+                    '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
+                    '-filter_complex', `[0:a]volume='${duckingFilter}':eval=frame[bg];[bg][1:a]amix=inputs=2:duration=longest[aout]`,
+                    '-map', '[aout]',
+                    '-acodec', 'pcm_s16le', '-f', 'wav',
+                    '-y', mixedAudioPath
+                ];
+                await runFFmpeg(mixArgs, tmpDir);
+
                 finalArgs = [
                     '-f', 'concat',
                     '-safe', '0',
                     '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
-                    '-i', bgAudioPath,
-                    '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                    '-filter_complex', `[1:a]volume='${duckingFilter}':eval=frame[bg_ducked];[bg_ducked]aresample=44100[bg_resampled];[2:a]aresample=44100[tts_resampled];[bg_resampled][tts_resampled]amix=inputs=2:duration=longest,loudnorm=I=-14:LRA=11:TP=-1.5[aout]`,
+                    '-i', mixedAudioPath,
                     '-map', '0:v',
-                    '-map', '[aout]',
+                    '-map', '1:a',
                     '-c:v', 'copy',
                     '-c:a', 'aac',
                     '-b:a', '128k',
@@ -769,7 +779,9 @@ export const processRecapPipeline = async (jobId) => {
             const filesToRemove = [
                 path.join(cacheDir, 'video.wav'),
                 path.join(cacheDir, 'audio.wav'),
-                path.join(cacheDir, 'concat.txt')
+                path.join(cacheDir, 'concat.txt'),
+                path.join(cacheDir, 'aconcat.txt'),
+                path.join(cacheDir, 'bg_audio.wav')
             ];
             
             if (fs.existsSync(cacheDir)) {
@@ -777,7 +789,7 @@ export const processRecapPipeline = async (jobId) => {
                 if (fs.existsSync(ttsChunksDir)) fs.rmSync(ttsChunksDir, { recursive: true, force: true });
                 
                 try {
-                    const segFiles = fs.readdirSync(cacheDir).filter(f => f.startsWith('seg_') && f.endsWith('.ts'));
+                    const segFiles = fs.readdirSync(cacheDir).filter(f => (f.startsWith('seg_') && f.endsWith('.ts')) || (f.startsWith('aseg_') && f.endsWith('.wav')));
                     for (const sf of segFiles) {
                         filesToRemove.push(path.join(cacheDir, sf));
                     }

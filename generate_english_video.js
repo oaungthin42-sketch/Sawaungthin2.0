@@ -1,47 +1,52 @@
-import { generateNarrationTTS } from './src/ai/index.js';
+import { spawn } from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
 import fs from 'fs';
-import path from 'path';
-import { execSync } from 'child_process';
 
-async function run() {
-    const originalTranscript = [];
-    const translatedTranscript = [];
-    
-    // 6 minutes = 360 seconds. Let's do 70 sentences, each 5 seconds.
-    for (let i = 0; i < 70; i++) {
-        const start = i * 5;
-        const end = start + 4;
-        originalTranscript.push({
-            index: i,
-            text: `This is test sentence number ${i}. The quick brown fox jumps over the lazy dog.`,
-            timestamp: [start, end],
-            is_dialogue: false
-        });
-        
-        translatedTranscript.push({
-            index: i,
-            text: `This is test sentence number ${i}. The quick brown fox jumps over the lazy dog.`,
-        });
+const args = [
+    '-y',
+    '-f', 'lavfi', '-i', 'color=c=blue:s=1280x720:d=15',
+    '-f', 'lavfi', '-i', 'aevalsrc=sin(440*2*PI*t)*0.2:d=15',
+    '-c:v', 'libx264',
+    '-c:a', 'aac',
+    'data/test_english.mp4'
+];
+
+const child = spawn(ffmpegPath, args);
+child.on('close', async (code) => {
+    if (code !== 0) {
+        console.error('Failed to create video');
+        process.exit(1);
     }
-
-    const cachePath = path.join(process.cwd(), 'data', 'test_input', 'tts.wav');
-    const cacheDir = path.dirname(cachePath);
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
     
-    console.log("Running TTS Generation...");
+    // Now we need to create a video with speech
+    // We can use macOS say if on mac, or espeak if on linux, but we are in a docker container.
+    // Let's use node-edge-tts to generate a short english speech audio, then mix it.
+    
     try {
-        await generateNarrationTTS(translatedTranscript, cachePath, 'male-young-adult', originalTranscript);
-        console.log("TTS Done. Generating video...");
+        const { EdgeTTS } = await import('node-edge-tts');
+        const tts = new EdgeTTS({ voice: 'en-US-AriaNeural' });
+        await tts.ttsPromise('Hello world. This is a test video. We are testing the pipeline.', 'data/speech.mp3');
         
-        // Now create a 350-second video with this audio
-        const videoPath = path.join(process.cwd(), 'data', 'test_input', 'input_video.mp4');
-        const cmd = \`ffmpeg -y -f lavfi -i color=c=blue:s=1280x720:r=30 -i \${cachePath} -c:v libx264 -preset ultrafast -tune stillimage -c:a aac -b:a 128k -shortest \${videoPath}\`;
-        console.log("Running ffmpeg:", cmd);
-        execSync(cmd, { stdio: 'inherit' });
+        const mixArgs = [
+            '-y',
+            '-i', 'data/test_english.mp4',
+            '-i', 'data/speech.mp3',
+            '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest[aout]',
+            '-map', '0:v',
+            '-map', '[aout]',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            'data/test_english_final.mp4'
+        ];
         
-        console.log("Video generated successfully at", videoPath);
+        const mixChild = spawn(ffmpegPath, mixArgs);
+        mixChild.on('close', (mixCode) => {
+            if (mixCode === 0) {
+                console.log('Test video created at data/test_english_final.mp4');
+                fs.copyFileSync('data/test_english_final.mp4', 'data/test_10s.mp4');
+            }
+        });
     } catch(e) {
         console.error(e);
     }
-}
-run();
+});
