@@ -380,7 +380,10 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                 processedChunks.push(adjustedPath);
                 actualFinalDur = chunkDur / speed;
             } else {
-                processedChunks.push(rawChunk);
+                const standardizedPath = path.join(ttsDir, `chunk_std_${String(i).padStart(4, '0')}.wav`);
+                await runFFmpeg(['-i', rawChunk, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', standardizedPath], ttsDir);
+                processedChunks.push(standardizedPath);
+                actualFinalDur = chunkDur;
             }
             
             let finalChunkPath = processedChunks[processedChunks.length - 1];
@@ -395,11 +398,20 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
                 throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${i}`);
             }
             
+            let adjusted_orig_end = orig_end;
+            let adjusted_orig_dur = orig_dur;
+            // If the audio is shorter than the video, the video should play at normal speed.
+            // The remaining original video time becomes a gap.
+            if (orig_dur > 0 && actualFinalDur < orig_dur) {
+                adjusted_orig_dur = actualFinalDur;
+                adjusted_orig_end = orig_start + adjusted_orig_dur;
+            }
+
             authoritativeTimeline.push({
                 chunk_index: i,
                 orig_start: orig_start,
-                orig_end: orig_end,
-                orig_dur: orig_dur,
+                orig_end: adjusted_orig_end,
+                orig_dur: adjusted_orig_dur,
                 final_audio_start: runningAudioTime + actualGapBefore,
                 final_audio_end: runningAudioTime + actualGapBefore + actualFinalDur,
                 final_dur: actualFinalDur,
