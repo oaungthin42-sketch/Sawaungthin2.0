@@ -5,7 +5,7 @@ const cors = require('cors');
 app.use(cors());
 app.use(express.json());
 
-app.post('*', (req, res) => {
+app.use( (req, res) => {
     try {
         const body = req.body;
         const text = JSON.parse(body.contents[0].parts[0].text);

@@ -552,6 +552,9 @@ export const processRecapPipeline = async (jobId) => {
             let envelopeExprs = [];
             let lastEnd = 0;
 
+            let duckingFilters = [];
+            let mergedIntervals = [];
+
             for (const chunk of authTimeline) {
                 let st = chunk.final_audio_start;
                 let et = chunk.final_audio_end;
@@ -566,18 +569,36 @@ export const processRecapPipeline = async (jobId) => {
                 
                 let A = Math.max(0, st - 0.3);
                 let B = et + 0.3;
-                envelopeExprs.push(`clip((t-${A.toFixed(3)})/0.3,0,1)*clip((${B.toFixed(3)}-t)/0.3,0,1)`);
-            }
-            
-            let duckingFilter = '1.0';
-            if (envelopeExprs.length > 0) {
-                const sumTrapezoids = envelopeExprs.join('+');
-                duckingFilter = `1.0-0.85*clip(${sumTrapezoids},0,1)`;
-                if (duckingFilter.length > 30000) {
-                    console.warn(`[AUDIO-MIX] Ducking filter too long (${duckingFilter.length} chars). Falling back to constant ducking.`);
-                    duckingFilter = '0.15';
+                
+                if (mergedIntervals.length > 0) {
+                    let last = mergedIntervals[mergedIntervals.length - 1];
+                    if (A <= last.B) {
+                        last.B = Math.max(last.B, B);
+                    } else {
+                        mergedIntervals.push({ A, B });
+                    }
+                } else {
+                    mergedIntervals.push({ A, B });
                 }
             }
+            
+            if (mergedIntervals.length > 0) {
+                let batch = [];
+                for (let i = 0; i < mergedIntervals.length; i++) {
+                    const { A, B } = mergedIntervals[i];
+                    batch.push(`clip((t-${A.toFixed(3)})/0.3,0,1)*clip((${B.toFixed(3)}-t)/0.3,0,1)`);
+                    
+                    if (batch.length >= 20 || i === mergedIntervals.length - 1) {
+                        const sumTrapezoids = batch.join('+');
+                        duckingFilters.push(`volume='1.0-0.85*clip(${sumTrapezoids},0,1)':eval=frame`);
+                        batch = [];
+                    }
+                }
+            } else {
+                duckingFilters.push(`volume=1.0`);
+            }
+            
+            let duckingFilterChain = duckingFilters.join(',');
 
             console.log(`[AUDIO-MIX-DIAGNOSTIC]`);
             console.log(`total_narration_active: ${totalNarrationActive.toFixed(3)}s`);
@@ -677,7 +698,7 @@ export const processRecapPipeline = async (jobId) => {
                 const mixArgs = [
                     '-i', bgAudioPath,
                     '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                    '-filter_complex', `[0:a]volume='${duckingFilter}':eval=frame[bg];[bg][1:a]amix=inputs=2:duration=longest[aout]`,
+                    '-filter_complex', `[0:a]${duckingFilterChain}[bg];[bg][1:a]amix=inputs=2:duration=longest[aout]`,
                     '-map', '[aout]',
                     '-acodec', 'pcm_s16le', '-f', 'wav',
                     '-y', mixedAudioPath
