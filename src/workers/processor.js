@@ -582,23 +582,7 @@ export const processRecapPipeline = async (jobId) => {
                 }
             }
             
-            if (mergedIntervals.length > 0) {
-                let batch = [];
-                for (let i = 0; i < mergedIntervals.length; i++) {
-                    const { A, B } = mergedIntervals[i];
-                    batch.push(`clip((t-${A.toFixed(3)})/0.3,0,1)*clip((${B.toFixed(3)}-t)/0.3,0,1)`);
-                    
-                    if (batch.length >= 20 || i === mergedIntervals.length - 1) {
-                        const sumTrapezoids = batch.join('+');
-                        duckingFilters.push(`volume='1.0-0.85*clip(${sumTrapezoids},0,1)':eval=frame`);
-                        batch = [];
-                    }
-                }
-            } else {
-                duckingFilters.push(`volume=1.0`);
-            }
-            
-            let duckingFilterChain = duckingFilters.join(',');
+            // ducking filters are now applied per-segment
 
             console.log(`[AUDIO-MIX-DIAGNOSTIC]`);
             console.log(`total_narration_active: ${totalNarrationActive.toFixed(3)}s`);
@@ -618,6 +602,11 @@ export const processRecapPipeline = async (jobId) => {
             
             if (hasOrigAudio && !fs.existsSync(bgAudioPath)) {
                 console.log(`[AUDIO-MIX] Extracting original audio timeline in parallel...`);
+                let currentGlobalTime = 0;
+                for (let i = 0; i < state.timeline.length; i++) {
+                    state.timeline[i].global_start = currentGlobalTime;
+                    currentGlobalTime += state.timeline[i].target_dur;
+                }
                 const limit = 5;
                 for (let i = 0; i < state.timeline.length; i += limit) {
                     const batch = state.timeline.slice(i, i + limit);
@@ -698,7 +687,7 @@ export const processRecapPipeline = async (jobId) => {
                 const mixArgs = [
                     '-i', bgAudioPath,
                     '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                    '-filter_complex', `[0:a]${duckingFilterChain}[bg];[bg][1:a]amix=inputs=2:duration=longest[aout]`,
+                    '-filter_complex', `[0:a][1:a]amix=inputs=2:duration=longest[aout]`,
                     '-map', '[aout]',
                     '-acodec', 'pcm_s16le', '-f', 'wav',
                     '-y', mixedAudioPath
@@ -817,7 +806,6 @@ export const processRecapPipeline = async (jobId) => {
                 } catch(e) {}
             }
             
-            if (job && job.videoPath) filesToRemove.push(job.videoPath);
             if (job && job.audioPath) filesToRemove.push(job.audioPath);
 
             for (const f of filesToRemove) {
