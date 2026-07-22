@@ -7,7 +7,7 @@ import db from './src/services/db.js';
 
 const id = uuidv4();
 const videoPath = path.resolve('data/test_10s.mp4');
-setJobKeys(id, { geminiApiKey: "bypass" });
+setJobKeys(id, { geminiApiKey: process.env.GEMINI_API_KEY });
 createJob(id, { videoPath });
 addJobToQueue(id);
 console.log('Started job:', id);

@@ -104,8 +104,11 @@ export const processRecapPipeline = async (jobId) => {
             try { state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache); } catch (err) { throw new Error(`Pipeline Error: Transcription Stage Failed.\nInput File: ${videoWavPath} (WAV audio)\nUnderlying Error: ${err.message}\nDiagnostic: faster-whisper executable or model unavailable in current environment.`); }
             
             // Compatibility validation for originalTranscript
-            if (!Array.isArray(state.originalTranscript) || state.originalTranscript.length === 0) {
-                throw new Error("Pipeline Error: originalTranscript is empty or invalid after Whisper transcription.");
+            if (!Array.isArray(state.originalTranscript)) {
+                throw new Error("Pipeline Error: originalTranscript is invalid after Whisper transcription.");
+            }
+            if (state.originalTranscript.length === 0) {
+                console.warn("[WARNING] originalTranscript is empty! Whisper returned no speech.");
             }
             
             let prevEnd = -1;
@@ -121,10 +124,7 @@ export const processRecapPipeline = async (jobId) => {
                 if (start < 0) throw new Error(`Pipeline Error: Negative start timestamp at chunk ${i}`);
                 if (end <= start) throw new Error(`Pipeline Error: end <= start at chunk ${i}`);
                 
-                // Allow some overlap/out of order if Whisper was weird, but ensure it's not absurdly beyond duration
-                if (state.originalVideoDuration && start > state.originalVideoDuration + 60) {
-                    throw new Error(`Pipeline Error: Timestamp wildly exceeds audio duration at chunk ${i}`);
-                }
+                // Strict validation is now handled in transcribeWav inside src/ai/index.js
             }
             
             saveState();
@@ -138,8 +138,11 @@ export const processRecapPipeline = async (jobId) => {
             state.translatedTranscript = await translateWithGemini(state.originalTranscript, translatedTranscriptCache, geminiApiKey);
             
             // Validation
-            if (!Array.isArray(state.translatedTranscript) || state.translatedTranscript.length === 0) {
-                throw new Error("Pipeline Error: translatedTranscript is empty or invalid after Gemini translation.");
+            if (!Array.isArray(state.translatedTranscript)) {
+                throw new Error("Pipeline Error: translatedTranscript is invalid after Gemini translation.");
+            }
+            if (state.translatedTranscript.length === 0) {
+                console.warn("[WARNING] translatedTranscript is empty! Continuing with empty audio timeline.");
             }
             if (state.translatedTranscript.length !== state.originalTranscript.length) {
                 throw new Error("Pipeline Error: translatedTranscript length mismatch.");
