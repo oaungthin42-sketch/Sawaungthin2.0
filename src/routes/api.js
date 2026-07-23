@@ -154,12 +154,10 @@ router.post('/process-recap', upload.single('video'), (req, res) => {
     }
 
     const geminiApiKey = req.body.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY;
-    const assemblyApiKey = req.body.assemblyApiKey || req.headers['x-assemblyai-api-key'] || process.env.ASSEMBLYAI_API_KEY;
-
-    if (!geminiApiKey || !assemblyApiKey) {
+    
+    if (!geminiApiKey) {
         const missing = [];
-        if (!assemblyApiKey) missing.push('ASSEMBLYAI_API_KEY');
-        if (!geminiApiKey) missing.push('GEMINI_API_KEY');
+                if (!geminiApiKey) missing.push('GEMINI_API_KEY');
         return res.status(400).json({ error: 'Please configure your API Keys before starting processing. Missing: ' + missing.join(', ') });
     }
 
@@ -168,7 +166,7 @@ router.post('/process-recap', upload.single('video'), (req, res) => {
         videoPath: videoFile.path,
         audioPath: null,
     });
-    setJobKeys(jobId, { geminiApiKey, assemblyApiKey });
+    setJobKeys(jobId, { geminiApiKey });
     
     res.json({ jobId });
 
@@ -199,18 +197,16 @@ router.post('/process', upload.single('video'), (req, res) => {
      if (!videoFile) return res.status(400).json({ error: 'Video file required' });
      
      const geminiApiKey = req.body.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY;
-     const assemblyApiKey = req.body.assemblyApiKey || req.headers['x-assemblyai-api-key'] || process.env.ASSEMBLYAI_API_KEY;
-
-     if (!geminiApiKey || !assemblyApiKey) {
+     
+     if (!geminiApiKey) {
          const missing = [];
-         if (!assemblyApiKey) missing.push('ASSEMBLYAI_API_KEY');
-         if (!geminiApiKey) missing.push('GEMINI_API_KEY');
+                  if (!geminiApiKey) missing.push('GEMINI_API_KEY');
          return res.status(400).json({ error: 'Please configure your API Keys before starting processing. Missing: ' + missing.join(', ') });
      }
      
      const jobId = uuidv4();
      createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null });
-     setJobKeys(jobId, { geminiApiKey, assemblyApiKey });
+     setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      
      addJobToQueue(jobId);

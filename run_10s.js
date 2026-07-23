@@ -6,10 +6,14 @@ import { addJobToQueue } from './src/services/queue.js';
 import db from './src/services/db.js';
 
 const id = uuidv4();
-const videoPath = path.resolve('data/test_10s.mp4');
+const originalVideo = path.resolve('data/test_30s.mp4');
+const videoPath = path.resolve('data/cache/test_10s_' + id + '.mp4');
+fs.copyFileSync(originalVideo, videoPath);
+
 setJobKeys(id, { geminiApiKey: process.env.GEMINI_API_KEY });
 createJob(id, { videoPath });
 addJobToQueue(id);
+
 console.log('Started job:', id);
 
 let lastProgress = 0;
@@ -29,6 +33,7 @@ const interval = setInterval(() => {
         clearInterval(interval);
         process.exit(1);
     }
+
     if (row.status === 'complete') {
         console.log(`SUCCESS in ${((Date.now() - startMs) / 1000).toFixed(2)}s`);
         clearInterval(interval);

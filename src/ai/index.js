@@ -1,3 +1,4 @@
+import axios from 'axios';
 
 import fs from 'fs';
 import path from 'path';
@@ -14,13 +15,46 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const computeSimilarity = async (text1, text2) => {
-    return 1.0;
+    return null;
 };
 
 export const initModels = async () => {};
 
-export const transcribeOriginalVideoWithAssemblyAI = async (audioPath, cachePath, apiKey = null) => {
-    throw new Error("AssemblyAI transcription is disabled. Use local whisper.");
+export const validateTimestamps = (transcript, audioDuration, tolerance = 0.05, allowClamp = 1.5) => {
+    if (!Array.isArray(transcript)) throw new Error("Transcript is not an array");
+    let prevEnd = -1;
+    for (let i = 0; i < transcript.length; i++) {
+        const chunk = transcript[i];
+        if (!Array.isArray(chunk.timestamp) || chunk.timestamp.length !== 2) {
+            throw new Error(`Invalid timestamp structure at chunk ${i}`);
+        }
+        let [start, end] = chunk.timestamp;
+        if (!Number.isFinite(start) || !Number.isFinite(end)) {
+            throw new Error(`Non-finite timestamp at chunk ${i}`);
+        }
+        if (start < 0) {
+            throw new Error(`Negative start timestamp at chunk ${i}`);
+        }
+        if (end <= start) {
+            throw new Error(`end <= start at chunk ${i}`);
+        }
+        if (start > audioDuration) {
+            throw new Error(`start timestamp (${start}) exceeds WAV duration (${audioDuration}) at chunk ${i} (overshoot: ${start - audioDuration})`);
+        }
+        if (i > 0 && start < prevEnd - tolerance) {
+            throw new Error(`Overlapping transcript timestamps at chunk ${i}: start ${start} < prevEnd ${prevEnd} - ${tolerance}`);
+        }
+        if (end > audioDuration) {
+            if (end - audioDuration <= allowClamp) {
+                end = audioDuration;
+                chunk.timestamp[1] = end;
+            } else {
+                throw new Error(`end timestamp (${end}) exceeds WAV duration (${audioDuration}) at chunk ${i} by more than allowClamp (${allowClamp})`);
+            }
+        }
+        prevEnd = end;
+    }
+    return transcript;
 };
 
 export const transcribeWav = async (wavPath, cachePath) => {
@@ -28,29 +62,11 @@ export const transcribeWav = async (wavPath, cachePath) => {
         try {
             const cachedData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
             const duration = await getDuration(wavPath);
-            let isValid = true;
-            for (let i = 0; i < cachedData.length; i++) {
-                const chunk = cachedData[i];
-                if (!Array.isArray(chunk.timestamp) || chunk.timestamp.length !== 2) { isValid = false; break; }
-                let [start, end] = chunk.timestamp;
-                if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) { isValid = false; break; }
-                if (start > duration) { isValid = false; break; }
-                if (end > duration) {
-                    if (end - duration < 0.5) {
-                        cachedData[i].timestamp[1] = duration; // clamp
-                    } else {
-                        isValid = false; break;
-                    }
-                }
-            }
-            if (isValid) {
-                return cachedData;
-            } else {
-                console.warn(`[Transcription] Cache rejected because timestamps exceed audio duration or are invalid (duration: ${duration})`);
-                try { fs.unlinkSync(cachePath); } catch (e) {}
-            }
+            const validated = validateTimestamps(cachedData, duration);
+            return validated;
         } catch(e) {
-            console.error("Failed to parse or validate transcription cache:", e);
+            console.warn(`[Transcription] Cache rejected because timestamps exceed audio duration or are invalid: ${e.message}`);
+            try { fs.unlinkSync(cachePath); } catch (err) {}
         }
     }
     const pyPath = path.join(__dirname, 'transcribe.py');
@@ -66,45 +82,12 @@ export const transcribeWav = async (wavPath, cachePath) => {
             try {
                 const res = JSON.parse(out);
                 const duration = await getDuration(wavPath);
-                
-                let prevEnd = -1;
-                for (let i = 0; i < res.length; i++) {
-                    const chunk = res[i];
-                    if (!Array.isArray(chunk.timestamp) || chunk.timestamp.length !== 2) {
-                        if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
-                        return reject(new Error(`Pipeline Error: Invalid timestamp structure at chunk ${i}`));
-                    }
-                    let [start, end] = chunk.timestamp;
-                    if (!Number.isFinite(start) || !Number.isFinite(end)) {
-                        if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
-                        return reject(new Error(`Pipeline Error: Non-finite timestamp at chunk ${i}`));
-                    }
-                    if (start < 0) {
-                        if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
-                        return reject(new Error(`Pipeline Error: Negative start timestamp at chunk ${i}`));
-                    }
-                    if (end <= start) {
-                        if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
-                        return reject(new Error(`Pipeline Error: end <= start at chunk ${i}`));
-                    }
-                    
-                    if (start > duration) {
-                        if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
-                        return reject(new Error(`Pipeline Error: start timestamp (${start}) exceeds WAV duration (${duration}) at chunk ${i} (overshoot: ${start - duration})`));
-                    }
-                    
-                    if (end > duration) {
-                        if (end - duration < 1.5) { // tiny overshoot, clamp it
-                            end = duration;
-                            chunk.timestamp[1] = end;
-                            res[i].timestamp[1] = end;
-                        } else {
-                            if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
-                            return reject(new Error(`Pipeline Error: end timestamp (${end}) wildly exceeds WAV duration (${duration}) at chunk ${i} (overshoot: ${end - duration})`));
-                        }
-                    }
+                try {
+                    validateTimestamps(res, duration);
+                } catch(e) {
+                    if (cachePath && fs.existsSync(cachePath)) { fs.unlinkSync(cachePath); }
+                    return reject(new Error(`Pipeline Error: Transcription Stage Failed.\nInput File: ${wavPath} (WAV audio)\nUnderlying Error: ${e.message}`));
                 }
-
                 if (cachePath) fs.writeFileSync(cachePath, JSON.stringify(res));
                 resolve(res);
             } catch(e) {
@@ -116,10 +99,99 @@ export const transcribeWav = async (wavPath, cachePath) => {
 };
 
 export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
-    // For test bypass
-    const res = originalTranscript.map(t => ({ timestamp: t.timestamp, text: t.text }));
-    if (cachePath) fs.writeFileSync(cachePath, JSON.stringify(res));
-    return res;
+    if (!originalTranscript || originalTranscript.length === 0) return [];
+    
+    if (cachePath && fs.existsSync(cachePath)) {
+        try {
+            const cachedData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+            if (cachedData.length === originalTranscript.length) {
+                return cachedData;
+            }
+        } catch(e) {}
+    }
+
+    if (!apiKey) {
+        throw new Error("Gemini API key is required for translation.");
+    }
+
+    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+    const style = getSetting('TRANSLATION_STYLE') || 'balanced';
+    const naturalness = getSetting('BURMESE_NATURALNESS') || 'balanced';
+    const systemInstructionText = getTranslationSystemInstruction(style, naturalness);
+
+    const inputPayload = originalTranscript.map((t, i) => ({
+        index: i,
+        text: t.text
+    }));
+
+    const maxRetries = 3;
+    let attempt = 0;
+    let delay = 1000;
+    
+    while (attempt < maxRetries) {
+        attempt++;
+        try {
+            const response = await axios.post(url, {
+                system_instruction: {
+                    parts: [{ text: systemInstructionText }]
+                },
+                contents: [{
+                    role: "user",
+                    parts: [{ text: JSON.stringify(inputPayload) }]
+                }],
+                generationConfig: {
+                    response_mime_type: "application/json",
+                    temperature: 0.2
+                }
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 60000
+            });
+
+            const textResponse = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!textResponse) throw new Error("Empty response from Gemini.");
+
+            let parsed;
+            try {
+                parsed = JSON.parse(textResponse);
+            } catch (e) {
+                throw new Error("Invalid JSON response from Gemini.");
+            }
+
+            if (!Array.isArray(parsed)) throw new Error("Gemini response is not an array.");
+            if (parsed.length !== originalTranscript.length) {
+                throw new Error(`Gemini response length (${parsed.length}) does not match input length (${originalTranscript.length}).`);
+            }
+
+            const result = [];
+            for (let i = 0; i < originalTranscript.length; i++) {
+                const item = parsed.find(p => p.index === i);
+                if (!item || typeof item.text !== 'string') {
+                    throw new Error(`Missing or invalid translation for chunk ${i}.`);
+                }
+                result.push({
+                    timestamp: originalTranscript[i].timestamp,
+                    text: item.text
+                });
+            }
+
+            if (cachePath) {
+                fs.writeFileSync(cachePath, JSON.stringify(result, null, 2));
+            }
+            return result;
+
+        } catch (err) {
+            console.error(`[AI] Gemini translation attempt ${attempt} failed: ${err.message}`);
+            const isTransient = !err.response || err.response.status >= 500 || err.response.status === 429 || err.code === 'ECONNABORTED';
+            if (attempt === maxRetries || !isTransient) {
+                throw new Error(`Gemini translation failed after ${attempt} attempts. Last error: ${err.message}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2;
+        }
+    }
 };
 
 export const generateNarrationTTS = async (translatedTranscript, cachePath, voiceId = 'male-young-adult', originalTranscript = null) => {
@@ -149,7 +221,7 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
         const chunks = [];
         const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
         
-        const concurrencyLimit = 3;
+        const concurrencyLimit = process.env.TTS_CONCURRENCY ? parseInt(process.env.TTS_CONCURRENCY, 10) : 3;
         for (let i = 0; i < translatedTranscript.length; i++) {
             const chunkFileName = `chunk_${String(i).padStart(4, '0')}.wav`;
             chunks.push(path.join(ttsDir, chunkFileName));

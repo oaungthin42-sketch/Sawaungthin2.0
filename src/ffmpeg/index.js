@@ -52,30 +52,45 @@ export const getStreamsDuration = (file) => new Promise((resolve, reject) => {
         let vDur = 0;
         let aDur = 0;
         let formatDur = 0;
-        
+        let hasVideo = false;
+        let hasAudio = false;
+            
         if (meta.format && meta.format.duration !== undefined && meta.format.duration !== 'N/A') {
             const parsedFormatDur = parseFloat(meta.format.duration);
             if (Number.isFinite(parsedFormatDur)) {
                 formatDur = parsedFormatDur;
             }
         }
-        
+            
         if (meta.streams) {
             meta.streams.forEach(s => {
-                if (s.codec_type === 'video' && s.duration && s.duration !== 'N/A') {
-                    const parsed = parseFloat(s.duration);
-                    if (Number.isFinite(parsed)) vDur = parsed;
+                if (s.codec_type === 'video') {
+                    hasVideo = true;
+                    if (s.duration && s.duration !== 'N/A') {
+                        const parsed = parseFloat(s.duration);
+                        if (Number.isFinite(parsed)) vDur = parsed;
+                    }
                 }
-                if (s.codec_type === 'audio' && s.duration && s.duration !== 'N/A') {
-                    const parsed = parseFloat(s.duration);
-                    if (Number.isFinite(parsed)) aDur = parsed;
+                if (s.codec_type === 'audio') {
+                    hasAudio = true;
+                    if (s.duration && s.duration !== 'N/A') {
+                        const parsed = parseFloat(s.duration);
+                        if (Number.isFinite(parsed)) aDur = parsed;
+                    }
                 }
             });
         }
-        
+            
         resolve({
-            videoDuration: vDur > 0 ? vDur : formatDur,
-            audioDuration: aDur > 0 ? aDur : formatDur
+            hasVideo,
+            hasAudio,
+            videoDuration: vDur,
+            audioDuration: aDur,
+            formatDuration: formatDur,
+            videoSource: vDur > 0 ? 'stream' : (formatDur > 0 ? 'format' : 'unknown'),
+            audioSource: aDur > 0 ? 'stream' : (formatDur > 0 ? 'format' : 'unknown'),
+            effectiveVideoDuration: vDur > 0 ? vDur : formatDur,
+            effectiveAudioDuration: aDur > 0 ? aDur : formatDur
         });
     });
 });

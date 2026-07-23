@@ -37,7 +37,10 @@ export const processRecapPipeline = async (jobId) => {
     let job = getJob(jobId);
     if (!job || !job.videoPath) throw new Error("Invalid job data: missing videoPath");
 
-    const { geminiApiKey, assemblyApiKey } = getJobKeys(jobId);
+    const { geminiApiKey } = getJobKeys(jobId);
+    if (!geminiApiKey) {
+        throw new Error("Job interrupted due to server restart. Credentials lost. Please resubmit the job with your API keys.");
+    }
 
     const tmpDir = path.join(process.cwd(), 'src', 'tmp');
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
@@ -211,6 +214,9 @@ export const processRecapPipeline = async (jobId) => {
             let current_time = 0;
             
             const createTimelineSegment = (start, end, scene_start, scene_end, text) => {
+                if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(scene_start) || !Number.isFinite(scene_end)) {
+                    throw new Error(`Pipeline Error: Non-finite timestamps passed to createTimelineSegment. start=${start}, end=${end}, scene_start=${scene_start}, scene_end=${scene_end}`);
+                }
                 let target_dur = end - start;
                 if (target_dur <= 0.001) return;
                 
@@ -231,6 +237,8 @@ export const processRecapPipeline = async (jobId) => {
                 let speed = 1.0;
                 if (desired_orig_dur > 0.1 && target_dur > 0.1) {
                     speed = desired_orig_dur / target_dur;
+                    if (speed < 0.5) speed = 0.5;
+                    if (speed > 100.0) speed = 100.0;
                 }
                 
                 let sIdx = 0;
@@ -397,84 +405,85 @@ export const processRecapPipeline = async (jobId) => {
         // 9. SEGMENT BUILDER
         if (!hasCompletedStep(job.currentStep, STEPS.SEGMENT_BUILDER)) {
             advanceStep(STEPS.SEGMENT_BUILDER, 80, 'Building Video Segments');
-            for (let i = 0; i < state.timeline.length; i++) {
-                updateJob(jobId, { progress: 80 + (10 * (i / state.timeline.length)) });
-                const t = state.timeline[i];
-                
-                if (!Number.isFinite(t.scene_start) || !Number.isFinite(t.scene_end)) {
-                    throw new Error(`Pipeline Error: Segment ${i} has non-finite scene bounds (${t.scene_start} - ${t.scene_end})`);
-                }
-                if (t.scene_start < 0) {
-                    throw new Error(`Pipeline Error: Segment ${i} has negative scene_start (${t.scene_start})`);
-                }
-                if (t.scene_end <= t.scene_start) {
-                    throw new Error(`Pipeline Error: Segment ${i} has scene_end (${t.scene_end}) <= scene_start (${t.scene_start})`);
-                }
-                
-                let sEnd = t.scene_end;
-                if (state.originalVideoDuration) {
-                    if (sEnd > state.originalVideoDuration) {
-                        const diff = sEnd - state.originalVideoDuration;
-                        if (diff > 0.5) {
-                            throw new Error(`Pipeline Error: Segment ${i} scene_end (${sEnd}) severely exceeds original video duration (${state.originalVideoDuration})`);
-                        }
-                        sEnd = state.originalVideoDuration;
-                        t.scene_end = sEnd;
+            const limit = process.env.SEGMENT_CONCURRENCY ? parseInt(process.env.SEGMENT_CONCURRENCY, 10) : 3;
+            for (let i = 0; i < state.timeline.length; i += limit) {
+                const batch = state.timeline.slice(i, i + limit);
+                await Promise.all(batch.map(async (t, batchIdx) => {
+                    const globalIdx = i + batchIdx;
+                    updateJob(jobId, { progress: 80 + (10 * (globalIdx / state.timeline.length)) });
+                    
+                    if (!Number.isFinite(t.scene_start) || !Number.isFinite(t.scene_end)) {
+                        throw new Error(`Pipeline Error: Segment ${globalIdx} has non-finite scene bounds (${t.scene_start} - ${t.scene_end})`);
                     }
-                    if (sEnd <= t.scene_start) {
-                        throw new Error(`Pipeline Error: Segment ${i} has scene_end (${sEnd}) <= scene_start (${t.scene_start}) after clamping`);
+                    if (t.scene_start < 0) {
+                        throw new Error(`Pipeline Error: Segment ${globalIdx} has negative scene_start (${t.scene_start})`);
                     }
-                }
-                
-                const s_start = t.scene_start.toFixed(3);
-                const source_dur = (t.scene_end - t.scene_start).toFixed(3);
-                const s_end = t.scene_end.toFixed(3);
-                const speed = t.speed || 1.0;
-                const target_dur = t.target_dur.toFixed(3);
-                
-                // We use input seeking: -ss s_start -t source_dur -i video
-                // This means the input stream starts at PTS 0 for the extracted segment.
-                // We just need to adjust speed and pad to target_dur.
-                const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
-                
-                const segFile = path.join(cacheDir, `seg_${i}.ts`);
-                const segFileTmp = path.join(cacheDir, `seg_${i}.ts.tmp`);
-                
-                if (!fs.existsSync(segFile)) {
-                    const args = [
-                        '-ss', s_start,
-                        '-t', source_dur,
-                        '-i', path.resolve(job.videoPath),
-                        '-filter_complex', filter,
-                        '-map', '[v]',
-                        '-t', target_dur,
-                        '-c:v', 'libx264',
-                        '-preset', 'ultrafast',
-                        '-threads', '2',
-                        '-crf', '28',
-                        '-f', 'mpegts',
-                        '-y', segFileTmp
-                    ];
-                    try {
-                        await runFFmpeg(args, tmpDir);
-                    } catch (err) {
-                        if (fs.existsSync(segFileTmp)) fs.unlinkSync(segFileTmp);
-                        throw err;
+                    if (t.scene_end <= t.scene_start) {
+                        throw new Error(`Pipeline Error: Segment ${globalIdx} has scene_end (${t.scene_end}) <= scene_start (${t.scene_start})`);
                     }
                     
-                    if (fs.existsSync(segFileTmp) && fs.statSync(segFileTmp).size > 0) {
-                        fs.renameSync(segFileTmp, segFile);
-                    } else {
-                        if (fs.existsSync(segFileTmp)) fs.unlinkSync(segFileTmp);
-                        throw new Error(`Pipeline Error: Segment ${i} generation failed or produced 0 bytes.`);
+                    let sEnd = t.scene_end;
+                    if (state.originalVideoDuration) {
+                        if (sEnd > state.originalVideoDuration) {
+                            const diff = sEnd - state.originalVideoDuration;
+                            if (diff > 0.5) {
+                                throw new Error(`Pipeline Error: Segment ${globalIdx} scene_end (${sEnd}) severely exceeds original video duration (${state.originalVideoDuration})`);
+                            }
+                            sEnd = state.originalVideoDuration;
+                            t.scene_end = sEnd;
+                        }
+                        if (sEnd <= t.scene_start) {
+                            throw new Error(`Pipeline Error: Segment ${globalIdx} has scene_end (${sEnd}) <= scene_start (${t.scene_start}) after clamping`);
+                        }
                     }
-                }
-                
-                try {
-                    const actualDur = await getDuration(segFile);
-                    const fileSize = fs.statSync(segFile).size;
-                    console.log(`[SEGMENT-DIAGNOSTIC] index: ${i} | scene: ${s_start}->${s_end} | source_dur: ${source_dur} | speed: ${speed.toFixed(4)} | target_dur: ${target_dur} | actual_file_dur: ${actualDur} | file_size: ${fileSize}`);
-                } catch(e) {}
+                    
+                    const s_start = t.scene_start.toFixed(3);
+                    const source_dur = (t.scene_end - t.scene_start).toFixed(3);
+                    const s_end = t.scene_end.toFixed(3);
+                    const speed = t.speed || 1.0;
+                    const target_dur = t.target_dur.toFixed(3);
+                    
+                    const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
+                    
+                    const segFile = path.join(cacheDir, `seg_${globalIdx}.ts`);
+                    const segFileTmp = path.join(cacheDir, `seg_${globalIdx}.ts.tmp`);
+                    
+                    if (!fs.existsSync(segFile)) {
+                        const args = [
+                            '-ss', s_start,
+                            '-t', source_dur,
+                            '-i', path.resolve(job.videoPath),
+                            '-filter_complex', filter,
+                            '-map', '[v]',
+                            '-t', target_dur,
+                            '-c:v', 'libx264',
+                            '-preset', 'ultrafast',
+                            '-threads', '2',
+                            '-crf', '28',
+                            '-f', 'mpegts',
+                            '-y', segFileTmp
+                        ];
+                        try {
+                            await runFFmpeg(args, tmpDir);
+                        } catch (err) {
+                            if (fs.existsSync(segFileTmp)) fs.unlinkSync(segFileTmp);
+                            throw err;
+                        }
+                        
+                        if (fs.existsSync(segFileTmp) && fs.statSync(segFileTmp).size > 0) {
+                            fs.renameSync(segFileTmp, segFile);
+                        } else {
+                            if (fs.existsSync(segFileTmp)) fs.unlinkSync(segFileTmp);
+                            throw new Error(`Pipeline Error: Segment ${globalIdx} generation failed or produced 0 bytes.`);
+                        }
+                    }
+                    
+                    try {
+                        const actualDur = await getDuration(segFile);
+                        const fileSize = fs.statSync(segFile).size;
+                        console.log(`[SEGMENT-DIAGNOSTIC] index: ${globalIdx} | scene: ${s_start}->${s_end} | source_dur: ${source_dur} | speed: ${speed.toFixed(4)} | target_dur: ${target_dur} | actual_file_dur: ${actualDur} | file_size: ${fileSize}`);
+                    } catch(e) {}
+                }));
             }
             advanceStep(STEPS.SEGMENT_BUILDER, 90, 'Segments Built');
         }
@@ -610,7 +619,7 @@ export const processRecapPipeline = async (jobId) => {
                     state.timeline[i].global_start = currentGlobalTime;
                     currentGlobalTime += state.timeline[i].target_dur;
                 }
-                const limit = 5;
+                const limit = process.env.SEGMENT_CONCURRENCY ? parseInt(process.env.SEGMENT_CONCURRENCY, 10) : 5;
                 for (let i = 0; i < state.timeline.length; i += limit) {
                     const batch = state.timeline.slice(i, i + limit);
                     await Promise.all(batch.map(async (t, batchIdx) => {
@@ -764,11 +773,15 @@ export const processRecapPipeline = async (jobId) => {
             
             // Validate final output duration
             const finalDurs = await getStreamsDuration(finalOutPath);
-            const vDur = finalDurs.videoDuration;
-            const aDur = finalDurs.audioDuration;
+            const vDur = finalDurs.effectiveVideoDuration;
+            const aDur = finalDurs.effectiveAudioDuration;
             const diff = Math.abs(vDur - aDur);
             
             console.log(`[FINAL-SYNC-DIAGNOSTIC]`);
+            console.log(`has_video: ${finalDurs.hasVideo}`);
+            console.log(`has_audio: ${finalDurs.hasAudio}`);
+            console.log(`video_source: ${finalDurs.videoSource}`);
+            console.log(`audio_source: ${finalDurs.audioSource}`);
             console.log(`video_duration: ${vDur.toFixed(3)}`);
             console.log(`audio_duration: ${aDur.toFixed(3)}`);
             console.log(`difference: ${diff.toFixed(3)}`);
@@ -780,10 +793,19 @@ export const processRecapPipeline = async (jobId) => {
             }
             console.log(`expected_video_duration: ${expected_video_duration.toFixed(3)}`);
 
+            if (!finalDurs.hasVideo) {
+                throw new Error(`Pipeline Error: Final output is missing a video stream.`);
+            }
+            if (!finalDurs.hasAudio) {
+                throw new Error(`Pipeline Error: Final output is missing an audio stream.`);
+            }
+            if (finalDurs.videoSource === 'unknown' || finalDurs.audioSource === 'unknown') {
+                console.warn(`[FINAL-SYNC-DIAGNOSTIC] WARNING: Unknown stream duration sources. Sync drift check might be inaccurate.`);
+            }
+
             if (diff > 0.3) {
                 console.error(`[FINAL-SYNC-DIAGNOSTIC] ERROR: Final audio/video sync difference (${diff.toFixed(3)}s) exceeds 0.3s tolerance!`);
-                // fail safely with a clear diagnostic error if necessary
-                throw new Error(`Pipeline Error: Final A/V sync drift exceeded 0.3s (Video: ${vDur.toFixed(3)}s, Audio: ${aDur.toFixed(3)}s)`);
+                throw new Error(`Pipeline Error: Final A/V sync drift exceeded 0.3s (Video: ${vDur.toFixed(3)}s [${finalDurs.videoSource}], Audio: ${aDur.toFixed(3)}s [${finalDurs.audioSource}])`);
             }
             
             advanceStep(STEPS.EXPORT, 99, 'Export Complete');
@@ -837,7 +859,8 @@ export const processRecapPipeline = async (jobId) => {
                 } catch(e) {}
             }
             
-            if (job && job.audioPath) filesToRemove.push(job.audioPath);
+            if (currentJob && currentJob.audioPath) filesToRemove.push(currentJob.audioPath);
+            if (currentJob && currentJob.videoPath) filesToRemove.push(currentJob.videoPath);
 
             for (const f of filesToRemove) {
                 if (fs.existsSync(f)) {
