@@ -13,7 +13,7 @@ db.exec(`
 
 // Clean up any leaked or pre-configured global keys from database
 try {
-    db.exec(`DELETE FROM settings WHERE key IN ('ASSEMBLYAI_API_KEY', 'GEMINI_API_KEY')`);
+    db.exec(`DELETE FROM settings WHERE key IN ('GEMINI_API_KEY')`);
 } catch (e) {
     console.error('Failed to clear database keys', e);
 }
@@ -64,7 +64,7 @@ export const getSetting = (key) => {
 };
 
 export const setSetting = (key, value) => {
-    if (key === 'GEMINI_API_KEY' || key === 'ASSEMBLYAI_API_KEY') {
+    if (key === 'GEMINI_API_KEY') {
         console.warn(`[Settings] Rejected persistent save of security key: ${key}`);
         return;
     }
@@ -85,7 +85,6 @@ export const deleteSetting = (key) => {
 export const getAllSettingsMasked = () => {
     const keys = ['EDGE_TTS_VOICE', 'TRANSLATION_STYLE', 'BURMESE_NATURALNESS', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE'];
     const result = {
-        ASSEMBLYAI_API_KEY: { configured: false },
         GEMINI_API_KEY: { configured: false }
     };
     for (const k of keys) {

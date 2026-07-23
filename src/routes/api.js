@@ -49,7 +49,7 @@ router.get('/health', (req, res) => res.json({ status: 'ok' }));
 router.get('/diagnostic', async (req, res) => {
     const key = (getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY) || '';
     const maskedKey = key.length > 8 ? `${key.substring(0, 4)}...${key.substring(key.length - 4)}` : (key ? 'too-short' : 'missing');
-    const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     
     const diagData = {
         model,

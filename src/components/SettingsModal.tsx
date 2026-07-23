@@ -55,7 +55,6 @@ export function SettingsModal({
                         {/* API Key Rows */}
                         <div className="space-y-4">
                             {[
-                                { id: 'ASSEMBLYAI_API_KEY', label: 'AssemblyAI API Key', placeholder: 'Enter AssemblyAI API Key...' },
                                 { id: 'GEMINI_API_KEY', label: 'Gemini API Key', placeholder: 'Enter Gemini API Key...' },
                             ].map(field => {
                                 const isConfigured = settings[field.id]?.configured;

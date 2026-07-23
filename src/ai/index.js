@@ -66,18 +66,22 @@ export const transcribeWav = async (wavPath, cachePath) => {
             return validated;
         } catch(e) {
             console.warn(`[Transcription] Cache rejected because timestamps exceed audio duration or are invalid: ${e.message}`);
+
             try { fs.unlinkSync(cachePath); } catch (err) {}
         }
     }
-    const pyPath = path.join(__dirname, 'transcribe.py');
+    
     return new Promise((resolve, reject) => {
-        const pyExec = fs.existsSync('/opt/venv/bin/python3') ? '/opt/venv/bin/python3' : 'python3';
-        const child = spawn(pyExec, [pyPath, wavPath, cachePath || '']);
+        const pyScript = path.join(__dirname, 'transcriber.py');
+        const pythonProcess = spawn('python3', [pyScript, wavPath]);
+
         let out = '';
         let errStr = '';
-        child.stdout.on('data', d => out += d);
-        child.stderr.on('data', d => errStr += d);
-        child.on('close', async (code) => {
+        
+        pythonProcess.stdout.on('data', (data) => out += data.toString());
+        pythonProcess.stderr.on('data', (data) => errStr += data.toString());
+        
+        pythonProcess.on('close', async (code) => {
             if (code !== 0) return reject(new Error(`Transcribe failed: ${errStr}`));
             try {
                 const res = JSON.parse(out);
@@ -98,6 +102,7 @@ export const transcribeWav = async (wavPath, cachePath) => {
     });
 };
 
+
 export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
     if (!originalTranscript || originalTranscript.length === 0) return [];
     
@@ -114,7 +119,7 @@ export const translateWithGemini = async (originalTranscript, cachePath, apiKey 
         throw new Error("Gemini API key is required for translation.");
     }
 
-    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const style = getSetting('TRANSLATION_STYLE') || 'balanced';
@@ -183,10 +188,15 @@ export const translateWithGemini = async (originalTranscript, cachePath, apiKey 
             return result;
 
         } catch (err) {
-            console.error(`[AI] Gemini translation attempt ${attempt} failed: ${err.message}`);
+            let errorMsg = err.message;
+            if (err.response && err.response.status === 404) {
+                errorMsg = `Model '${modelName}' not found or unsupported (HTTP 404). Please configure a valid GEMINI_MODEL.`;
+            }
+            console.error(`[AI] Gemini translation attempt ${attempt} failed: ${errorMsg}`);
+            
             const isTransient = !err.response || err.response.status >= 500 || err.response.status === 429 || err.code === 'ECONNABORTED';
-            if (attempt === maxRetries || !isTransient) {
-                throw new Error(`Gemini translation failed after ${attempt} attempts. Last error: ${err.message}`);
+            if (attempt === maxRetries || !isTransient || (err.response && err.response.status === 404)) {
+                throw new Error(`Gemini translation failed. ${errorMsg}`);
             }
             await new Promise(resolve => setTimeout(resolve, delay));
             delay *= 2;
