@@ -68,7 +68,6 @@ function App() {
       const backendSettings = { ...res.data };
       
       const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-      const assemblyKey = localStorage.getItem('ASSEMBLYAI_API_KEY') || '';
       
       if (geminiKey) {
         backendSettings['GEMINI_API_KEY'] = {
@@ -80,16 +79,6 @@ function App() {
         backendSettings['GEMINI_API_KEY'] = { configured: false };
       }
       
-      if (assemblyKey) {
-        backendSettings['ASSEMBLYAI_API_KEY'] = {
-          configured: true,
-          masked: '•'.repeat(16) + assemblyKey.slice(-4),
-          value: assemblyKey
-        };
-      } else {
-        backendSettings['ASSEMBLYAI_API_KEY'] = { configured: false };
-      }
-      
       setSettings(backendSettings);
     } catch (e) {
       console.error("Failed to load settings", e);
@@ -97,7 +86,7 @@ function App() {
   };
 
   const saveSetting = async (key: string, value: string) => {
-    if (key === 'GEMINI_API_KEY' || key === 'ASSEMBLYAI_API_KEY') {
+    if (key === 'GEMINI_API_KEY' ) {
       localStorage.setItem(key, value);
       setSettings((prev: any) => ({
         ...prev,
@@ -121,18 +110,11 @@ function App() {
       const backendSettings = { ...res.data };
       
       const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-      const assemblyKey = localStorage.getItem('ASSEMBLYAI_API_KEY') || '';
       
       backendSettings['GEMINI_API_KEY'] = geminiKey ? {
         configured: true,
         masked: '•'.repeat(16) + geminiKey.slice(-4),
         value: geminiKey
-      } : { configured: false };
-
-      backendSettings['ASSEMBLYAI_API_KEY'] = assemblyKey ? {
-        configured: true,
-        masked: '•'.repeat(16) + assemblyKey.slice(-4),
-        value: assemblyKey
       } : { configured: false };
 
       setSettings(backendSettings);
@@ -146,7 +128,7 @@ function App() {
   };
 
   const deleteSetting = async (key: string) => {
-    if (key === 'GEMINI_API_KEY' || key === 'ASSEMBLYAI_API_KEY') {
+    if (key === 'GEMINI_API_KEY' ) {
       localStorage.removeItem(key);
       setSettings((prev: any) => ({
         ...prev,
@@ -162,18 +144,11 @@ function App() {
       const backendSettings = { ...res.data };
       
       const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-      const assemblyKey = localStorage.getItem('ASSEMBLYAI_API_KEY') || '';
       
       backendSettings['GEMINI_API_KEY'] = geminiKey ? {
         configured: true,
         masked: '•'.repeat(16) + geminiKey.slice(-4),
         value: geminiKey
-      } : { configured: false };
-
-      backendSettings['ASSEMBLYAI_API_KEY'] = assemblyKey ? {
-        configured: true,
-        masked: '•'.repeat(16) + assemblyKey.slice(-4),
-        value: assemblyKey
       } : { configured: false };
 
       setSettings(backendSettings);
@@ -245,9 +220,7 @@ function App() {
     formData.append('video', videoFile);
 
     const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-    const assemblyKey = localStorage.getItem('ASSEMBLYAI_API_KEY') || '';
     formData.append('geminiApiKey', geminiKey);
-    formData.append('assemblyApiKey', assemblyKey);
 
     try {
       const response = await axios.post('/api/process-recap', formData, {
@@ -335,8 +308,7 @@ function App() {
 
   // Check if API keys are configured in local storage
   const hasGeminiKey = !!localStorage.getItem('GEMINI_API_KEY');
-  const hasAssemblyKey = !!localStorage.getItem('ASSEMBLYAI_API_KEY');
-  const isKeysConfigured = hasGeminiKey && hasAssemblyKey;
+  const isKeysConfigured = hasGeminiKey;
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-indigo-500/30 selection:text-white">
@@ -401,8 +373,8 @@ function App() {
                 <div className="flex gap-3">
                   <ShieldAlert className="w-5.5 h-5.5 text-amber-500 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold text-sm text-amber-200 block">စနစ်အသုံးပြုရန် API Keys များ ထည့်သွင်းပေးပါ</span>
-                    <span className="text-xs text-amber-400/80">ဗီဒီယို ပြန်ဆိုခြင်း စတင်ရန်အတွက် Gemini AI နှင့် AssemblyAI API key များ ထည့်သွင်းပေးရန် လိုအပ်ပါသည်။</span>
+                    <span className="font-bold text-sm text-amber-200 block">စနစ်အသုံးပြုရန် API Key ထည့်သွင်းပေးပါ</span>
+                    <span className="text-xs text-amber-400/80">ဗီဒီယို ပြန်ဆိုခြင်း စတင်ရန်အတွက် Gemini AI API key ထည့်သွင်းပေးရန် လိုအပ်ပါသည်။</span>
                   </div>
                 </div>
                 <button

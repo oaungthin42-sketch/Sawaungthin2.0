@@ -221,7 +221,13 @@ export const generateNarrationTTS = async (translatedTranscript, cachePath, voic
         const chunks = [];
         const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
         
-        const concurrencyLimit = process.env.TTS_CONCURRENCY ? parseInt(process.env.TTS_CONCURRENCY, 10) : 3;
+        let concurrencyLimit = 3;
+        if (process.env.TTS_CONCURRENCY) {
+            const parsed = parseInt(process.env.TTS_CONCURRENCY, 10);
+            if (Number.isFinite(parsed) && parsed >= 1) {
+                concurrencyLimit = Math.min(parsed, 20);
+            }
+        }
         for (let i = 0; i < translatedTranscript.length; i++) {
             const chunkFileName = `chunk_${String(i).padStart(4, '0')}.wav`;
             chunks.push(path.join(ttsDir, chunkFileName));

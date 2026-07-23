@@ -405,7 +405,13 @@ export const processRecapPipeline = async (jobId) => {
         // 9. SEGMENT BUILDER
         if (!hasCompletedStep(job.currentStep, STEPS.SEGMENT_BUILDER)) {
             advanceStep(STEPS.SEGMENT_BUILDER, 80, 'Building Video Segments');
-            const limit = process.env.SEGMENT_CONCURRENCY ? parseInt(process.env.SEGMENT_CONCURRENCY, 10) : 3;
+            let limit = 3;
+            if (process.env.SEGMENT_CONCURRENCY) {
+                const parsed = parseInt(process.env.SEGMENT_CONCURRENCY, 10);
+                if (Number.isFinite(parsed) && parsed >= 1) {
+                    limit = Math.min(parsed, 20);
+                }
+            }
             for (let i = 0; i < state.timeline.length; i += limit) {
                 const batch = state.timeline.slice(i, i + limit);
                 await Promise.all(batch.map(async (t, batchIdx) => {
@@ -612,6 +618,9 @@ export const processRecapPipeline = async (jobId) => {
                 hasOrigAudio = origDetails.channels > 0;
             } catch(e) {}
             
+            let audioExtractionFailures = 0;
+            const failedAudioSegments = [];
+            
             if (hasOrigAudio && !fs.existsSync(bgAudioPath)) {
                 console.log(`[AUDIO-MIX] Extracting original audio timeline in parallel...`);
                 let currentGlobalTime = 0;
@@ -619,7 +628,13 @@ export const processRecapPipeline = async (jobId) => {
                     state.timeline[i].global_start = currentGlobalTime;
                     currentGlobalTime += state.timeline[i].target_dur;
                 }
-                const limit = process.env.SEGMENT_CONCURRENCY ? parseInt(process.env.SEGMENT_CONCURRENCY, 10) : 5;
+                let limit = 5;
+                if (process.env.SEGMENT_CONCURRENCY) {
+                    const parsed = parseInt(process.env.SEGMENT_CONCURRENCY, 10);
+                    if (Number.isFinite(parsed) && parsed >= 1) {
+                        limit = Math.min(parsed, 20);
+                    }
+                }
                 for (let i = 0; i < state.timeline.length; i += limit) {
                     const batch = state.timeline.slice(i, i + limit);
                     await Promise.all(batch.map(async (t, batchIdx) => {
@@ -684,7 +699,9 @@ export const processRecapPipeline = async (jobId) => {
                                     throw new Error("0 bytes");
                                 }
                             } catch (err) {
-                                console.warn(`[AUDIO-MIX] Failed to extract audio for segment ${globalIdx}, substituting silence...`);
+                                audioExtractionFailures++;
+                                failedAudioSegments.push(globalIdx);
+                                console.warn(`[AUDIO-MIX] Failed to extract audio for segment ${globalIdx}, substituting silence... Error: ${err.message}`);
                                 if (fs.existsSync(aSegFileTmp)) fs.unlinkSync(aSegFileTmp);
                                 const silArgs = [
                                     '-f', 'lavfi',
@@ -700,6 +717,14 @@ export const processRecapPipeline = async (jobId) => {
                     }));
                 }
                 
+                if (audioExtractionFailures > 0) {
+                    console.log(`[AUDIO-MIX] DIAGNOSTIC: Used fallback silence for ${audioExtractionFailures} segments: ${failedAudioSegments.join(', ')}`);
+                    const threshold = Math.max(3, state.timeline.length * 0.2); // fail if 20% or 3+ segments fail
+                    if (audioExtractionFailures >= threshold) {
+                        throw new Error(`Pipeline Error: Excessive audio extraction failures. ${audioExtractionFailures} of ${state.timeline.length} background segments failed to process.`);
+                    }
+                }
+
                 let aValidSegments = [];
                 for (let i = 0; i < state.timeline.length; i++) {
                     const aSegFile = path.join(cacheDir, `aseg_${i}.wav`);
@@ -844,7 +869,9 @@ export const processRecapPipeline = async (jobId) => {
                 path.join(cacheDir, 'audio.wav'),
                 path.join(cacheDir, 'concat.txt'),
                 path.join(cacheDir, 'aconcat.txt'),
-                path.join(cacheDir, 'bg_audio.wav')
+                path.join(cacheDir, 'bg_audio.wav'),
+                path.join(cacheDir, 'mixed_audio.wav'),
+                path.join(cacheDir, 'final_tmp.mp4')
             ];
             
             if (fs.existsSync(cacheDir)) {

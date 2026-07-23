@@ -15,7 +15,34 @@ const router = express.Router();
 const tmpDir = path.join(process.cwd(), 'src', 'tmp');
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-const upload = multer({ dest: tmpDir });
+let maxUploadSize = 500 * 1024 * 1024; // 500 MB default
+if (process.env.MAX_UPLOAD_SIZE_MB) {
+    const parsed = parseInt(process.env.MAX_UPLOAD_SIZE_MB, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+        maxUploadSize = parsed * 1024 * 1024;
+    }
+}
+const upload = multer({ 
+    dest: tmpDir,
+    limits: { fileSize: maxUploadSize }
+});
+
+const handleUpload = (req, res, next) => {
+    upload.single('video')(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                if (req.file && fs.existsSync(req.file.path)) {
+                    fs.unlinkSync(req.file.path);
+                }
+                return res.status(413).json({ error: `File too large. Maximum allowed size is ${maxUploadSize / (1024 * 1024)} MB.` });
+            }
+            return res.status(400).json({ error: err.message });
+        } else if (err) {
+            return res.status(500).json({ error: "Upload failed." });
+        }
+        next();
+    });
+};
 
 router.get('/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -146,7 +173,7 @@ router.post('/settings', (req, res) => {
 });
 
 
-router.post('/process-recap', upload.single('video'), (req, res) => {
+router.post('/process-recap', handleUpload, (req, res) => {
     const videoFile = req.file;
 
     if (!videoFile) {
@@ -190,7 +217,7 @@ router.get('/status/:jobId', (req, res) => {
 });
 
 // Adding compatibility routes based on instructions
-router.post('/process', upload.single('video'), (req, res) => {
+router.post('/process', handleUpload, (req, res) => {
      // Forward to process-recap logic
      const videoFile = req.file;
      const audioFile = null;
