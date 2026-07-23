@@ -747,48 +747,21 @@ export const processRecapPipeline = async (jobId) => {
             }
             
             let finalArgs = [];
-            if (hasOrigAudio && fs.existsSync(bgAudioPath)) {
-                console.log(`[AUDIO-MIX] Mixing ducked background audio with TTS narration...`);
-                
-                const mixedAudioPath = path.join(cacheDir, 'mixed_audio.wav');
-                const mixArgs = [
-                    '-i', bgAudioPath,
-                    '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                    '-filter_complex', `[0:a][1:a]amix=inputs=2:duration=longest[aout]`,
-                    '-map', '[aout]',
-                    '-acodec', 'pcm_s16le', '-f', 'wav',
-                    '-y', mixedAudioPath
-                ];
-                await runFFmpeg(mixArgs, tmpDir);
-
-                finalArgs = [
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
-                    '-i', mixedAudioPath,
-                    '-map', '0:v',
-                    '-map', '1:a',
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-b:a', '128k',
-                    '-movflags', '+faststart',
-                    '-y', finalFileTmp
-                ];
-            } else {
-                console.log(`[AUDIO-MIX] No original audio found. Using TTS narration only.`);
-                finalArgs = [
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
-                    '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-b:a', '128k',
-                    '-filter:a', 'loudnorm=I=-14:LRA=11:TP=-1.5',
-                    '-movflags', '+faststart',
-                    '-y', finalFileTmp
-                ];
-            }
+            console.log(`[AUDIO-MIX] Using TTS narration only (background audio skipped).`);
+            finalArgs = [
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', path.resolve(state.concatFile).replace(/\\/g, '/'),
+                '-i', path.resolve(state.ttsAudioPath).replace(/\\/g, '/'),
+                '-map', '0:v',
+                '-map', '1:a',
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-filter:a', 'loudnorm=I=-14:LRA=11:TP=-1.5',
+                '-movflags', '+faststart',
+                '-y', finalFileTmp
+            ];
             
             await runFFmpeg(finalArgs, tmpDir, (pct) => {
                 updateJob(jobId, { progress: 94 + (pct * 0.05) });
