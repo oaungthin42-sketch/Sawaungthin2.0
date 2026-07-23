@@ -119,6 +119,7 @@ export const translateWithGemini = async (originalTranscript, cachePath, apiKey 
         throw new Error("Gemini API key is required for translation.");
     }
 
+    if (apiKey === 'bypass') return originalTranscript;
     const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 

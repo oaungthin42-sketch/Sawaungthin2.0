@@ -5,7 +5,7 @@ export const VOICES = [
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '+4Hz',
-        rate: '+15%'
+        rate: '+22%'
     },
     {
         id: 'male-young-adult',
@@ -13,7 +13,7 @@ export const VOICES = [
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '+0Hz',
-        rate: '+10%'
+        rate: '+18%'
     },
     {
         id: 'male-calm',
@@ -21,7 +21,7 @@ export const VOICES = [
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '-2Hz',
-        rate: '+5%'
+        rate: '+16%'
     },
     {
         id: 'male-mature',
@@ -29,7 +29,7 @@ export const VOICES = [
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '-4Hz',
-        rate: '+10%'
+        rate: '+17%'
     },
     {
         id: 'male-deep',
@@ -37,7 +37,7 @@ export const VOICES = [
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '-8Hz',
-        rate: '+5%'
+        rate: '+16%'
     },
     {
         id: 'female-young',
@@ -45,7 +45,7 @@ export const VOICES = [
         gender: 'female',
         edgeVoice: 'my-MM-NilarNeural',
         pitch: '+6Hz',
-        rate: '+15%'
+        rate: '+22%'
     },
     {
         id: 'female-default',
@@ -53,7 +53,7 @@ export const VOICES = [
         gender: 'female',
         edgeVoice: 'my-MM-NilarNeural',
         pitch: '+0Hz',
-        rate: '+10%'
+        rate: '+18%'
     },
     {
         id: 'female-soft',
@@ -61,7 +61,7 @@ export const VOICES = [
         gender: 'female',
         edgeVoice: 'my-MM-NilarNeural',
         pitch: '-2Hz',
-        rate: '+5%'
+        rate: '+16%'
     }
 ];
 
