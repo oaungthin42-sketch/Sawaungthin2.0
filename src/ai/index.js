@@ -72,7 +72,7 @@ export const transcribeWav = async (wavPath, cachePath) => {
     }
     
     return new Promise((resolve, reject) => {
-        const pyScript = path.join(__dirname, 'transcriber.py');
+        const pyScript = path.join(__dirname, 'transcribe.py');
         const pythonProcess = spawn('python3', [pyScript, wavPath]);
 
         let out = '';
