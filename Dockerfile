@@ -3,7 +3,6 @@ FROM node:20-bookworm-slim
 
 # Set production environment variables
 ENV NODE_ENV=production
-ENV PORT=3000
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install system dependencies: Python 3, venv, development tools, and ffmpeg
@@ -43,8 +42,6 @@ RUN /opt/venv/bin/python3 src/ai/download_model.py
 # Build the client-side React code with Vite
 RUN npm run build
 
-# Expose port 3000
-EXPOSE 3000
 
 # Start the full-stack server
 CMD ["node", "server.js"]
