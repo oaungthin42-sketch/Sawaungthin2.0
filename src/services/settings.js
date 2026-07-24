@@ -83,7 +83,7 @@ export const deleteSetting = (key) => {
 };
 
 export const getAllSettingsMasked = () => {
-    const keys = ['EDGE_TTS_VOICE', 'TRANSLATION_STYLE', 'BURMESE_NATURALNESS', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE'];
+    const keys = ['EDGE_TTS_VOICE', 'TRANSLATION_STYLE', 'BURMESE_NATURALNESS', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
     const result = {
         GEMINI_API_KEY: { configured: false }
     };

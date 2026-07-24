@@ -63,8 +63,11 @@ export function SettingsModal({
                             <div className="relative">
                                 <select 
                                     className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 appearance-none"
-                                    value={settings['OUTPUT_SPEED_MULTIPLIER']?.value || "1.0"}
-                                    onChange={(e) => saveSetting('OUTPUT_SPEED_MULTIPLIER', e.target.value)}
+                                    value={editSettings['OUTPUT_SPEED_MULTIPLIER'] !== undefined ? editSettings['OUTPUT_SPEED_MULTIPLIER'] : (settings['OUTPUT_SPEED_MULTIPLIER']?.value || "1.0")}
+                                    onChange={(e) => {
+                                        setEditSettings({ ...editSettings, 'OUTPUT_SPEED_MULTIPLIER': e.target.value });
+                                        saveSetting('OUTPUT_SPEED_MULTIPLIER', e.target.value);
+                                    }}
                                 >
                                     <option value="1.0">1x (Default)</option>
                                     <option value="1.25">1.25x</option>
