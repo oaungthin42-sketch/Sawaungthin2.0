@@ -23,15 +23,15 @@ def main():
     # Load model with fallback compute_types
     model = None
     try:
-        model = WhisperModel("tiny", device="cpu", compute_type="int8", cpu_threads=4, num_workers=2)
+        model = WhisperModel("base", device="cpu", compute_type="int8", cpu_threads=4, num_workers=2)
     except Exception as e:
         sys.stderr.write(f"Warning: Failed to load model with compute_type='int8': {e}\n")
         try:
-            model = WhisperModel("tiny", device="cpu", compute_type="float32", cpu_threads=4, num_workers=2)
+            model = WhisperModel("base", device="cpu", compute_type="float32", cpu_threads=4, num_workers=2)
         except Exception as e2:
             sys.stderr.write(f"Warning: Failed to load model with compute_type='float32': {e2}\n")
             try:
-                model = WhisperModel("tiny", device="cpu", cpu_threads=4, num_workers=2)
+                model = WhisperModel("base", device="cpu", cpu_threads=4, num_workers=2)
             except Exception as e3:
                 sys.stderr.write(f"Error: Failed to load model with auto compute_type: {e3}\n")
                 sys.exit(1)

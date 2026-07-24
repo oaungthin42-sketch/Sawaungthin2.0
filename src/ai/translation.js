@@ -98,6 +98,7 @@ CRITICAL TRANSLATION MANDATES:
 6. Do NOT add titles, headings, explanations, notes, translator comments, or labels (such as "ခေါင်းစဉ်", "ဇာတ်လမ်း", "အကျဉ်းချုပ်").
 7. Do NOT invent forms of address or descriptions that are not present in the original text (e.g., do not add "လူငယ်", "မြေးလေး", "အဖိုး", "အဖွား", "ကောင်မလေး", "ကောင်လေး" unless explicitly indicated in the text).
 8. Ensure sentences are easy for Burmese TTS to pronounce naturally without unnatural pauses or overloaded punctuation.
+9. Character names and proper nouns: identify any character names or proper nouns in the original text (even if imperfectly transcribed) and render them as natural Burmese phonetic transliteration (e.g., a name like "John" becomes "ဂျွန်", "Maria" becomes "မာရီယာ") rather than dropping them or leaving them in the original script. Use the SAME transliteration consistently for the same character every time they are mentioned across the entire transcript — do not use different Burmese spellings for the same name in different lines.
 
 STYLE GUIDELINES:
 ${styleInstruction}
