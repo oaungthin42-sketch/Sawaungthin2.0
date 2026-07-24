@@ -1,27 +1,69 @@
 const fs = require('fs');
 let content = fs.readFileSync('src/workers/processor.js', 'utf8');
 
-const regexImport = /import \{ transcribeWav, computeSimilarity, generateSceneNarration, generateNarrationTTS \} from '\.\.\/ai\/index\.js';/;
-const newImport = "import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS } from '../ai/index.js';";
+const regex = /state\.mapping = \[\];\s*for \(let i = 0; i < authTimeline\.length; i\+\+\) \{[\s\S]*?current_time = c_end;\s*\}/;
 
-content = content.replace(regexImport, newImport);
+const replacement = `state.mapping = [];
+            
+            const mergedGroups = [];
+            let currentGroup = null;
 
-const regexTranscript = /advanceStep\(STEPS\.TRANSCRIPT_ORIGINAL, 25, 'Skipping Original Transcript \(Scene Mode\)'\);\s*state\.originalTranscript = \[\];/;
-const newTranscript = `advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Audio');
-            state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache);`;
+            for (let i = 0; i < authTimeline.length; i++) {
+                const chunk = authTimeline[i];
+                
+                if (!chunk) {
+                    throw new Error(\`Pipeline Error: Missing authTimeline chunk for scene \${i}\`);
+                }
 
-content = content.replace(regexTranscript, newTranscript);
+                state.mapping.push({
+                    text: chunk.text,
+                    timestamp: [chunk.final_audio_start, chunk.final_audio_end]
+                });
 
-const regexTranslate = /advanceStep\(STEPS\.TRANSLATE_BURMESE, 30, 'Generating Scene Narration'\);\s*state\.sceneNarration = await generateSceneNarration\(state\.scenes, job\.videoPath, geminiApiKey\);\s*if \(!Array\.isArray\(state\.sceneNarration\) \|\| state\.sceneNarration\.length !== state\.scenes\.length\) \{\s*throw new Error\("Pipeline Error: sceneNarration length mismatch or invalid\."\);\s*\}/;
-const newTranslate = `advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
-            state.translatedTranscript = await translateWithGemini(state.originalTranscript, translatedTranscriptCache, geminiApiKey);`;
+                if (!currentGroup) {
+                    currentGroup = {
+                        text: chunk.text,
+                        orig_start: chunk.orig_start,
+                        orig_end: chunk.orig_end,
+                        final_audio_start: chunk.final_audio_start,
+                        final_audio_end: chunk.final_audio_end
+                    };
+                } else {
+                    const gap = chunk.orig_start - currentGroup.orig_end;
+                    const proposedDuration = chunk.orig_end - currentGroup.orig_start;
+                    
+                    if (gap < 0.75 && proposedDuration <= 12) {
+                        currentGroup.text += " " + chunk.text;
+                        currentGroup.orig_end = chunk.orig_end;
+                        currentGroup.final_audio_end = chunk.final_audio_end;
+                    } else {
+                        mergedGroups.push(currentGroup);
+                        currentGroup = {
+                            text: chunk.text,
+                            orig_start: chunk.orig_start,
+                            orig_end: chunk.orig_end,
+                            final_audio_start: chunk.final_audio_start,
+                            final_audio_end: chunk.final_audio_end
+                        };
+                    }
+                }
+            }
+            
+            if (currentGroup) {
+                mergedGroups.push(currentGroup);
+            }
 
-content = content.replace(regexTranslate, newTranslate);
+            for (const group of mergedGroups) {
+                createTimelineSegment(
+                    group.final_audio_start, 
+                    group.final_audio_end, 
+                    group.orig_start, 
+                    group.orig_end, 
+                    group.text
+                );
+                current_time = group.final_audio_end;
+            }`;
 
-const regexTTS = /state\.ttsAudioPath = await generateNarrationTTS\(state\.sceneNarration, ttsAudioCache, voiceId\);/;
-const newTTS = `state.ttsAudioPath = await generateNarrationTTS(state.translatedTranscript, ttsAudioCache, voiceId, state.originalTranscript);`;
-
-content = content.replace(regexTTS, newTTS);
-
+content = content.replace(regex, replacement);
 fs.writeFileSync('src/workers/processor.js', content, 'utf8');
-console.log('patched processor');
+console.log('patched');
