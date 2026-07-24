@@ -42,7 +42,7 @@ export const getTranslationSystemInstruction = () => {
   * For "Suddenly / Unexpectedly", use "မထင်မှတ်ဘဲ...", "ရုတ်တရက်ကြီး...", "ထင်မထားဘဲ...". Do NOT use "ချက်ချင်းပင်", "ရုတ်ခြည်း".
   * Integrate engaging spoken narration hooks naturally: "ဒီအချိန်မှာတော့...", "သူမထင်ထားတာက...", "အခြေအနေကတော့...", "ဒီလိုနဲ့...", "နောက်ဆုံးမှာတော့...".
 - Spoken Sentence Endings:
-  * Use lively spoken endings like "တယ်", "မယ်", "ခဲ့တယ်", "ပါပဲ", "တာပေါ့", "နေတာ" instead of written final markers like "သည်", "ပါသည်", "ခဲ့သည်", "အံ့", "လေသည်။".
+  * Use a NATURAL VARIETY of lively spoken endings like 'တယ်', 'တာပဲ', 'တာပေါ့', 'ပါတယ်', 'လိုက်တယ်', 'ရော', 'တာကွ', 'ခဲ့တယ်', 'နေတယ်', 'ဘူး' (negatives) instead of written final markers like "သည်", "ပါသည်", "ခဲ့သည်", "အံ့", "လေသည်။". Do not mechanically repeat the same ending for every sentence.
 - Fluid Storytelling: Keep sentences compact, punchy, and highly rhythmic so they are easy for TTS to pronounce and extremely natural when heard by viewers.
 `;
             break;
@@ -90,7 +90,7 @@ Translate the provided original movie recap short narration/dialogue transcript 
 
 CRITICAL TRANSLATION MANDATES:
 1. NEVER translate English grammar, word order, or sentence structure directly. Rewrite into natural spoken Burmese phrasing.
-2. ABSOLUTELY FORBIDDEN to use written/bookish sentence-ending markers like "သည်", "ပါသည်", "ခဲ့သည်", "အံ့", "လေသည်။". You MUST always use spoken endings like "တယ်", "မယ်", "ခဲ့တယ်", "နေတယ်", "တာပေါ့", "ပါပဲ", "ပါ" instead.
+2. ABSOLUTELY FORBIDDEN to use written/bookish sentence-ending markers like 'သည်', 'ပါသည်', 'ခဲ့သည်', 'အံ့', 'လေသည်။'. Instead, use a NATURAL VARIETY of spoken endings depending on rhythm and meaning — do not end every single sentence with the same word. Vary naturally between endings like 'တယ်', 'တာပဲ', 'တာပေါ့', 'ပါတယ်', 'လိုက်တယ်', 'ရော', 'တာကွ', 'ခဲ့တယ်', 'နေတယ်', 'ဘူး' (negatives), question/exclamation forms, etc. — exactly like a real Burmese narrator would vary their speech, never mechanically repeating the same ending sentence after sentence.
 3. Keep sentences concise, punchy, and highly rhythmic. Long, complex written compound sentences should be split into smaller, natural spoken sentences to ensure they flow perfectly when read by TTS.
 4. Do NOT translate passive voice literally (e.g., "He was chased by a dog" -> "သူ ခွေးမောင်းခံရတယ်" or "သူ့ကို ခွေးလိုက်ဆွဲတယ်", NOT "သူသည် ခွေးတစ်ကောင်၏ အမဲလိုက်ခြင်းကို ခံခဲ့ရသည်").
 5. Preserve the exact original story meaning, emotional nuance, facts, and character actions. Do NOT aggressively summarize or remove critical information.
@@ -180,7 +180,7 @@ Your task: write a continuous, flowing Burmese recap narration, broken into one 
 CRITICAL RULES:
 1. Each scene's narration MUST directly describe what is visually/narratively happening in that specific scene — never generic filler, never text that could apply to any scene.
 2. Narration must flow as ONE continuous story across scene boundaries — the last sentence of scene N should feel like it naturally continues into the first sentence of scene N+1, with no abrupt topic jumps, no "အခန်း ၁", no scene-number labels, no restart-style openers like "ဒီရုပ်ရှင်ထဲမှာ" repeated per scene.
-3. Use natural spoken Burmese narration style — sentence endings like "တယ်", "မယ်", "ခဲ့တယ်", "နေတယ်", NOT written/bookish endings like "သည်", "ပါသည်".
+3. Use natural spoken Burmese narration style — ABSOLUTELY FORBIDDEN to use written/bookish sentence-ending markers like 'သည်', 'ပါသည်'. Instead, use a NATURAL VARIETY of spoken endings depending on rhythm and meaning — do not end every single sentence with the same word. Vary naturally between endings like 'တယ်', 'တာပဲ', 'တာပေါ့', 'ပါတယ်', 'လိုက်တယ်', 'ရော', 'တာကွ', 'ခဲ့တယ်', 'နေတယ်', 'ဘူး' (negatives), question/exclamation forms, etc. — exactly like a real Burmese narrator would vary their speech.
 4. Use natural spoken narrative transitions ("အဲ့ဒီနောက်...", "ဒါပေမဲ့...", "ရုတ်တရက်ကြီး...") only where the story genuinely transitions — do not force a transition word into every single scene.
 5. Keep each scene's narration length roughly proportional to how much story content that scene contains — do not pad short scenes with filler just to fill time; video speed adjustment will handle timing sync separately, so focus purely on natural, accurate storytelling.
 6. Do NOT invent plot events, characters, or dialogue not shown in the scene data. Do NOT add narrator commentary, opinions, or meta-remarks.
