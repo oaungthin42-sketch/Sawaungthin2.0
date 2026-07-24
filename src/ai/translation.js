@@ -1,19 +1,18 @@
 import { getSetting } from '../services/settings.js';
 
 export const getTranslationSystemInstruction = () => {
-    const translationStyle = getSetting('TRANSLATION_STYLE') || 'default_recap';
+    const translationStyle = getSetting('TRANSLATION_STYLE') || 'literal';
     const naturalnessLevel = getSetting('BURMESE_NATURALNESS') || 'balanced';
 
     let styleInstruction = '';
     
     switch (translationStyle) {
         case 'literal':
-            styleInstruction = `
-- Provide a faithful translation of the original English text that preserves the exact meaning and key information, but MUST still be written in grammatically natural spoken Burmese.
+            styleInstruction = `- Provide a faithful translation of the original English text that preserves the exact meaning and key information, but MUST still be written in grammatically natural spoken Burmese.
 - Avoid stiff, Google-translated English phrasing. Do NOT directly translate English word order if it creates awkward Burmese.
 - Maintain standard spoken sentence-ending markers like "တယ်", "မယ်", "ခဲ့တယ်", "နေတယ်" instead of written bookish forms like "သည်", "ပါသည်", "ခဲ့သည်".
 - Avoid adding extra conversational fillers, slang, or colloquial expressions that are not in the original text.
-`;
+- CRITICAL: Translate as faithfully and literally as possible without embellishment, invented framing, or added narrative fluff.`;
             break;
         case 'dialogue':
             styleInstruction = `
@@ -99,6 +98,7 @@ CRITICAL TRANSLATION MANDATES:
 7. Do NOT invent forms of address or descriptions that are not present in the original text (e.g., do not add "လူငယ်", "မြေးလေး", "အဖိုး", "အဖွား", "ကောင်မလေး", "ကောင်လေး" unless explicitly indicated in the text).
 8. Ensure sentences are easy for Burmese TTS to pronounce naturally without unnatural pauses or overloaded punctuation.
 9. Character names and proper nouns: identify any character names or proper nouns in the original text (even if imperfectly transcribed) and render them as natural Burmese phonetic transliteration (e.g., a name like "John" becomes "ဂျွန်", "Maria" becomes "မာရီယာ") rather than dropping them or leaving them in the original script. Use the SAME transliteration consistently for the same character every time they are mentioned across the entire transcript — do not use different Burmese spellings for the same name in different lines.
+10. Translate as faithfully and literally as natural spoken Burmese allows — this is NOT a creative recap rewrite. Do not summarize, do not expand, do not add narrator commentary, dramatic framing, or YouTube/TikTok-style introductions. Keep each translated line's length roughly proportional to the original line — not noticeably shorter or longer. The output will be converted to speech and played over the original video, so it must say what the original text says, naturally in Burmese, nothing more and nothing less.
 
 STYLE GUIDELINES:
 ${styleInstruction}
@@ -133,7 +133,8 @@ export const getSceneNarrationSystemInstruction = (translationStyle, naturalness
         case 'literal':
             styleInstruction = `- Provide a faithful retelling of the scene that preserves the exact visual meaning and key information, written in grammatically natural spoken Burmese.
 - Avoid stiff phrasing. Maintain standard spoken sentence-ending markers like "တယ်", "မယ်", "ခဲ့တယ်", "နေတယ်".
-- Avoid adding extra conversational fillers or slang.`;
+- Avoid adding extra conversational fillers or slang.
+- CRITICAL: Translate as faithfully and literally as possible without embellishment, invented framing, or added narrative fluff.`;
             break;
         case 'dialogue':
             styleInstruction = `- CRITICAL: Incorporate dynamic storytelling as if sharing real-life action.
