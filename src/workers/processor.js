@@ -3,7 +3,7 @@ import path from 'path';
 import { updateJob, getJob, getJobKeys, clearJobKeys } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
+import { transcribeWav, computeSimilarity, generateSceneNarration, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
 
 // Pipeline steps
@@ -103,33 +103,8 @@ export const processRecapPipeline = async (jobId) => {
         // 4. TRANSCRIPT ORIGINAL
         const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
-            advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Video Audio');
-            try { state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache); } catch (err) { throw new Error(`Pipeline Error: Transcription Stage Failed.\nInput File: ${videoWavPath} (WAV audio)\nUnderlying Error: ${err.message}\nDiagnostic: faster-whisper executable or model unavailable in current environment.`); }
-            
-            // Compatibility validation for originalTranscript
-            if (!Array.isArray(state.originalTranscript)) {
-                throw new Error("Pipeline Error: originalTranscript is invalid after Whisper transcription.");
-            }
-            if (state.originalTranscript.length === 0) {
-                console.warn("[WARNING] originalTranscript is empty! Whisper returned no speech.");
-            }
-            
-            let prevEnd = -1;
-            for (let i = 0; i < state.originalTranscript.length; i++) {
-                const chunk = state.originalTranscript[i];
-                if (!chunk.timestamp || chunk.timestamp.length !== 2) throw new Error(`Pipeline Error: Invalid timestamp structure at chunk ${i}`);
-                if (!chunk.text) throw new Error(`Pipeline Error: Empty text at chunk ${i}`);
-                
-                const start = chunk.timestamp[0];
-                const end = chunk.timestamp[1];
-                
-                if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error(`Pipeline Error: Non-finite timestamp at chunk ${i}`);
-                if (start < 0) throw new Error(`Pipeline Error: Negative start timestamp at chunk ${i}`);
-                if (end <= start) throw new Error(`Pipeline Error: end <= start at chunk ${i}`);
-                
-                // Strict validation is now handled in transcribeWav inside src/ai/index.js
-            }
-            
+            advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Skipping Original Transcript (Scene Mode)');
+            state.originalTranscript = [];
             saveState();
         }
 
@@ -137,28 +112,11 @@ export const processRecapPipeline = async (jobId) => {
         // 4.5. TRANSLATE TO BURMESE
         const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
-            advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
-            state.translatedTranscript = await translateWithGemini(state.originalTranscript, translatedTranscriptCache, geminiApiKey);
+            advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Generating Scene Narration');
+            state.sceneNarration = await generateSceneNarration(state.scenes, job.videoPath, geminiApiKey);
             
-            // Validation
-            if (!Array.isArray(state.translatedTranscript)) {
-                throw new Error("Pipeline Error: translatedTranscript is invalid after Gemini translation.");
-            }
-            if (state.translatedTranscript.length === 0) {
-                console.warn("[WARNING] translatedTranscript is empty! Continuing with empty audio timeline.");
-            }
-            if (state.translatedTranscript.length !== state.originalTranscript.length) {
-                throw new Error("Pipeline Error: translatedTranscript length mismatch.");
-            }
-            for (let i = 0; i < state.translatedTranscript.length; i++) {
-                const chunk = state.translatedTranscript[i];
-                if (!chunk || typeof chunk.text !== 'string' || chunk.text.trim() === '' || !chunk.timestamp) {
-                    throw new Error(`Pipeline Error: Invalid translated chunk at index ${i}`);
-                }
-                if (chunk.timestamp[0] !== state.originalTranscript[i].timestamp[0] ||
-                    chunk.timestamp[1] !== state.originalTranscript[i].timestamp[1]) {
-                    throw new Error(`Pipeline Error: Timestamp mismatch at index ${i}`);
-                }
+            if (!Array.isArray(state.sceneNarration) || state.sceneNarration.length !== state.scenes.length) {
+                throw new Error("Pipeline Error: sceneNarration length mismatch or invalid.");
             }
             saveState();
         }
@@ -168,7 +126,7 @@ export const processRecapPipeline = async (jobId) => {
         if (!hasCompletedStep(job.currentStep, STEPS.GENERATE_TTS)) {
             advanceStep(STEPS.GENERATE_TTS, 35, 'Generating Burmese TTS Audio');
             const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
-            state.ttsAudioPath = await generateNarrationTTS(state.translatedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
+            state.ttsAudioPath = await generateNarrationTTS(state.sceneNarration, ttsAudioCache, voiceId);
             saveState();
         }
 
@@ -262,71 +220,30 @@ export const processRecapPipeline = async (jobId) => {
             
             state.mapping = [];
             
-            for (let i = 0; i < authTimeline.length; i++) {
+            for (let i = 0; i < state.sceneNarration.length; i++) {
+                const sceneItem = state.sceneNarration[i];
                 const chunk = authTimeline[i];
+                
+                if (!chunk) {
+                    throw new Error(`Pipeline Error: Missing authTimeline chunk for scene ${i}`);
+                }
+                
                 let c_start = chunk.final_audio_start;
                 let c_end = chunk.final_audio_end;
                 
-                let chunk_start_time = c_start;
+                let scene_start = sceneItem.scene_start;
+                let scene_end = sceneItem.scene_end;
                 
-                if (c_start > current_time) {
-                    // Gap
-                    let gap_scene_start = i > 0 ? authTimeline[i-1].orig_end : 0;
-                    let gap_scene_end = chunk.orig_start;
-                    
-                    if (Number.isFinite(gap_scene_start) && Number.isFinite(gap_scene_end) && gap_scene_end > gap_scene_start + 0.05) {
-                        createTimelineSegment(current_time, c_start, gap_scene_start, gap_scene_end, "[Silence]");
-                    } else {
-                        // Skip zero-duration video gap safely by extending the NEXT segment's start_time backward
-                        chunk_start_time = current_time;
-                        console.log(`[AI] Skipped zero-duration gap video before chunk ${i}, merged audio silence into chunk video.`);
-                    }
-                }
-                
-                let chunk_orig_start = chunk.orig_start;
-                let chunk_orig_end = chunk.orig_end;
-                
-                if (!Number.isFinite(chunk_orig_start)) chunk_orig_start = 0;
-                if (!Number.isFinite(chunk_orig_end)) chunk_orig_end = chunk_orig_start;
-                
-                if (chunk_orig_end <= chunk_orig_start) {
-                    chunk_orig_end = chunk_orig_start + Math.max(0.1, chunk.final_dur || 1.0);
-                    if (chunk_orig_end > state.originalVideoDuration) {
-                        chunk_orig_end = state.originalVideoDuration;
-                    }
-                    console.log(`[AI] Recovered invalid scene boundary for chunk ${i}: start=${chunk_orig_start}, new_end=${chunk_orig_end} (based on chunk dur)`);
-                }
-                
-                if (chunk_orig_end - chunk_orig_start < 0.05) {
-                    if (timeline.length > 0) {
-                        const prev = timeline[timeline.length - 1];
-                        prev.end_time = c_end;
-                        prev.target_dur = prev.end_time - prev.start_time;
-                        current_time = c_end;
-                        console.log(`[AI] Skipped extremely small invalid segment for chunk ${i}, merged into previous segment.`);
-                    } else {
-                        chunk_orig_end = state.originalVideoDuration;
-                        createTimelineSegment(chunk_start_time, c_end, chunk_orig_start, chunk_orig_end, chunk.text);
-                        current_time = c_end;
-                    }
-                } else {
-                    createTimelineSegment(chunk_start_time, c_end, chunk_orig_start, chunk_orig_end, chunk.text);
-                    current_time = c_end;
-                }
+                createTimelineSegment(c_start, c_end, scene_start, scene_end, sceneItem.narration_text);
                 
                 state.mapping.push({
-                    narration_index: chunk.chunk_index,
-                    narration_text: chunk.text,
-                    narration_start: c_start,
-                    narration_end: c_end,
-                    matched_scene_index: timeline[timeline.length-1].matched_scene_index,
-                    matched_scene_start: chunk.orig_start,
-                    matched_scene_text: "Original mapped",
-                    similarity_score: 1.0,
-                    speed: timeline[timeline.length-1].speed
+                    text: sceneItem.narration_text,
+                    timestamp: [c_start, c_end]
                 });
+                
+                current_time = c_end;
             }
-            
+
             if (current_time < state.audioDuration) {
                 const lastChunk = authTimeline[authTimeline.length - 1];
                 let sEnd = lastChunk ? lastChunk.orig_end : 0;
