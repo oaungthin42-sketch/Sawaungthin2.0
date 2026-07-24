@@ -592,7 +592,8 @@ export const processRecapPipeline = async (jobId) => {
                                 }
                             }
                             
-                            let filterChain = `[0:a]atempo=${speed.toFixed(4)},apad`;
+                            const audioTempo = Math.max(speed, 0.5);
+                            let filterChain = `[0:a]atempo=${audioTempo.toFixed(4)},apad`;
                             if (volumeFilters.length > 0) {
                                 filterChain += `,${volumeFilters.join(',')}`;
                             }
