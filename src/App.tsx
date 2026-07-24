@@ -301,8 +301,7 @@ function App() {
   };
 
   // Helper values for current selections on the workspace
-  const currentTranslationStyle = settings['TRANSLATION_STYLE']?.value || 'default_recap';
-  const currentSpeechStyle = settings['BURMESE_NATURALNESS']?.value || 'balanced';
+  const currentNarrationMode = settings['NARRATION_MODE']?.value || 'normal';
   const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
   const selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
 
@@ -449,45 +448,18 @@ function App() {
 
                 {/* ဘာသာပြန်ပုံစံ */}
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">ဘာသာပြန်ပုံစံ (Translation Style)</label>
+                  <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">ဘာသာပြန်ပုံစံ (Narration Mode)</label>
                   <div className="flex flex-col gap-2">
                     {[
-                      { value: 'default_recap', label: 'ဇာတ်လမ်းရှင်းပြပုံ', desc: 'Movie Recap ပုံစံ' },
-                      { value: 'literal', label: 'အဓိပ္ပါယ်အတိုင်း', desc: 'မူရင်းအတိုင်း' },
-                      { value: 'dialogue', label: 'သူတစ်ပြန် ကိုယ်တစ်ပြန်', desc: 'A-B စကားပြောပုံစံ' }
+                      { value: 'normal', label: 'အဓိပ္ပါယ်အတိုင်း', desc: 'မူရင်းအတိုင်း' },
+                      { value: 'dialogue', label: 'သူတစ်ပြန် ကိုယ်တစ်ပြန်', desc: 'A-B စကားပြောပုံစံ' },
+                      { value: 'colloquial', label: 'လက်သုံးစကား', desc: 'သူငယ်ချင်းလို သဘာဝကျကျ' }
                     ].map(style => {
-                      const isSelected = currentTranslationStyle === style.value;
+                      const isSelected = currentNarrationMode === style.value;
                       return (
                         <button
                           key={style.value}
-                          onClick={() => saveSetting('TRANSLATION_STYLE', style.value)}
-                          className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${isSelected ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                        >
-                          <div>
-                            <span className="text-xs font-bold block">{style.label}</span>
-                            <span className="text-[10px] text-gray-500">{style.desc}</span>
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* စကားပြောပုံစံ */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">စကားပြောပုံစံ (Speech Style)</label>
-                  <div className="flex flex-col gap-2">
-                    {[
-                      { value: 'balanced', label: 'ပုံမှန်', desc: 'သဘာဝကျကျ' },
-                      { value: 'formal', label: 'ယဉ်ကျေး', desc: 'ရှင်းပြီး အေးဆေး' },
-                      { value: 'high_colloquial', label: 'လက်သုံးစကား', desc: 'သူငယ်ချင်းလို သဘာဝကျကျ' }
-                    ].map(style => {
-                      const isSelected = currentSpeechStyle === style.value;
-                      return (
-                        <button
-                          key={style.value}
-                          onClick={() => saveSetting('BURMESE_NATURALNESS', style.value)}
+                          onClick={() => saveSetting('NARRATION_MODE', style.value)}
                           className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${isSelected ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
                         >
                           <div>

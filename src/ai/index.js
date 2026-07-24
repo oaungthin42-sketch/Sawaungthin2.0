@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import { EdgeTTS } from 'node-edge-tts';
 import { getVoiceConfig } from './voices.js';
-import { getTranslationSystemInstruction, getSceneNarrationSystemInstruction } from './translation.js';
+import { getTranslationSystemInstruction } from './translation.js';
 import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { fileURLToPath } from 'url';
@@ -124,10 +124,7 @@ export const translateWithGemini = async (originalTranscript, cachePath, apiKey 
     const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     
-    const style = getSetting('TRANSLATION_STYLE') || 'literal';
-    const naturalness = getSetting('BURMESE_NATURALNESS') || 'balanced';
-    
-    const systemInstructionText = getTranslationSystemInstruction(style, naturalness);
+    const systemInstructionText = getTranslationSystemInstruction();
     
     const BATCH_SIZE = 40;
     const finalResult = [];
@@ -247,6 +244,11 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
         const mergedBlocks = [];
         let currentBlock = null;
 
+        const narrationMode = getSetting('NARRATION_MODE') || 'normal';
+        const isDialogue = narrationMode === 'dialogue';
+        const maxGap = isDialogue ? 3.0 : 0.75;
+        const maxDur = isDialogue ? 60 : 12;
+
         for (let i = 0; i < sceneNarration.length; i++) {
             const scene = sceneNarration[i];
             
@@ -261,7 +263,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
                 const gap = scene.scene_start - currentBlock.orig_end;
                 const proposedDuration = scene.scene_end - currentBlock.orig_start;
                 
-                if (gap < 0.75 && proposedDuration <= 12) {
+                if (gap < maxGap && proposedDuration <= maxDur) {
                     currentBlock.scenes.push(i);
                     currentBlock.mergedText += " " + scene.narration_text;
                     currentBlock.orig_end = scene.scene_end;
@@ -281,7 +283,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
         }
 
         const chunks = [];
-        const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
+        const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate, saveSubtitles: true });
         
         let concurrencyLimit = 3;
         if (process.env.TTS_CONCURRENCY) {
@@ -379,28 +381,79 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
                 throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${bIdx}`);
             }
 
-            // Distribute actualFinalDur among block.scenes proportionally by text length
-            const totalTextLength = block.scenes.reduce((sum, sIdx) => sum + sceneNarration[sIdx].narration_text.length, 0);
-            
+            // Precise boundary mapping via EdgeTTS subtitle timing (if available)
+            const subFilePath = rawChunk + '.json';
+            let charToTime = null;
+
+            if (fs.existsSync(subFilePath)) {
+                try {
+                    const subData = JSON.parse(fs.readFileSync(subFilePath, 'utf8'));
+                    charToTime = new Array(block.mergedText.length).fill(0);
+                    let charCounter = 0;
+                    for (const sub of subData) {
+                        const partLen = sub.part.length;
+                        const startSec = sub.start / 1000;
+                        const endSec = sub.end / 1000;
+                        for (let k = 0; k < partLen; k++) {
+                            if (charCounter < charToTime.length) {
+                                charToTime[charCounter] = startSec + (k / partLen) * (endSec - startSec);
+                                charCounter++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`[AI] Failed to parse subtitle timing for chunk ${bIdx}`);
+                    charToTime = null;
+                }
+            }
+
+            // Calculate start character indices for each scene in the block
+            let sceneStartCharIndices = [];
+            let currentCharIndex = 0;
+            for (let i = 0; i < block.scenes.length; i++) {
+                sceneStartCharIndices.push(currentCharIndex);
+                currentCharIndex += sceneNarration[block.scenes[i]].narration_text.length;
+                if (i < block.scenes.length - 1) {
+                    currentCharIndex += 1; // space separator
+                }
+            }
+
             let blockRunningTime = runningAudioTime;
-            
+            const totalTextLength = block.scenes.reduce((sum, sIdx) => sum + sceneNarration[sIdx].narration_text.length, 0);
+
             for (let i = 0; i < block.scenes.length; i++) {
                 const sIdx = block.scenes[i];
                 const sceneItem = sceneNarration[sIdx];
                 const textLen = sceneItem.narration_text.length;
                 
-                // Proportion of this scene in the block
                 let sceneDur = 0;
-                if (totalTextLength > 0) {
-                    sceneDur = (textLen / totalTextLength) * actualFinalDur;
-                } else {
-                    sceneDur = actualFinalDur / block.scenes.length;
-                }
                 
-                // If it's the last scene in the block, ensure no rounding gaps
-                if (i === block.scenes.length - 1) {
-                    sceneDur = (runningAudioTime + actualFinalDur) - blockRunningTime;
+                if (charToTime) {
+                    const startIdx = sceneStartCharIndices[i];
+                    const nextStartIdx = (i < block.scenes.length - 1) ? sceneStartCharIndices[i + 1] : block.mergedText.length;
+                    
+                    let startSec = charToTime[startIdx] || 0;
+                    let nextStartSec = (i < block.scenes.length - 1) ? (charToTime[nextStartIdx] || 0) : actualFinalDur;
+                    
+                    // Force first scene to absorb leading silence, and last scene to absorb trailing silence
+                    if (i === 0) startSec = 0;
+                    
+                    sceneDur = (i === block.scenes.length - 1) 
+                        ? (actualFinalDur - (blockRunningTime - runningAudioTime)) 
+                        : (nextStartSec - startSec);
+                } else {
+                    // Fallback to proportional
+                    if (totalTextLength > 0) {
+                        sceneDur = (textLen / totalTextLength) * actualFinalDur;
+                    } else {
+                        sceneDur = actualFinalDur / block.scenes.length;
+                    }
+                    if (i === block.scenes.length - 1) {
+                        sceneDur = (actualFinalDur - (blockRunningTime - runningAudioTime));
+                    }
                 }
+
+                if (sceneDur < 0) sceneDur = 0;
 
                 let orig_start = sceneItem.scene_start;
                 let orig_end = sceneItem.scene_end;
@@ -502,158 +555,5 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
             fs.unlinkSync(cachePath);
         }
         throw err;
-    }
-};
-
-
-
-import { getStreamsDuration } from '../ffmpeg/index.js';
-
-export const generateSceneNarration = async (scenes, videoPath, apiKey) => {
-    console.log("[AI] Generating Scene Narration...");
-    if (apiKey === 'bypass') {
-        const fallback = [];
-        const videoDur = (await getStreamsDuration(videoPath)).effectiveVideoDuration || 10;
-        for (let i = 0; i < scenes.length; i++) {
-            const start = scenes[i];
-            const end = i < scenes.length - 1 ? scenes[i+1] : videoDur;
-            fallback.push({
-                scene_index: i,
-                scene_start: start,
-                scene_end: end,
-                narration_text: `This is fallback narration for scene ${i+1}.`
-            });
-        }
-        return fallback;
-    }
-
-    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
-    const style = getSetting('TRANSLATION_STYLE') || 'literal';
-    const naturalness = getSetting('BURMESE_NATURALNESS') || 'balanced';
-    const systemInstructionText = getSceneNarrationSystemInstruction(style, naturalness);
-
-    // Get video duration
-    const streamsDur = await getStreamsDuration(videoPath);
-    const videoDuration = streamsDur.effectiveVideoDuration || 0;
-
-    const frameDataList = [];
-    const sceneData = [];
-    
-    const tempDir = path.join(path.dirname(videoPath), 'temp_frames_' + Date.now());
-    fs.mkdirSync(tempDir, { recursive: true });
-
-    console.log("[AI] Extracting frames for visual context...");
-    for (let i = 0; i < scenes.length; i++) {
-        const start = scenes[i];
-        const end = i < scenes.length - 1 ? scenes[i+1] : videoDuration;
-        const mid = start + (end - start) / 2;
-        
-        const framePath = path.join(tempDir, `frame_${i}.jpg`);
-        await runFFmpeg(['-ss', mid.toString(), '-i', videoPath, '-vframes', '1', '-q:v', '2', '-y', framePath], tempDir);
-        
-        const base64Data = fs.readFileSync(framePath).toString('base64');
-        sceneData.push({
-            scene_index: i,
-            scene_start: start,
-            scene_end: end
-        });
-        
-        frameDataList.push({
-            inlineData: {
-                data: base64Data,
-                mimeType: "image/jpeg"
-            }
-        });
-    }
-
-    try {
-        if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (e) {}
-
-    const maxRetries = 3;
-    let attempt = 0;
-    let delay = 1000;
-    
-    const parts = [
-        { text: `Here is the scene boundary data:\n${JSON.stringify(sceneData, null, 2)}\n\nAnd here are the corresponding video frames (one per scene in order):` },
-        ...frameDataList
-    ];
-
-    while (attempt < maxRetries) {
-        attempt++;
-        try {
-            console.log(`[AI] Requesting Gemini narration (attempt ${attempt})...`);
-            const response = await axios.post(url, {
-                system_instruction: {
-                    parts: [{ text: systemInstructionText }]
-                },
-                contents: [{
-                    role: "user",
-                    parts: parts
-                }],
-                generationConfig: {
-                    response_mime_type: "application/json",
-                    temperature: 0.2
-                }
-            }, {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 60000
-            });
-
-            const textResponse = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!textResponse) throw new Error("Empty response from Gemini.");
-
-            let parsed;
-            try {
-                parsed = JSON.parse(textResponse);
-            } catch (e) {
-                throw new Error("Invalid JSON response from Gemini.");
-            }
-
-            if (!Array.isArray(parsed)) throw new Error("Gemini response is not an array.");
-            if (parsed.length !== scenes.length) {
-                throw new Error(`Gemini response length (${parsed.length}) does not match input length (${scenes.length}).`);
-            }
-
-            const result = [];
-            for (let i = 0; i < scenes.length; i++) {
-                const item = parsed.find(p => p.scene === i || p.scene === i + 1 || p.scene_index === i); 
-                // Flexible matching for scene index
-                let narText = item?.narration || item?.narration_text;
-                if (!narText && parsed[i] && (parsed[i].narration || parsed[i].narration_text)) {
-                    narText = parsed[i].narration || parsed[i].narration_text;
-                }
-
-                if (!narText || typeof narText !== 'string') {
-                    throw new Error(`Missing or invalid narration for scene ${i}.`);
-                }
-                
-                result.push({
-                    scene_index: i,
-                    scene_start: sceneData[i].scene_start,
-                    scene_end: sceneData[i].scene_end,
-                    narration_text: narText
-                });
-            }
-
-            console.log("[AI] Successfully generated scene narration.");
-            return result;
-
-        } catch (err) {
-            let errorMsg = err.message;
-            if (err.response && err.response.status === 404) {
-                errorMsg = `Model '${modelName}' not found or unsupported (HTTP 404).`;
-            }
-            console.error(`[AI] Gemini narration attempt ${attempt} failed: ${errorMsg}`);
-            
-            const isTransient = !err.response || err.response.status >= 500 || err.response.status === 429 || err.code === 'ECONNABORTED';
-            if (attempt === maxRetries || !isTransient || (err.response && err.response.status === 404)) {
-                throw new Error(`Gemini scene narration failed. ${errorMsg}`);
-            }
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2;
-        }
     }
 };

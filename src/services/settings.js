@@ -52,15 +52,32 @@ function decrypt(text) {
 }
 
 export const getSetting = (key) => {
-    const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
-    const row = stmt.get(key);
-    if (!row) return null;
-    try {
-        return decrypt(row.value);
-    } catch (e) {
-        console.error('Failed to decrypt setting', key, e);
-        return null;
+    const _getRaw = (k) => {
+        const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+        const row = stmt.get(k);
+        if (!row) return null;
+        try {
+            return decrypt(row.value);
+        } catch (e) {
+            console.error('Failed to decrypt setting', k, e);
+            return null;
+        }
+    };
+
+    if (key === 'NARRATION_MODE') {
+        let val = _getRaw('NARRATION_MODE');
+        if (val) return val;
+
+        // Migration from old settings
+        const oldTranslation = _getRaw('TRANSLATION_STYLE');
+        const oldNaturalness = _getRaw('BURMESE_NATURALNESS');
+
+        if (oldTranslation === 'dialogue') return 'dialogue';
+        if (oldNaturalness === 'high_colloquial') return 'colloquial';
+        return 'normal';
     }
+
+    return _getRaw(key);
 };
 
 export const setSetting = (key, value) => {
@@ -83,7 +100,7 @@ export const deleteSetting = (key) => {
 };
 
 export const getAllSettingsMasked = () => {
-    const keys = ['EDGE_TTS_VOICE', 'TRANSLATION_STYLE', 'BURMESE_NATURALNESS', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
+    const keys = ['EDGE_TTS_VOICE', 'NARRATION_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
     const result = {
         GEMINI_API_KEY: { configured: false }
     };
