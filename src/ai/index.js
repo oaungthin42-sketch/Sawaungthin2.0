@@ -244,6 +244,42 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
             fs.mkdirSync(ttsDir, { recursive: true });
         }
 
+        const mergedBlocks = [];
+        let currentBlock = null;
+
+        for (let i = 0; i < sceneNarration.length; i++) {
+            const scene = sceneNarration[i];
+            
+            if (!currentBlock) {
+                currentBlock = {
+                    scenes: [i],
+                    mergedText: scene.narration_text,
+                    orig_start: scene.scene_start,
+                    orig_end: scene.scene_end
+                };
+            } else {
+                const gap = scene.scene_start - currentBlock.orig_end;
+                const proposedDuration = scene.scene_end - currentBlock.orig_start;
+                
+                if (gap < 0.75 && proposedDuration <= 12) {
+                    currentBlock.scenes.push(i);
+                    currentBlock.mergedText += " " + scene.narration_text;
+                    currentBlock.orig_end = scene.scene_end;
+                } else {
+                    mergedBlocks.push(currentBlock);
+                    currentBlock = {
+                        scenes: [i],
+                        mergedText: scene.narration_text,
+                        orig_start: scene.scene_start,
+                        orig_end: scene.scene_end
+                    };
+                }
+            }
+        }
+        if (currentBlock) {
+            mergedBlocks.push(currentBlock);
+        }
+
         const chunks = [];
         const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
         
@@ -255,22 +291,22 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
             }
         }
 
-        for (let i = 0; i < sceneNarration.length; i++) {
+        for (let i = 0; i < mergedBlocks.length; i++) {
             const chunkFileName = `chunk_${String(i).padStart(4, '0')}.wav`;
             chunks.push(path.join(ttsDir, chunkFileName));
         }
 
         let currentIndex = 0;
         const processNext = async () => {
-            while (currentIndex < sceneNarration.length) {
-                const i = currentIndex++;
-                const chunkText = sceneNarration[i].narration_text;
+            while (currentIndex < mergedBlocks.length) {
+                const bIdx = currentIndex++;
+                const chunkText = mergedBlocks[bIdx].mergedText;
                 if (!chunkText || typeof chunkText !== 'string' || chunkText.trim() === '') {
-                    throw new Error(`Scene narration chunk ${i} is empty or invalid.`);
+                    throw new Error(`Merged block ${bIdx} text is empty or invalid.`);
                 }
 
-                const chunkPath = chunks[i];
-                console.log(`[AI] Generating TTS chunk ${i + 1} / ${sceneNarration.length}...`);
+                const chunkPath = chunks[bIdx];
+                console.log(`[AI] Generating TTS chunk ${bIdx + 1} / ${mergedBlocks.length}...`);
                 
                 let success = false;
                 let lastError = null;
@@ -295,18 +331,18 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
                         }
                     } catch (err) {
                         lastError = err;
-                        console.warn(`[AI] TTS attempt ${attempt} failed for chunk ${i}:`, err);
+                        console.warn(`[AI] TTS attempt ${attempt} failed for block ${bIdx}:`, err);
                     }
                 }
 
                 if (!success) {
-                    throw new Error(`Failed to generate TTS for chunk ${i} after 3 attempts. Last error: ${lastError?.message}`);
+                    throw new Error(`Failed to generate TTS for block ${bIdx} after 3 attempts. Last error: ${lastError?.message}`);
                 }
             }
         };
 
         const workers = [];
-        for (let i = 0; i < Math.min(concurrencyLimit, sceneNarration.length); i++) {
+        for (let i = 0; i < Math.min(concurrencyLimit, mergedBlocks.length); i++) {
             workers.push(processNext());
         }
         await Promise.all(workers);
@@ -316,12 +352,9 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
         const authoritativeTimeline = [];
         let runningAudioTime = 0;
         
-        for (let i = 0; i < chunks.length; i++) {
-            const rawChunk = chunks[i];
-            let orig_start = sceneNarration[i].scene_start;
-            let orig_end = sceneNarration[i].scene_end;
-            let orig_dur = orig_end - orig_start;
-            if (orig_dur < 0) orig_dur = 0;
+        for (let bIdx = 0; bIdx < mergedBlocks.length; bIdx++) {
+            const rawChunk = chunks[bIdx];
+            const block = mergedBlocks[bIdx];
 
             let chunkDur = 0;
             try {
@@ -330,7 +363,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
                 throw new Error(`Failed to get duration for ${rawChunk}`);
             }
 
-            const standardizedPath = path.join(ttsDir, `chunk_std_${String(i).padStart(4, '0')}.wav`);
+            const standardizedPath = path.join(ttsDir, `chunk_std_${String(bIdx).padStart(4, '0')}.wav`);
             await runFFmpeg(['-i', rawChunk, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', standardizedPath], ttsDir);
             processedChunks.push(standardizedPath);
             
@@ -343,19 +376,50 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
                     throw new Error(`Invalid FFprobe duration for ${standardizedPath}`);
                 }
             } catch(e) {
-                throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${i}`);
+                throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${bIdx}`);
             }
 
-            authoritativeTimeline.push({
-                chunk_index: i,
-                orig_start: orig_start,
-                orig_end: orig_end,
-                orig_dur: orig_dur,
-                final_audio_start: runningAudioTime,
-                final_audio_end: runningAudioTime + actualFinalDur,
-                final_dur: actualFinalDur,
-                text: sceneNarration[i].narration_text
-            });
+            // Distribute actualFinalDur among block.scenes proportionally by text length
+            const totalTextLength = block.scenes.reduce((sum, sIdx) => sum + sceneNarration[sIdx].narration_text.length, 0);
+            
+            let blockRunningTime = runningAudioTime;
+            
+            for (let i = 0; i < block.scenes.length; i++) {
+                const sIdx = block.scenes[i];
+                const sceneItem = sceneNarration[sIdx];
+                const textLen = sceneItem.narration_text.length;
+                
+                // Proportion of this scene in the block
+                let sceneDur = 0;
+                if (totalTextLength > 0) {
+                    sceneDur = (textLen / totalTextLength) * actualFinalDur;
+                } else {
+                    sceneDur = actualFinalDur / block.scenes.length;
+                }
+                
+                // If it's the last scene in the block, ensure no rounding gaps
+                if (i === block.scenes.length - 1) {
+                    sceneDur = (runningAudioTime + actualFinalDur) - blockRunningTime;
+                }
+
+                let orig_start = sceneItem.scene_start;
+                let orig_end = sceneItem.scene_end;
+                let orig_dur = orig_end - orig_start;
+                if (orig_dur < 0) orig_dur = 0;
+
+                authoritativeTimeline.push({
+                    chunk_index: sIdx,
+                    orig_start: orig_start,
+                    orig_end: orig_end,
+                    orig_dur: orig_dur,
+                    final_audio_start: blockRunningTime,
+                    final_audio_end: blockRunningTime + sceneDur,
+                    final_dur: sceneDur,
+                    text: sceneItem.narration_text
+                });
+
+                blockRunningTime += sceneDur;
+            }
 
             runningAudioTime += actualFinalDur;
         }
