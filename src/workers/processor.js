@@ -3,7 +3,7 @@ import path from 'path';
 import { updateJob, getJob, getJobKeys, clearJobKeys } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { transcribeWav, computeSimilarity, generateSceneNarration, generateNarrationTTS } from '../ai/index.js';
+import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
 
 // Pipeline steps
@@ -103,8 +103,8 @@ export const processRecapPipeline = async (jobId) => {
         // 4. TRANSCRIPT ORIGINAL
         const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
-            advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Skipping Original Transcript (Scene Mode)');
-            state.originalTranscript = [];
+            advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Audio');
+            state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache);
             saveState();
         }
 
@@ -112,12 +112,8 @@ export const processRecapPipeline = async (jobId) => {
         // 4.5. TRANSLATE TO BURMESE
         const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
-            advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Generating Scene Narration');
-            state.sceneNarration = await generateSceneNarration(state.scenes, job.videoPath, geminiApiKey);
-            
-            if (!Array.isArray(state.sceneNarration) || state.sceneNarration.length !== state.scenes.length) {
-                throw new Error("Pipeline Error: sceneNarration length mismatch or invalid.");
-            }
+            advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
+            state.translatedTranscript = await translateWithGemini(state.originalTranscript, translatedTranscriptCache, geminiApiKey);
             saveState();
         }
 
@@ -126,7 +122,12 @@ export const processRecapPipeline = async (jobId) => {
         if (!hasCompletedStep(job.currentStep, STEPS.GENERATE_TTS)) {
             advanceStep(STEPS.GENERATE_TTS, 35, 'Generating Burmese TTS Audio');
             const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
-            state.ttsAudioPath = await generateNarrationTTS(state.sceneNarration, ttsAudioCache, voiceId);
+            const mappedTranscript = state.translatedTranscript.map(t => ({
+                narration_text: t.text,
+                scene_start: t.timestamp[0],
+                scene_end: t.timestamp[1]
+            }));
+            state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
             saveState();
         }
 
@@ -220,9 +221,9 @@ export const processRecapPipeline = async (jobId) => {
             
             state.mapping = [];
             
-            for (let i = 0; i < state.sceneNarration.length; i++) {
-                const sceneItem = state.sceneNarration[i];
+            for (let i = 0; i < authTimeline.length; i++) {
                 const chunk = authTimeline[i];
+                const sceneItem = { scene_start: chunk.orig_start, scene_end: chunk.orig_end, narration_text: chunk.text };
                 
                 if (!chunk) {
                     throw new Error(`Pipeline Error: Missing authTimeline chunk for scene ${i}`);
