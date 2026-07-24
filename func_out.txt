@@ -1,0 +1,225 @@
+export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _ignoredOriginalTranscript) => {
+    try {
+        console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
+        const cacheMetaPath = cachePath + '.meta.json';
+        const voiceConfig = getVoiceConfig(voiceId);
+        const edgeVoice = voiceConfig.edgeVoice;
+        const pitch = voiceConfig.pitch;
+        const rate = voiceConfig.rate;
+
+        const currentMeta = { voice: edgeVoice, pitch, rate, len: sceneNarration.length };
+        if (fs.existsSync(cachePath) && fs.existsSync(cacheMetaPath)) {
+            try {
+                const existingMeta = JSON.parse(fs.readFileSync(cacheMetaPath, 'utf8'));
+                if (existingMeta.voice === currentMeta.voice && 
+                    existingMeta.pitch === currentMeta.pitch && 
+                    existingMeta.rate === currentMeta.rate && 
+                    existingMeta.len === currentMeta.len) {
+                    console.log("[AI] Reusing cached continuous TTS audio.");
+                    return cachePath;
+                }
+            } catch (e) { }
+        }
+
+        const cacheDir = path.dirname(cachePath);
+        const ttsDir = path.join(cacheDir, 'tts_chunks_scene');
+        if (!fs.existsSync(ttsDir)) {
+            fs.mkdirSync(ttsDir, { recursive: true });
+        }
+
+        const chunks = [];
+        const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
+        
+        let concurrencyLimit = 3;
+        if (process.env.TTS_CONCURRENCY) {
+            const parsed = parseInt(process.env.TTS_CONCURRENCY, 10);
+            if (Number.isFinite(parsed) && parsed >= 1) {
+                concurrencyLimit = Math.min(parsed, 20);
+            }
+        }
+
+        for (let i = 0; i < sceneNarration.length; i++) {
+            const chunkFileName = `chunk_${String(i).padStart(4, '0')}.wav`;
+            chunks.push(path.join(ttsDir, chunkFileName));
+        }
+
+        let currentIndex = 0;
+        const processNext = async () => {
+            while (currentIndex < sceneNarration.length) {
+                const i = currentIndex++;
+                const chunkText = sceneNarration[i].narration_text;
+                if (!chunkText || typeof chunkText !== 'string' || chunkText.trim() === '') {
+                    throw new Error(`Scene narration chunk ${i} is empty or invalid.`);
+                }
+
+                const chunkPath = chunks[i];
+                console.log(`[AI] Generating TTS chunk ${i + 1} / ${sceneNarration.length}...`);
+                
+                let success = false;
+                let lastError = null;
+                
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        let timeoutId;
+                        try {
+                            const timeoutPromise = new Promise((_, reject) => {
+                                timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 30000);
+                            });
+                            await Promise.race([ttsClient.ttsPromise(chunkText, chunkPath), timeoutPromise]);
+                        } finally {
+                            if (timeoutId) clearTimeout(timeoutId);
+                        }
+                        
+                        if (fs.existsSync(chunkPath) && fs.statSync(chunkPath).size > 0) {
+                            success = true;
+                            break;
+                        } else {
+                            throw new Error("TTS generated empty file");
+                        }
+                    } catch (err) {
+                        lastError = err;
+                        console.warn(`[AI] TTS attempt ${attempt} failed for chunk ${i}:`, err);
+                    }
+                }
+
+                if (!success) {
+                    throw new Error(`Failed to generate TTS for chunk ${i} after 3 attempts. Last error: ${lastError?.message}`);
+                }
+            }
+        };
+
+        const workers = [];
+        for (let i = 0; i < Math.min(concurrencyLimit, sceneNarration.length); i++) {
+            workers.push(processNext());
+        }
+        await Promise.all(workers);
+
+        // Build Authoritative Timeline (Continuous)
+        const processedChunks = [];
+        const authoritativeTimeline = [];
+        let runningAudioTime = 0;
+        
+        for (let i = 0; i < chunks.length; i++) {
+            const rawChunk = chunks[i];
+            let orig_start = sceneNarration[i].scene_start;
+            let orig_end = sceneNarration[i].scene_end;
+            let orig_dur = orig_end - orig_start;
+            if (orig_dur < 0) orig_dur = 0;
+
+            let chunkDur = 0;
+            try {
+                chunkDur = parseFloat(await getDuration(rawChunk));
+            } catch(e) {
+                throw new Error(`Failed to get duration for ${rawChunk}`);
+            }
+
+            const standardizedPath = path.join(ttsDir, `chunk_std_${String(i).padStart(4, '0')}.wav`);
+            await runFFmpeg(['-i', rawChunk, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', standardizedPath], ttsDir);
+            processedChunks.push(standardizedPath);
+            
+            let actualFinalDur = chunkDur;
+            try {
+                let actualDur = parseFloat(await getDuration(standardizedPath));
+                if (Number.isFinite(actualDur) && actualDur > 0) {
+                    actualFinalDur = actualDur;
+                } else {
+                    throw new Error(`Invalid FFprobe duration for ${standardizedPath}`);
+                }
+            } catch(e) {
+                throw new Error(`Timeline Error: Cannot determine actual duration for chunk ${i}`);
+            }
+
+            authoritativeTimeline.push({
+                chunk_index: i,
+                orig_start: orig_start,
+                orig_end: orig_end,
+                orig_dur: orig_dur,
+                final_audio_start: runningAudioTime,
+                final_audio_end: runningAudioTime + actualFinalDur,
+                final_dur: actualFinalDur,
+                text: sceneNarration[i].narration_text
+            });
+
+            runningAudioTime += actualFinalDur;
+        }
+
+        const concatListPath = path.join(ttsDir, 'concat.txt');
+        let concatLines = processedChunks.map(c => `file '${path.basename(c)}'`).join('\n');
+
+        if (processedChunks.length === 0) {
+            console.warn("[WARNING] No audio chunks to concatenate. Generating 100ms silent audio...");
+            const gapPath = path.join(ttsDir, 'gap_empty.wav');
+            await runFFmpeg(['-f', 'lavfi', '-i', `anullsrc=r=24000:cl=mono`, '-t', '0.1', '-acodec', 'pcm_s16le', '-y', gapPath], ttsDir);
+            concatLines = `file 'gap_empty.wav'`;
+            processedChunks.push(gapPath);
+        }
+
+        fs.writeFileSync(concatListPath, concatLines);
+        
+        const args = [
+            '-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
+            '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '24000', cachePath
+        ];
+        
+        await runFFmpeg(args, ttsDir);
+        
+        if (!fs.existsSync(cachePath) || fs.statSync(cachePath).size === 0) {
+            throw new Error("Final TTS audio generation failed or is 0 bytes.");
+        }
+        
+        const duration = await getDuration(cachePath);
+        if (!Number.isFinite(duration) || duration <= 0) {
+            throw new Error(`Final TTS audio has invalid duration: ${duration}`);
+        }
+        
+        let numChunks = processedChunks.length;
+        const absDiff = Math.abs(runningAudioTime - duration);
+        let status = absDiff <= 0.05 ? 'PASS' : 'FAIL';
+        
+        if (numChunks === 0 && duration <= 0.15) { 
+             status = 'PASS';
+             runningAudioTime = duration;
+        }
+
+        console.log(`[FINAL-TIMELINE-VALIDATION]`);
+        console.log(`timeline_duration: ${runningAudioTime.toFixed(3)}`);
+        console.log(`final_audio_duration: ${duration.toFixed(3)}`);
+        console.log(`absolute_difference: ${absDiff.toFixed(3)}`);
+        console.log(`chunk_count: ${numChunks}`);
+        console.log(`gap_count: 0`);
+        console.log(`status: ${status}`);
+
+        if (status === 'FAIL') {
+            throw new Error(`Pipeline Error: Final TTS audio duration difference (${absDiff.toFixed(3)}s) exceeds 0.05s tolerance!`);
+        }
+
+        console.log(`[AI-DIAGNOSTIC] FINAL ASSEMBLY: Expected duration=${runningAudioTime.toFixed(2)}s | Actual duration=${duration}s | Audio chunks=${numChunks} | Silence gaps=0`);
+        console.log(`[AI-TIMELINE-SUMMARY] chunks=${numChunks} | gaps=0 | authoritative_timeline_duration=${runningAudioTime.toFixed(3)}s`);
+        
+        fs.writeFileSync(cacheMetaPath, JSON.stringify(currentMeta));
+        const authoritativeTimelinePath = cachePath + '.timeline.json';
+        fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(authoritativeTimeline, null, 2));
+        
+        try {
+            if (fs.existsSync(ttsDir)) {
+                fs.rmSync(ttsDir, { recursive: true, force: true });
+            }
+        } catch (cleanupErr) { }
+        
+        return cachePath;
+
+    } catch (err) {
+        console.error("[AI] Error generating TTS:", err);
+        const cacheDir = path.dirname(cachePath);
+        const ttsDir = path.join(cacheDir, 'tts_chunks_scene');
+        try {
+            if (fs.existsSync(ttsDir)) {
+                fs.rmSync(ttsDir, { recursive: true, force: true });
+            }
+        } catch (cleanupErr) { }
+        if (fs.existsSync(cachePath)) {
+            fs.unlinkSync(cachePath);
+        }
+        throw err;
+    }
+};

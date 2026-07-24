@@ -209,9 +209,10 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
     try {
         console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
         const cacheMetaPath = cachePath + '.meta.json';
-        const edgeVoice = voiceId || 'male-young-adult';
-        let pitch = '-10Hz';
-        let rate = '+0%';
+        const voiceConfig = getVoiceConfig(voiceId);
+        const edgeVoice = voiceConfig.edgeVoice;
+        const pitch = voiceConfig.pitch;
+        const rate = voiceConfig.rate;
 
         const currentMeta = { voice: edgeVoice, pitch, rate, len: sceneNarration.length };
         if (fs.existsSync(cachePath) && fs.existsSync(cacheMetaPath)) {
@@ -284,7 +285,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
                         }
                     } catch (err) {
                         lastError = err;
-                        console.warn(`[AI] TTS attempt ${attempt} failed for chunk ${i}: ${err.message}`);
+                        console.warn(`[AI] TTS attempt ${attempt} failed for chunk ${i}:`, err);
                     }
                 }
 
