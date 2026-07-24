@@ -548,7 +548,7 @@ export const processRecapPipeline = async (jobId) => {
                     state.timeline[i].global_start = currentGlobalTime;
                     currentGlobalTime += state.timeline[i].target_dur;
                 }
-                let limit = 5;
+                let limit = 2;
                 if (process.env.SEGMENT_CONCURRENCY) {
                     const parsed = parseInt(process.env.SEGMENT_CONCURRENCY, 10);
                     if (Number.isFinite(parsed) && parsed >= 1) {
@@ -611,18 +611,31 @@ export const processRecapPipeline = async (jobId) => {
                                 '-ac', '2',
                                 '-y', aSegFileTmp
                             ];
-                            try {
-                                await runFFmpeg(aArgs, tmpDir, null, 120000); // 2 min timeout
-                                if (fs.existsSync(aSegFileTmp) && fs.statSync(aSegFileTmp).size > 0) {
-                                    fs.renameSync(aSegFileTmp, aSegFile);
-                                } else {
-                                    throw new Error("0 bytes");
+                            let attempt = 0;
+                            let success = false;
+                            while (attempt < 3 && !success) {
+                                attempt++;
+                                try {
+                                    await runFFmpeg(aArgs, tmpDir, null, 120000); // 2 min timeout
+                                    if (fs.existsSync(aSegFileTmp) && fs.statSync(aSegFileTmp).size > 0) {
+                                        fs.renameSync(aSegFileTmp, aSegFile);
+                                        success = true;
+                                    } else {
+                                        throw new Error("0 bytes");
+                                    }
+                                } catch (err) {
+                                    console.warn(`[AUDIO-MIX] Attempt ${attempt}/3 failed for segment ${globalIdx}: ${err.message}`);
+                                    if (fs.existsSync(aSegFileTmp)) fs.unlinkSync(aSegFileTmp);
+                                    if (attempt < 3) {
+                                        await new Promise(resolve => setTimeout(resolve, 500));
+                                    }
                                 }
-                            } catch (err) {
+                            }
+                            
+                            if (!success) {
                                 audioExtractionFailures++;
                                 failedAudioSegments.push(globalIdx);
-                                console.warn(`[AUDIO-MIX] Failed to extract audio for segment ${globalIdx}, substituting silence... Error: ${err.message}`);
-                                if (fs.existsSync(aSegFileTmp)) fs.unlinkSync(aSegFileTmp);
+                                console.warn(`[AUDIO-MIX] All 3 attempts failed for segment ${globalIdx}, substituting silence.`);
                                 const silArgs = [
                                     '-f', 'lavfi',
                                     '-i', 'anullsrc=r=44100:cl=stereo',

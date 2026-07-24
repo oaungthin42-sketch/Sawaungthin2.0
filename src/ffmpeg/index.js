@@ -176,7 +176,7 @@ export const runFFmpeg = (args, cwd, onProgress, timeoutMs = 600000) => {
         if (!fs.existsSync(cwd)) {
             return reject(new Error(`CWD does not exist: ${cwd}`));
         }
-        console.log(`[FFmpeg] Running command: ffmpeg ${args.join(' ')}`);
+        console.log(`[FFmpeg] Running (cwd=${cwd}): ${args[0]} ... (${args.length} args)`);
         const child = spawn(ffmpegPath, args, { cwd });
         
         let timeoutTimer = null;
