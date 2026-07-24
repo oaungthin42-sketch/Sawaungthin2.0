@@ -196,7 +196,7 @@ export const processRecapPipeline = async (jobId) => {
                 let speed = 1.0;
                 if (desired_orig_dur > 0.1 && target_dur > 0.1) {
                     speed = desired_orig_dur / target_dur;
-                    if (speed < 0.5) speed = 0.5;
+                    if (speed < 0.35) speed = 0.35;
                     if (speed > 100.0) speed = 100.0;
                 }
                 
@@ -367,6 +367,8 @@ export const processRecapPipeline = async (jobId) => {
                     const speed = t.speed || 1.0;
                     const target_dur = t.target_dur.toFixed(3);
                     
+                    const freezeAmount = t.target_dur - ((t.scene_end - t.scene_start) / speed);
+                    console.log(`[FREEZE-PADDING] segment ${globalIdx}: speed=${speed.toFixed(2)}, freeze_padding=${freezeAmount.toFixed(2)}s`);
                     const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
                     
                     const segFile = path.join(cacheDir, `seg_${globalIdx}.ts`);
