@@ -368,6 +368,12 @@ function App() {
               </div>
             )}
             
+            <button
+              onClick={() => { setShowCompletedJobs(true); fetchCompletedJobs(); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 text-gray-300 hover:text-white font-semibold text-xs transition-all active:scale-95"
+            >
+              <Menu className="w-4 h-4 text-indigo-400" />
+            </button>
             <button 
               onClick={() => setShowSettings(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 text-gray-300 hover:text-white font-semibold text-xs transition-all active:scale-95"

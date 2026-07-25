@@ -815,6 +815,7 @@ export const processRecapPipeline = async (jobId) => {
             status: 'complete',
             progress: 100,
             currentStep: 'Done',
+            completed_at: Date.now(),
             result: {
                 metadata: { duration: state.originalVideoDuration, finalDuration: state.audioDuration },
                 scenes: state.scenes,
