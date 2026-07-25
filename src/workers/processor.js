@@ -22,6 +22,8 @@ const STEPS = {
     SEGMENT_BUILDER: 'Segment Builder',
     CONCAT: 'Concat Segments',
     EXPORT: 'Export Final',
+    BLUR_BOXES: 'Blur Boxes',
+    SUBTITLE_BURN: 'Subtitle Burn',
     SPEED_ADJUST: 'Speed Adjust',
     CLEANUP: 'Cleanup'
 };
@@ -780,7 +782,8 @@ export const processRecapPipeline = async (jobId) => {
         }
 
         // 11.5 BLUR BOXES
-        if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
+        if (!hasCompletedStep(job.currentStep, STEPS.BLUR_BOXES)) {
+            if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
             try {
                 let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
                 if (Array.isArray(parsedBoxes) && parsedBoxes.length > 0) {
@@ -845,6 +848,106 @@ export const processRecapPipeline = async (jobId) => {
             } catch(e) {
                 console.error("[BLUR] Error applying blur boxes:", e);
             }
+        }
+        advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
+    }
+
+        // 11.7 SUBTITLE BURN
+        if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
+            if (state.srtFile && fs.existsSync(state.srtFile)) {
+                try {
+                    const srtContent = fs.readFileSync(state.srtFile, 'utf8');
+                    const blocks = srtContent.trim().split(/\n\s*\n/);
+                    let subtitles = [];
+                    for (const block of blocks) {
+                        const lines = block.split('\n');
+                        if (lines.length >= 3) {
+                            const timeLine = lines[1];
+                            const textLines = lines.slice(2).join('\n').trim();
+                            const timeParts = timeLine.split(' --> ');
+                            if (timeParts.length === 2) {
+                                const parseTime = (t) => {
+                                    const [hms, ms] = t.split(',');
+                                    const [h, m, s] = hms.split(':');
+                                    return parseInt(h)*3600 + parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
+                                };
+                                const start = parseTime(timeParts[0]);
+                                const end = parseTime(timeParts[1]);
+                                if (textLines) {
+                                    subtitles.push({ start, end, text: textLines });
+                                }
+                            }
+                        }
+                    }
+
+                    if (subtitles.length > 0) {
+                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles...");
+                        const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
+                        
+                        let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+                        if (job.subtitlePosition && job.subtitlePosition !== 'null') {
+                            try {
+                                pos = typeof job.subtitlePosition === 'string' ? JSON.parse(job.subtitlePosition) : job.subtitlePosition;
+                            } catch(e) {}
+                        }
+                        
+                        const bx = Math.round((pos.xPct / 100) * 1080);
+                        const by = Math.round((pos.yPct / 100) * 1920);
+                        const bw = Math.round((pos.widthPct / 100) * 1080);
+                        const bh = Math.round((pos.heightPct / 100) * 1920);
+                        
+                        let fontsize = Math.round(bh * 0.6);
+                        if (fontsize < 24) fontsize = 24;
+                        if (fontsize > 80) fontsize = 80;
+
+                        // Create text files for each subtitle line to avoid quoting issues
+                        const subDir = path.join(tmpDir, jobId + "_subs");
+                        if (!fs.existsSync(subDir)) fs.mkdirSync(subDir, { recursive: true });
+
+                        let filterComplex = '';
+                        let lastMap = '[0:v]';
+                        
+                        for (let i = 0; i < subtitles.length; i++) {
+                            const sub = subtitles[i];
+                            const txtPath = path.join(subDir, "sub_" + i + ".txt");
+                            fs.writeFileSync(txtPath, sub.text, 'utf8');
+                            const escapedPath = txtPath.replace(/:/g, '\\:');
+                            
+                            const nextMap = "[v_sub" + i + "]";
+                            
+                            const font = 'Noto Sans Myanmar';
+                            const drawCmd = "drawtext=font='" + font + "':textfile='" + escapedPath + "':fontsize=" + fontsize + ":fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=8:x=" + bx + "+(" + bw + "-text_w)/2:y=" + by + "+(" + bh + "-text_h)/2:enable='between(t," + sub.start + "," + sub.end + ")'";
+                            
+                            filterComplex += lastMap + drawCmd + nextMap + ";";
+                            lastMap = nextMap;
+                        }
+                        
+                        filterComplex = filterComplex.replace(/;$/, '');
+
+                        const subArgs = [
+                            '-i', finalOutPath,
+                            '-filter_complex', filterComplex,
+                            '-map', lastMap,
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            '-y', subTmpPath
+                        ];
+
+                        await runFFmpeg(subArgs, tmpDir);
+
+                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                            fs.unlinkSync(finalOutPath);
+                            fs.renameSync(subTmpPath, finalOutPath);
+                        } else {
+                            console.error("[SUBTITLE] Error: subtitle burn failed to produce output file, skipping.");
+                        }
+                    }
+                } catch(e) {
+                    console.error("[SUBTITLE] Error burning subtitles:", e);
+                }
+            }
+            advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
         }
 
         // 12. SPEED ADJUST

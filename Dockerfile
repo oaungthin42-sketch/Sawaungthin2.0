@@ -6,7 +6,7 @@ ENV NODE_ENV=production
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install system dependencies: Python 3, venv, development tools, and ffmpeg
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
+    fonts-noto-core \
+    fontconfig \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up the working directory inside the container
