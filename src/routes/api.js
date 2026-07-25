@@ -8,6 +8,7 @@ import { addJobToQueue } from '../services/queue.js';
 import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../services/settings.js';
 import { VOICES, getVoiceConfig } from '../ai/voices.js';
 import { EdgeTTS } from '@seepine/edge-tts';
+import db from '../services/db.js';
 
 
 const router = express.Router();
@@ -255,15 +256,11 @@ router.get('/completed-jobs', (req, res) => {
     const ids = idsParam.split(',').slice(0, 200).filter(id => typeof id === 'string' && id.trim().length > 0);
     if (ids.length === 0) return res.json([]);
     
-    const db = require('../services/db.js').default;
     const placeholders = ids.map(() => '?').join(',');
     const stmt = db.prepare(`SELECT id, originalFilename, completed_at FROM jobs WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at > ? AND id IN (${placeholders})`);
     
     const timeLimit = Date.now() - 24 * 60 * 60 * 1000;
     const rows = stmt.all(timeLimit, ...ids);
-    
-    const fs = require('fs');
-    const path = require('path');
     
     const validJobs = [];
     for (const row of rows) {
