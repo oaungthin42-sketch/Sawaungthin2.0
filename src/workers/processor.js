@@ -779,6 +779,74 @@ export const processRecapPipeline = async (jobId) => {
             advanceStep(STEPS.EXPORT, 99, 'Export Complete');
         }
 
+        // 11.5 BLUR BOXES
+        if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
+            try {
+                let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
+                if (Array.isArray(parsedBoxes) && parsedBoxes.length > 0) {
+                    console.log(`[BLUR] Applying ${parsedBoxes.length} blur boxes...`);
+                    const blurTmpPath = path.join(tmpDir, `${jobId}_blur.mp4`);
+                    
+                    let filterComplex = '';
+                    let lastMap = '[0:v]';
+                    let splitInputs = '';
+                    let overlayChains = '';
+                    
+                    // Split the input video for each blur box
+                    // e.g. [0:v]split=2[v0][base]; [v0]crop=...[b0]; [b0]boxblur=...[bb0]; [base][bb0]overlay=...[out]
+                    // The prompt specifically says "Use ffmpeg's per-region boxblur pattern: split the region out with crop, apply boxblur=strength ... then overlay it back"
+                    // Chain multiple boxes by overlaying sequentially.
+                    
+                    for (let i = 0; i < parsedBoxes.length; i++) {
+                        const box = parsedBoxes[i];
+                        const x = Math.round((box.xPct / 100) * 1080);
+                        const y = Math.round((box.yPct / 100) * 1920);
+                        const w = Math.round((box.widthPct / 100) * 1080);
+                        const h = Math.round((box.heightPct / 100) * 1920);
+                        const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
+                        
+                        // we need to crop the region, blur it, and overlay it.
+                        // to do this without complex splitting, we can use the following approach:
+                        // [lastMap] split=2 [split_main_i] [split_blur_i];
+                        // [split_blur_i] crop=w:h:x:y,boxblur=strength [blurred_i];
+                        // [split_main_i][blurred_i] overlay=x:y [out_i]
+                        
+                        const nextMap = `[v${i}]`;
+                        const mainSplit = `[main${i}]`;
+                        const blurSplit = `[blur${i}]`;
+                        const blurred = `[blurred${i}]`;
+                        
+                        filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
+                        filterComplex += `${blurSplit}crop=${w}:${h}:${x}:${y},boxblur=${strength}:${strength}${blurred};`;
+                        filterComplex += `${mainSplit}${blurred}overlay=${x}:${y}${nextMap};`;
+                        
+                        lastMap = nextMap;
+                    }
+                    
+                    const blurArgs = [
+                        '-i', finalOutPath,
+                        '-filter_complex', filterComplex,
+                        '-map', lastMap,
+                        '-c:a', 'copy',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-y', blurTmpPath
+                    ];
+                    
+                    await runFFmpeg(blurArgs, tmpDir);
+                    
+                    if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
+                        fs.unlinkSync(finalOutPath);
+                        fs.renameSync(blurTmpPath, finalOutPath);
+                    } else {
+                        console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
+                    }
+                }
+            } catch(e) {
+                console.error("[BLUR] Error applying blur boxes:", e);
+            }
+        }
+
         // 12. SPEED ADJUST
         if (!hasCompletedStep(job.currentStep, STEPS.SPEED_ADJUST)) {
             advanceStep(STEPS.SPEED_ADJUST, 99, 'Adjusting Final Speed');

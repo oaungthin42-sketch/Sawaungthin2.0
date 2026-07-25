@@ -31,3 +31,5 @@ export default db;
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN originalFilename TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN completed_at INTEGER`); } catch (e) {}
+
+try { db.exec(`ALTER TABLE jobs ADD COLUMN blurBoxes TEXT`); } catch (e) {}

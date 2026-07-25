@@ -10,6 +10,70 @@ import axios from 'axios';
 function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
+  const [selectedBlurBox, setSelectedBlurBox] = useState<string | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
+  const addBlurBox = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (blurBoxes.length >= 3) return;
+    const newId = 'box_' + Date.now();
+    setBlurBoxes([...blurBoxes, { id: newId, xPct: 35, yPct: 45, widthPct: 30, heightPct: 10, strength: 15 }]);
+    setSelectedBlurBox(newId);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent, boxId: string, isResize: boolean) => {
+    e.stopPropagation();
+    setSelectedBlurBox(boxId);
+    if (!previewContainerRef.current) return;
+    const rect = previewContainerRef.current.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    
+    setBlurBoxes(prev => {
+      const box = prev.find(b => b.id === boxId);
+      if (!box) return prev;
+      const startXPct = box.xPct;
+      const startYPct = box.yPct;
+      const startWPct = box.widthPct;
+      const startHPct = box.heightPct;
+
+      const onPointerMove = (moveEv: PointerEvent) => {
+        const dx = moveEv.clientX - startX;
+        const dy = moveEv.clientY - startY;
+        const dxPct = (dx / rect.width) * 100;
+        const dyPct = (dy / rect.height) * 100;
+
+        setBlurBoxes(current => current.map(b => {
+          if (b.id !== boxId) return b;
+          if (isResize) {
+            return {
+              ...b,
+              widthPct: Math.max(5, Math.min(100 - b.xPct, startWPct + dxPct)),
+              heightPct: Math.max(5, Math.min(100 - b.yPct, startHPct + dyPct))
+            };
+          } else {
+            return {
+              ...b,
+              xPct: Math.max(0, Math.min(100 - b.widthPct, startXPct + dxPct)),
+              yPct: Math.max(0, Math.min(100 - b.heightPct, startYPct + dyPct))
+            };
+          }
+        }));
+      };
+
+      const onPointerUp = () => {
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+      };
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      
+      return prev;
+    });
+  };
+
 
   useEffect(() => {
     if (videoFile) {
@@ -257,6 +321,7 @@ function App() {
 
     const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
     formData.append('geminiApiKey', geminiKey);
+    formData.append('blurBoxes', JSON.stringify(blurBoxes));
 
     try {
       const response = await axios.post('/api/process-recap', formData, {
@@ -508,7 +573,7 @@ function App() {
                 />
                                 
                 {videoFile && videoPreviewUrl ? (
-                  <div className="relative w-full h-48 sm:h-64 rounded-xl overflow-hidden group bg-black">
+                  <div ref={previewContainerRef} className="relative w-full h-48 sm:h-64 rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedBlurBox(null); }}>
                     <video
                       src={videoPreviewUrl}
                       muted
@@ -520,7 +585,56 @@ function App() {
                       className="w-full h-full object-cover"
                     />
                     
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-between p-4 opacity-100 transition-opacity">
+                    
+                    {blurBoxes.map((box) => (
+                      <div
+                        key={box.id}
+                        onPointerDown={(e) => handlePointerDown(e, box.id, false)}
+                        className={`absolute border-2 ${selectedBlurBox === box.id ? 'border-indigo-400 bg-indigo-500/20' : 'border-gray-400 border-dashed bg-gray-500/20'} cursor-move backdrop-blur-sm transition-colors`}
+                        style={{
+                          left: `${box.xPct}%`,
+                          top: `${box.yPct}%`,
+                          width: `${box.widthPct}%`,
+                          height: `${box.heightPct}%`
+                        }}
+                      >
+                        {selectedBlurBox === box.id && (
+                          <>
+                            <div className="absolute -top-8 left-0 bg-gray-900 border border-gray-700 rounded-md p-1 flex items-center gap-2 cursor-default" onPointerDown={e => e.stopPropagation()}>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setBlurBoxes(prev => prev.filter(b => b.id !== box.id)); setSelectedBlurBox(null); }}
+                                className="text-red-400 hover:text-red-300 p-1"
+                                title="Delete Blur Box"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                              </button>
+                            </div>
+                            <div 
+                              onPointerDown={(e) => handlePointerDown(e, box.id, true)}
+                              className="absolute -bottom-2 -right-2 w-4 h-4 bg-indigo-500 border-2 border-white rounded-full cursor-nwse-resize"
+                            />
+                          </>
+                        )}
+                      </div>
+                    ))}
+
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-between p-4 opacity-100 transition-opacity pointer-events-none">
+                      <div className="self-end pointer-events-auto flex items-center gap-2">
+                        {blurBoxes.length < 3 && (
+                          <button 
+                            onClick={addBlurBox}
+                            className="px-3 py-1.5 bg-indigo-600/80 hover:bg-indigo-500/80 backdrop-blur-md border border-white/10 text-white font-semibold text-[11px] rounded-lg transition-all shadow-sm"
+                          >
+                            + Add Blur Box
+                          </button>
+                        )}
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setVideoFile(null); setBlurBoxes([]); setSelectedBlurBox(null); }}
+                          className="px-3 py-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md border border-white/10 text-white font-semibold text-[11px] rounded-lg transition-all shadow-sm"
+                        >
+                          ဗီဒီယိုဖျက်ရန် (Remove)
+                        </button>
+                      </div>
                       <div className="self-end">
                         <button 
                           onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
@@ -529,9 +643,24 @@ function App() {
                           ဗီဒီယိုဖျက်ရန် (Remove)
                         </button>
                       </div>
-                      <div className="bg-black/40 backdrop-blur-sm self-start px-3 py-2 rounded-lg border border-white/10 max-w-full">
-                        <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
-                        <span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
+                      <div className="bg-black/40 backdrop-blur-sm self-start px-3 py-2 rounded-lg border border-white/10 max-w-full pointer-events-auto flex flex-col gap-2">
+                        <div>
+                          <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
+                          <span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
+                        </div>
+                        {selectedBlurBox && blurBoxes.find(b => b.id === selectedBlurBox) && (
+                          <div className="pt-2 border-t border-white/10" onPointerDown={e => e.stopPropagation()}>
+                            <label className="text-xs text-gray-300 block mb-1">Blur Strength: {blurBoxes.find(b => b.id === selectedBlurBox)?.strength}</label>
+                            <input 
+                              type="range" 
+                              min="1" 
+                              max="30" 
+                              value={blurBoxes.find(b => b.id === selectedBlurBox)?.strength}
+                              onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedBlurBox ? { ...b, strength: parseInt(e.target.value) } : b))}
+                              className="w-32 accent-indigo-500 cursor-pointer"
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

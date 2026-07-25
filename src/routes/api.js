@@ -190,10 +190,12 @@ router.post('/process-recap', handleUpload, (req, res) => {
     }
 
     const jobId = uuidv4();
+    const blurBoxes = req.body.blurBoxes || '[]';
     createJob(jobId, {
         videoPath: videoFile.path,
         audioPath: null,
-        originalFilename: videoFile.originalname
+        originalFilename: videoFile.originalname,
+        blurBoxes: blurBoxes
     });
     setJobKeys(jobId, { geminiApiKey });
     
@@ -234,7 +236,8 @@ router.post('/process', handleUpload, (req, res) => {
      }
      
      const jobId = uuidv4();
-     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: videoFile.originalname });
+     const blurBoxes = req.body.blurBoxes || '[]';
+     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: videoFile.originalname, blurBoxes: blurBoxes });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      
