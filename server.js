@@ -7,6 +7,7 @@ import apiRoutes from './src/routes/api.js';
 
 import { initModels } from './src/ai/index.js';
 import { recoverStuckJobs } from './src/services/jobManager.js';
+import { startCleanupSweep } from './src/services/cleanup.js';
 
 const app = express();
 app.use(cors());
@@ -20,6 +21,7 @@ app.use('/api', apiRoutes);
 
 async function startServer() {
   recoverStuckJobs();
+  startCleanupSweep();
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

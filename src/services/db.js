@@ -21,8 +21,13 @@ db.exec(`
     error TEXT,
     result TEXT,
     currentStep TEXT,
-    created_at INTEGER
+    created_at INTEGER,
+    originalFilename TEXT,
+    completed_at INTEGER
   );
 `);
 
 export default db;
+
+try { db.exec(`ALTER TABLE jobs ADD COLUMN originalFilename TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN completed_at INTEGER`); } catch (e) {}

@@ -16,10 +16,10 @@ export const clearJobKeys = (id) => {
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(id, data.videoPath, data.audioPath, 'uploading', 0, 'Upload', Date.now());
+    stmt.run(id, data.videoPath, data.audioPath, 'uploading', 0, 'Upload', Date.now(), data.originalFilename || null);
     return getJob(id);
 };
 

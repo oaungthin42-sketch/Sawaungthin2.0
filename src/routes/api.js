@@ -192,6 +192,7 @@ router.post('/process-recap', handleUpload, (req, res) => {
     createJob(jobId, {
         videoPath: videoFile.path,
         audioPath: null,
+        originalFilename: videoFile.originalname
     });
     setJobKeys(jobId, { geminiApiKey });
     
@@ -232,7 +233,7 @@ router.post('/process', handleUpload, (req, res) => {
      }
      
      const jobId = uuidv4();
-     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null });
+     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: videoFile.originalname });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      
@@ -245,6 +246,42 @@ router.get('/play/:jobId', (req, res) => {
         return res.status(404).send('Video not found or not ready');
     }
     res.redirect(job.result.videoUrl);
+});
+
+
+router.get('/completed-jobs', (req, res) => {
+    const idsParam = req.query.ids;
+    if (!idsParam) return res.json([]);
+    const ids = idsParam.split(',').slice(0, 200).filter(id => typeof id === 'string' && id.trim().length > 0);
+    if (ids.length === 0) return res.json([]);
+    
+    const db = require('../services/db.js').default;
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`SELECT id, originalFilename, completed_at FROM jobs WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at > ? AND id IN (${placeholders})`);
+    
+    const timeLimit = Date.now() - 24 * 60 * 60 * 1000;
+    const rows = stmt.all(timeLimit, ...ids);
+    
+    const fs = require('fs');
+    const path = require('path');
+    
+    const validJobs = [];
+    for (const row of rows) {
+        const outputPath = path.join(process.cwd(), 'public', 'output', `${row.id}.mp4`);
+        if (fs.existsSync(outputPath)) {
+            const stat = fs.statSync(outputPath);
+            validJobs.push({
+                jobId: row.id,
+                originalFilename: row.originalFilename || 'Untitled video',
+                completedAt: row.completed_at,
+                sizeBytes: stat.size,
+                videoUrl: `/output/${row.id}.mp4`,
+                expiresAt: row.completed_at + 24 * 60 * 60 * 1000
+            });
+        }
+    }
+    
+    res.json(validJobs);
 });
 
 export default router;

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { 
   UploadCloud, Video, AlertCircle, CheckCircle, Loader2, Download, 
-  Settings, Play, ShieldAlert, FileVideo, RefreshCw, 
+  Settings, Play, ShieldAlert, FileVideo, RefreshCw, Menu, 
   Volume2, ArrowRight, Check 
 } from 'lucide-react';
 import axios from 'axios';
@@ -19,6 +19,8 @@ function App() {
   const [pollTimer, setPollTimer] = useState<any>(null);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showCompletedJobs, setShowCompletedJobs] = useState(false);
+  const [completedJobsList, setCompletedJobsList] = useState<any[]>([]);
   const [voices, setVoices] = useState<any[]>([]);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
@@ -209,6 +211,27 @@ function App() {
     }
   };
 
+  
+  const fetchCompletedJobs = async () => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('completedJobsIds') || '[]');
+      if (stored.length === 0) {
+        setCompletedJobsList([]);
+        return;
+      }
+      const res = await axios.get('/api/completed-jobs?ids=' + stored.join(','));
+      setCompletedJobsList(res.data);
+    } catch (e) {
+      console.error('Failed to fetch completed jobs', e);
+    }
+  };
+
+  useEffect(() => {
+    if (showCompletedJobs) {
+      fetchCompletedJobs();
+    }
+  }, [showCompletedJobs]);
+
   const startAnalysis = async () => {
     if (!videoFile) return;
 
@@ -228,6 +251,16 @@ function App() {
       });
 
       const newJobId = response.data.jobId;
+      
+      // Track in localstorage
+      try {
+        const stored = JSON.parse(localStorage.getItem('completedJobsIds') || '[]');
+        stored.push(newJobId);
+        // keep last 200
+        while (stored.length > 200) stored.shift();
+        localStorage.setItem('completedJobsIds', JSON.stringify(stored));
+      } catch (e) {}
+
       setJobId(newJobId);
       setStatus('analyzing');
       startPolling(newJobId);
@@ -350,7 +383,54 @@ function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         {/* Settings Modal */}
-        <SettingsModal 
+        
+      {/* Completed Jobs Modal */}
+      {showCompletedJobs && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-all duration-300">
+            <div className="bg-gray-950 border border-gray-800/80 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                <div className="flex justify-between items-center px-6 py-5 border-b border-gray-800/50">
+                    <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                        <Menu className="w-5 h-5 text-indigo-400" />
+                        Completed Videos (Last 24h)
+                    </h2>
+                    <button onClick={() => setShowCompletedJobs(false)} className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                    </button>
+                </div>
+                <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                    {completedJobsList.length === 0 ? (
+                        <div className="text-center py-10 text-gray-500">
+                            No completed videos in the last 24 hours.
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {completedJobsList.map(job => (
+                                <div key={job.jobId} className="flex items-center justify-between p-4 bg-gray-900/50 border border-gray-800 rounded-xl">
+                                    <div className="flex-1 min-w-0 pr-4">
+                                        <h4 className="text-sm font-medium text-gray-200 truncate">{job.originalFilename}</h4>
+                                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-3">
+                                            <span>{new Date(job.completedAt).toLocaleString()}</span>
+                                            <span>{(job.sizeBytes / (1024 * 1024)).toFixed(2)} MB</span>
+                                        </div>
+                                    </div>
+                                    <a 
+                                        href={job.videoUrl} 
+                                        download 
+                                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shrink-0"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        Download
+                                    </a>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
+
+      <SettingsModal 
           showSettings={showSettings} 
           setShowSettings={setShowSettings}
           settings={settings}
