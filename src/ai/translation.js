@@ -1,13 +1,16 @@
 import { getSetting } from '../services/settings.js';
 
 export const getTranslationSystemInstruction = () => {
-    const narrationMode = getSetting('NARRATION_MODE') || 'normal';
+    const dialogueVal = getSetting('DIALOGUE_MODE');
+    const dialogueMode = dialogueVal === 'true' || dialogueVal === '1' || dialogueVal === true;
+    
+    const colloquialVal = getSetting('COLLOQUIAL_MODE');
+    const colloquialMode = colloquialVal === 'true' || colloquialVal === '1' || colloquialVal === true;
 
     let styleInstruction = '';
 
-    switch (narrationMode) {
-        case 'dialogue':
-            styleInstruction = `
+    if (dialogueMode) {
+        styleInstruction += `
 - CRITICAL: Translate as if it is a natural, real-life spoken dialogue between characters, NOT written narration or book text.
 - Pronoun Adaptation based on Relationship & Emotion:
   * Do NOT use formal/bookish written pronouns like "သင်", "မိမိ", "၎င်း" or "သူမ" (she - written).
@@ -19,11 +22,19 @@ export const getTranslationSystemInstruction = () => {
   * Do NOT translate English grammar or passive voice directly (e.g., "He was punched by him" should NOT be "သူ့အား လက်သီးဖြင့် ထိုးခြင်းခံရသည်" -> rewrite as active voice "သူ သူ့ကို ထိုးလိုက်တယ်").
   * Use natural spoken sentence structures. For example, "What are you doing here?" depending on context should be "ဟေ့ မင်းဒီမှာဘာလုပ်နေတာလဲ။" or "မင်းကဒီကိုဘာလာလုပ်တာလဲ။" instead of the literal "မင်းဒီကို ဘာလုပ်ဖို့လာတာလဲ။".
   * Questions must use spoken endings like "လဲ", "လား", "မလို့လဲ", "မလား", "မလို့လား" instead of written "သနည်း", "ပါသလား".
-  * Commands/Warnings must use spoken endings like "နဲ့", "ပါနဲ့", "စမ်း", "လိုက်စမ်း" instead of written "မပြုပါနှင့်", "လော့".
-`;
-            break;
-        case 'colloquial':
-            styleInstruction = `
+  * Commands/Warnings must use spoken endings like "နဲ့", "ပါနဲ့", "စမ်း", "လိုက်စမ်း" instead of written "မပြုပါနှင့်", "လော့".`;
+    } else {
+        styleInstruction += `
+- Provide a faithful translation of the original English text that preserves the exact meaning and key information, but MUST still be written in grammatically natural spoken Burmese.
+- Avoid stiff, Google-translated English phrasing. Do NOT directly translate English word order if it creates awkward Burmese.
+- Maintain standard spoken sentence-ending markers like "တယ်", "မယ်", "ခဲ့တယ်", "နေတယ်" instead of written bookish forms like "သည်", "ပါသည်", "ခဲ့သည်".
+- Avoid adding extra conversational fillers, slang, or colloquial expressions that are not in the original text.
+- CRITICAL: Translate as faithfully and literally as possible without embellishment, invented framing, or added narrative fluff.
+- CRITICAL PRONOUN FIDELITY: Preserve the original speaker/referent's gender and pronoun exactly as in the source. If the original text refers to someone as 'she' (feminine), the Burmese translation must consistently use a feminine-appropriate pronoun (e.g. 'သူမ') for that same person throughout the ENTIRE transcript — do not switch to 'သူ' or a masculine form partway through, and do not swap pronouns between different people. If the original uses 'he' (masculine), use a masculine-appropriate pronoun consistently. Do not normalize or simplify gendered pronouns for casualness in this mode — that trade-off belongs only to dialogue mode, not to the faithful default.`;
+    }
+
+    if (colloquialMode) {
+        styleInstruction += `
 - The goal is NOT to make every sentence rude. The goal is to make each character sound like a real Burmese person in the actual situation.
 - You MUST consider: Character personality, Age, Social status, Relationship, Emotional state, Situation, Scene intensity, Humor, Anger, Fear, Surprise, Sadness, Mockery, Threatening tone, and Casual friendship.
 - The colloquial mode should allow natural everyday Burmese expressions where contextually appropriate.
@@ -31,19 +42,7 @@ export const getTranslationSystemInstruction = () => {
 - IMPORTANT: CONTEXTUAL ROUGHNESS
   * In colloquial mode, the system may use stronger or rougher everyday Burmese wording when the scene genuinely requires it.
   * For example: A poor or rough character may speak differently from a wealthy or educated character. An angry character may speak more aggressively. A funny scene may use naturally funny Burmese wording. A mocking scene may use teasing or sarcastic expressions. A sad scene should use emotionally natural Burmese expressions. A frightened scene should sound frightened. A street-level character may use more direct everyday wording.
-  * However: Do not add profanity randomly. Do not make every sentence rude. Do not force slang. Do not change the story meaning. Do not invent dialogue that does not exist. Do not change character relationships without evidence. The same character should not randomly change speech style from sentence to sentence unless the emotion or situation changes. Keep the rough, realistic, emotionally expressive language specifically inside colloquial.
-`;
-            break;
-        case 'normal':
-        default:
-            styleInstruction = `
-- Provide a faithful translation of the original English text that preserves the exact meaning and key information, but MUST still be written in grammatically natural spoken Burmese.
-- Avoid stiff, Google-translated English phrasing. Do NOT directly translate English word order if it creates awkward Burmese.
-- Maintain standard spoken sentence-ending markers like "တယ်", "မယ်", "ခဲ့တယ်", "နေတယ်" instead of written bookish forms like "သည်", "ပါသည်", "ခဲ့သည်".
-- Avoid adding extra conversational fillers, slang, or colloquial expressions that are not in the original text.
-- CRITICAL: Translate as faithfully and literally as possible without embellishment, invented framing, or added narrative fluff.
-`;
-            break;
+  * However: Do not add profanity randomly. Do not make every sentence rude. Do not force slang. Do not change the story meaning. Do not invent dialogue that does not exist. Do not change character relationships without evidence. The same character should not randomly change speech style from sentence to sentence unless the emotion or situation changes. Keep the rough, realistic, emotionally expressive language specifically inside colloquial.`;
     }
 
     return `You are an expert professional Burmese translator specializing in faithful video transcript translation.
@@ -60,6 +59,7 @@ CRITICAL TRANSLATION MANDATES:
 8. Ensure sentences are easy for Burmese TTS to pronounce naturally without unnatural pauses or overloaded punctuation.
 9. Character names and proper nouns: identify any character names or proper nouns in the original text (even if imperfectly transcribed) and render them as natural Burmese phonetic transliteration (e.g., a name like "John" becomes "ဂျွန်", "Maria" becomes "မာရီယာ") rather than dropping them or leaving them in the original script. Use the SAME transliteration consistently for the same character every time they are mentioned across the entire transcript — do not use different Burmese spellings for the same name in different lines.
 10. Translate as faithfully and literally as natural spoken Burmese allows — this is NOT a creative recap rewrite. Do not summarize, do not expand, do not add narrator commentary, dramatic framing, or YouTube/TikTok-style introductions. Keep each translated line's length roughly proportional to the original line — not noticeably shorter or longer. The output will be converted to speech and played over the original video, so it must say what the original text says, naturally in Burmese, nothing more and nothing less.
+11. ZERO ENGLISH CHARACTERS: The entire output must be written 100% in Burmese script. Do not leave any English letters, English words, or Latin-script acronyms in the output under any circumstance. Transliterate all names, foreign words, brand names, and acronyms into Burmese phonetic spelling based on pronunciation (this extends rule 9 to ALL foreign text, not just character names). Numbers may be written as Burmese numerals or spelled out in Burmese words, whichever reads most naturally when spoken by TTS — never leave a number-word hybrid like '3PM' or an English unit untranslated.
 
 STYLE GUIDELINES:
 ${styleInstruction}

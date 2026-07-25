@@ -64,17 +64,30 @@ export const getSetting = (key) => {
         }
     };
 
-    if (key === 'NARRATION_MODE') {
-        let val = _getRaw('NARRATION_MODE');
-        if (val) return val;
-
-        // Migration from old settings
-        const oldTranslation = _getRaw('TRANSLATION_STYLE');
-        const oldNaturalness = _getRaw('BURMESE_NATURALNESS');
-
-        if (oldTranslation === 'dialogue') return 'dialogue';
-        if (oldNaturalness === 'high_colloquial') return 'colloquial';
-        return 'normal';
+    if (key === 'DIALOGUE_MODE') {
+        let val = _getRaw('DIALOGUE_MODE');
+        if (val !== null) return val;
+        
+        let oldNarration = _getRaw('NARRATION_MODE');
+        if (oldNarration === 'dialogue') return 'true';
+        if (oldNarration === 'colloquial' || oldNarration === 'normal') return 'false';
+        
+        let oldTranslation = _getRaw('TRANSLATION_STYLE');
+        if (oldTranslation === 'dialogue') return 'true';
+        return 'false';
+    }
+    
+    if (key === 'COLLOQUIAL_MODE') {
+        let val = _getRaw('COLLOQUIAL_MODE');
+        if (val !== null) return val;
+        
+        let oldNarration = _getRaw('NARRATION_MODE');
+        if (oldNarration === 'colloquial') return 'true';
+        if (oldNarration === 'dialogue' || oldNarration === 'normal') return 'false';
+        
+        let oldNaturalness = _getRaw('BURMESE_NATURALNESS');
+        if (oldNaturalness === 'high_colloquial') return 'true';
+        return 'false';
     }
 
     return _getRaw(key);
@@ -100,7 +113,7 @@ export const deleteSetting = (key) => {
 };
 
 export const getAllSettingsMasked = () => {
-    const keys = ['EDGE_TTS_VOICE', 'NARRATION_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
+    const keys = ['EDGE_TTS_VOICE', 'DIALOGUE_MODE', 'COLLOQUIAL_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
     const result = {
         GEMINI_API_KEY: { configured: false }
     };

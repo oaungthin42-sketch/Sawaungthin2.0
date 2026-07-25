@@ -301,7 +301,8 @@ function App() {
   };
 
   // Helper values for current selections on the workspace
-  const currentNarrationMode = settings['NARRATION_MODE']?.value || 'normal';
+  const currentDialogueMode = settings['DIALOGUE_MODE']?.value === 'true';
+  const currentColloquialMode = settings['COLLOQUIAL_MODE']?.value === 'true';
   const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
   const selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
 
@@ -446,31 +447,35 @@ function App() {
                   <p className="text-xs text-gray-500">ဇာတ်လမ်းပြောမည့်ပုံစံနှင့် လေသံပုံစံကို သတ်မှတ်ပါ။</p>
                 </div>
 
-                {/* ဘာသာပြန်ပုံစံ */}
+                {/* ဘာသာပြန်ပုံစံ (Modifiers) */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">ဘာသာပြန်ပုံစံ (Narration Mode)</label>
                   <div className="flex flex-col gap-2">
-                    {[
-                      { value: 'normal', label: 'အဓိပ္ပါယ်အတိုင်း', desc: 'မူရင်းအတိုင်း' },
-                      { value: 'dialogue', label: 'သူတစ်ပြန် ကိုယ်တစ်ပြန်', desc: 'A-B စကားပြောပုံစံ' },
-                      { value: 'colloquial', label: 'လက်သုံးစကား', desc: 'သူငယ်ချင်းလို သဘာဝကျကျ' }
-                    ].map(style => {
-                      const isSelected = currentNarrationMode === style.value;
-                      return (
-                        <button
-                          key={style.value}
-                          onClick={() => saveSetting('NARRATION_MODE', style.value)}
-                          className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${isSelected ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                        >
-                          <div>
-                            <span className="text-xs font-bold block">{style.label}</span>
-                            <span className="text-[10px] text-gray-500">{style.desc}</span>
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
-                        </button>
-                      );
-                    })}
+                    <button
+                      onClick={() => saveSetting('DIALOGUE_MODE', currentDialogueMode ? 'false' : 'true')}
+                      className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${currentDialogueMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
+                    >
+                      <div>
+                        <span className="text-xs font-bold block">Dialogue (A-B)</span>
+                        <span className="text-[10px] text-gray-500">သူတစ်ပြန် ကိုယ်တစ်ပြန်</span>
+                      </div>
+                      {currentDialogueMode && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
+                    </button>
+                    
+                    <button
+                      onClick={() => saveSetting('COLLOQUIAL_MODE', currentColloquialMode ? 'false' : 'true')}
+                      className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${currentColloquialMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
+                    >
+                      <div>
+                        <span className="text-xs font-bold block">Colloquial</span>
+                        <span className="text-[10px] text-gray-500">လက်သုံးစကား / သဘာဝကျကျ</span>
+                      </div>
+                      {currentColloquialMode && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
+                    </button>
                   </div>
+                  <p className="text-[10px] text-gray-500 mt-3 text-center opacity-70">
+                    {!currentDialogueMode && !currentColloquialMode ? 'လက်ရှိ: Normal (မူရင်းအတိုင်း)' : 'နှစ်ခုလုံးတွဲသုံးနိုင်သည်'}
+                  </p>
                 </div>
               </div>
 

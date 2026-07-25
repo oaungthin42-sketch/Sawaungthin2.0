@@ -244,8 +244,8 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
         const mergedBlocks = [];
         let currentBlock = null;
 
-        const narrationMode = getSetting('NARRATION_MODE') || 'normal';
-        const isDialogue = narrationMode === 'dialogue';
+        const dialogueVal = getSetting('DIALOGUE_MODE');
+        const isDialogue = dialogueVal === 'true' || dialogueVal === '1' || dialogueVal === true;
         const maxGap = isDialogue ? 3.0 : 0.75;
         const maxDur = isDialogue ? 60 : 12;
 
