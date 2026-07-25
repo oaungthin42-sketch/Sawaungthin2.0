@@ -15,6 +15,43 @@ function App() {
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoRect, setVideoRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const videoRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
+
+  const updateVideoRect = () => {
+    if (!previewContainerRef.current || !videoRef.current) return;
+    const container = previewContainerRef.current.getBoundingClientRect();
+    const videoW = videoRef.current.videoWidth;
+    const videoH = videoRef.current.videoHeight;
+    if (!videoW || !videoH) return;
+
+    const containerRatio = container.width / container.height;
+    const videoRatio = videoW / videoH;
+
+    let displayWidth, displayHeight;
+    if (videoRatio > containerRatio) {
+      displayWidth = container.width;
+      displayHeight = container.width / videoRatio;
+    } else {
+      displayHeight = container.height;
+      displayWidth = container.height * videoRatio;
+    }
+
+    const rect = {
+      left: (container.width - displayWidth) / 2,
+      top: (container.height - displayHeight) / 2,
+      width: displayWidth,
+      height: displayHeight
+    };
+    videoRectRef.current = rect;
+    setVideoRect(rect);
+  };
+
+  useEffect(() => {
+    window.addEventListener('resize', updateVideoRect);
+    return () => window.removeEventListener('resize', updateVideoRect);
+  }, []);
 
   const addBlurBox = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -42,8 +79,8 @@ function App() {
         const onPointerMove = (moveEv: PointerEvent) => {
           const dx = moveEv.clientX - startX;
           const dy = moveEv.clientY - startY;
-          const dxPct = (dx / rect.width) * 100;
-          const dyPct = (dy / rect.height) * 100;
+          const dxPct = (dx / (videoRectRef.current.width || rect.width)) * 100;
+          const dyPct = (dy / (videoRectRef.current.height || rect.height)) * 100;
 
           setSubtitlePosition((current: any) => {
             if (isResize) {
@@ -618,17 +655,20 @@ function App() {
                 />
                                 
                 {videoFile && videoPreviewUrl ? (
-                  <div ref={previewContainerRef} className="relative w-full h-48 sm:h-64 rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
+                  <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
                     <video
+                      ref={videoRef}
                       src={videoPreviewUrl}
                       muted
                       playsInline
                       preload="metadata"
                       onLoadedMetadata={(e) => {
                         e.currentTarget.currentTime = 0.1;
+                        updateVideoRect();
                       }}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-contain"
                     />
+                    <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                     
                     
                     
@@ -682,6 +722,7 @@ function App() {
                         )}
                       </div>
                     ))}
+                    </div>
 
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-between p-4 opacity-100 transition-opacity pointer-events-none">
                       <div className="self-end pointer-events-auto flex items-center gap-2">
