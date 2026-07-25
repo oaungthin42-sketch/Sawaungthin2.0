@@ -2,13 +2,26 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { 
   UploadCloud, Video, AlertCircle, CheckCircle, Loader2, Download, 
-  Settings, Play, ShieldAlert, FileVideo, RefreshCw, Menu, 
+  Settings, Play, ShieldAlert, RefreshCw, Menu, 
   Volume2, ArrowRight, Check 
 } from 'lucide-react';
 import axios from 'axios';
 
 function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (videoFile) {
+      const url = URL.createObjectURL(videoFile);
+      setVideoPreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      setVideoPreviewUrl(null);
+    }
+  }, [videoFile]);
   const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'>('idle');
   const [progressMsg, setProgressMsg] = useState<string>('');
   const [progressPct, setProgressPct] = useState<number>(0);
@@ -481,7 +494,7 @@ function App() {
               <p className="text-xs text-gray-500 mb-5">ဇာတ်လမ်းရှင်းပြချက် ဗီဒီယိုကို ဤနေရာတွင် ထည့်သွင်းပေးပါ။</p>
 
               <div 
-                className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-10 transition-all cursor-pointer ${videoFile ? 'border-indigo-500 bg-indigo-500/5 shadow-inner' : 'border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`}
+                className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`}
                 onDragOver={handleDragOver}
                 onDrop={handleVideoDrop}
                 onClick={() => videoInputRef.current?.click()}
@@ -494,21 +507,33 @@ function App() {
                   onChange={handleVideoSelect}
                 />
                                 
-                {videoFile ? (
-                  <div className="flex flex-col items-center gap-3 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                      <FileVideo className="w-8 h-8" />
+                {videoFile && videoPreviewUrl ? (
+                  <div className="relative w-full h-48 sm:h-64 rounded-xl overflow-hidden group bg-black">
+                    <video
+                      src={videoPreviewUrl}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      onLoadedMetadata={(e) => {
+                        e.currentTarget.currentTime = 0.1;
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-between p-4 opacity-100 transition-opacity">
+                      <div className="self-end">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
+                          className="px-3 py-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md border border-white/10 text-white font-semibold text-[11px] rounded-lg transition-all shadow-sm"
+                        >
+                          ဗီဒီယိုဖျက်ရန် (Remove)
+                        </button>
+                      </div>
+                      <div className="bg-black/40 backdrop-blur-sm self-start px-3 py-2 rounded-lg border border-white/10 max-w-full">
+                        <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
+                        <span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-sm font-semibold text-indigo-200 block truncate max-w-[280px]">{videoFile.name}</span>
-                      <span className="text-xs text-gray-500">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
-                    </div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
-                      className="mt-2 px-3 py-1.5 bg-gray-900 hover:bg-red-950/30 border border-gray-800 hover:border-red-900/30 text-gray-400 hover:text-red-400 font-semibold text-[11px] rounded-lg transition-all"
-                    >
-                      ဗီဒီယိုဖျက်ရန် (Remove)
-                    </button>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-center text-gray-500">
