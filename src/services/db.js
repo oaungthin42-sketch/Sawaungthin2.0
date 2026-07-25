@@ -35,3 +35,16 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN completed_at INTEGER`); } catch (e) {
 try { db.exec(`ALTER TABLE jobs ADD COLUMN blurBoxes TEXT`); } catch (e) {}
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitlePosition TEXT`); } catch (e) {}
+
+try { db.exec(`ALTER TABLE jobs ADD COLUMN selectedFontId TEXT`); } catch (e) {}
+
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS fonts (
+            id TEXT PRIMARY KEY,
+            originalName TEXT NOT NULL,
+            storedFilename TEXT NOT NULL,
+            uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+} catch (e) {}

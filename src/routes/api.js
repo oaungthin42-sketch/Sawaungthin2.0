@@ -23,6 +23,30 @@ if (process.env.MAX_UPLOAD_SIZE_MB) {
         maxUploadSize = parsed * 1024 * 1024;
     }
 }
+
+const fontStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const dir = path.join(process.cwd(), 'public', 'fonts');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, uuidv4() + ext);
+    }
+});
+const fontUpload = multer({
+    storage: fontStorage,
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (ext === '.ttf' || ext === '.otf') {
+            cb(null, true);
+        } else {
+            cb(new Error('Only .ttf and .otf font files are allowed'));
+        }
+    }
+});
+
 const upload = multer({ 
     dest: tmpDir,
     limits: { fileSize: maxUploadSize }
@@ -157,6 +181,33 @@ router.post('/preview-voice', async (req, res) => {
 });
 
 
+
+router.post('/fonts/upload', (req, res) => {
+    fontUpload.single('font')(req, res, function(err) {
+        if (err) return res.status(400).json({ error: err.message });
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+        const fontId = uuidv4();
+        const storedFilename = req.file.filename;
+        const originalName = req.file.originalname;
+
+        const stmt = db.prepare(`INSERT INTO fonts (id, originalName, storedFilename) VALUES (?, ?, ?)`);
+        stmt.run(fontId, originalName, storedFilename);
+
+        res.json({ id: fontId, originalName, url: `/fonts/${storedFilename}` });
+    });
+});
+
+router.get('/fonts', (req, res) => {
+    const rows = db.prepare(`SELECT id, originalName, storedFilename FROM fonts`).all();
+    const fonts = rows.map(r => ({
+        id: r.id,
+        originalName: r.originalName,
+        url: `/fonts/${r.storedFilename}`
+    }));
+    res.json(fonts);
+});
+
 // Settings Routes
 router.get('/settings', (req, res) => {
     res.json(getAllSettingsMasked());
@@ -192,12 +243,14 @@ router.post('/process-recap', handleUpload, (req, res) => {
     const jobId = uuidv4();
     const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
+     const selectedFontId = req.body.selectedFontId || null;
     createJob(jobId, {
         videoPath: videoFile.path,
         audioPath: null,
         originalFilename: videoFile.originalname,
         blurBoxes: blurBoxes,
-        subtitlePosition: subtitlePosition
+        subtitlePosition: subtitlePosition,
+        selectedFontId: selectedFontId
     });
     setJobKeys(jobId, { geminiApiKey });
     
@@ -240,7 +293,7 @@ router.post('/process', handleUpload, (req, res) => {
      const jobId = uuidv4();
      const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
-     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: videoFile.originalname, blurBoxes: blurBoxes, subtitlePosition: subtitlePosition });
+     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: videoFile.originalname, blurBoxes: blurBoxes, subtitlePosition: subtitlePosition, selectedFontId: selectedFontId });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      

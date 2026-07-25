@@ -14,6 +14,44 @@ function App() {
   const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   
+  const [fonts, setFonts] = useState<any[]>([]);
+  const [selectedFontId, setSelectedFontId] = useState<string | null>(null);
+  const [fontUploadStatus, setFontUploadStatus] = useState<string>('');
+
+  const fetchFonts = async () => {
+    try {
+      const res = await axios.get('/api/fonts');
+      setFonts(res.data);
+      res.data.forEach((font: any) => {
+        const fontFace = new FontFace(`font_${font.id}`, `url(${font.url})`);
+        fontFace.load().then(f => document.fonts.add(f)).catch(e => console.warn("Failed to load font", e));
+      });
+    } catch(e) {
+      console.error(e);
+    }
+  };
+
+  const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const formData = new FormData();
+      formData.append('font', file);
+      setFontUploadStatus('Uploading...');
+      try {
+        await axios.post('/api/fonts/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        setFontUploadStatus('Uploaded!');
+        fetchFonts();
+        setTimeout(() => setFontUploadStatus(''), 2000);
+      } catch (err: any) {
+        setFontUploadStatus('Error: ' + (err.response?.data?.error || err.message));
+        setTimeout(() => setFontUploadStatus(''), 4000);
+      }
+    }
+  };
+
+  
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoRect, setVideoRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
@@ -61,7 +99,7 @@ function App() {
     setSelectedElement(newId);
   };
 
-  const handlePointerDown = (e: React.PointerEvent, boxId: string, isResize: boolean) => {
+  const handlePointerDown = (e: React.PointerEvent, boxId: string, action: 'move' | 'tl' | 'tr' | 'bl' | 'br') => {
     e.stopPropagation();
     setSelectedElement(boxId);
     if (!previewContainerRef.current) return;
@@ -69,94 +107,140 @@ function App() {
     const startX = e.clientX;
     const startY = e.clientY;
     
-    if (boxId === 'subtitle') {
-      setSubtitlePosition((prev: any) => {
-        const startXPct = prev.xPct;
-        const startYPct = prev.yPct;
-        const startWPct = prev.widthPct;
-        const startHPct = prev.heightPct;
-
-        const onPointerMove = (moveEv: PointerEvent) => {
-          const dx = moveEv.clientX - startX;
-          const dy = moveEv.clientY - startY;
-          const dxPct = (dx / (videoRectRef.current.width || rect.width)) * 100;
-          const dyPct = (dy / (videoRectRef.current.height || rect.height)) * 100;
-
-          setSubtitlePosition((current: any) => {
-            if (isResize) {
-              return {
-                ...current,
-                widthPct: Math.max(5, Math.min(100 - current.xPct, startWPct + dxPct)),
-                heightPct: Math.max(5, Math.min(100 - current.yPct, startHPct + dyPct))
-              };
-            } else {
-              return {
+    let isDragging = true;
+    let latestDx = 0;
+    let latestDy = 0;
+    let rafId: number | null = null;
+    
+    const applyMovement = (current: any, startXPct: number, startYPct: number, startWPct: number, startHPct: number, dxPct: number, dyPct: number) => {
+        if (action === 'move') {
+            return {
                 ...current,
                 xPct: Math.max(0, Math.min(100 - current.widthPct, startXPct + dxPct)),
                 yPct: Math.max(0, Math.min(100 - current.heightPct, startYPct + dyPct))
-              };
+            };
+        } else if (action === 'tl') {
+            const newW = startWPct - dxPct;
+            const newH = startHPct - dyPct;
+            const canW = newW >= 5 && startXPct + dxPct >= 0;
+            const canH = newH >= 5 && startYPct + dyPct >= 0;
+            return {
+                ...current,
+                xPct: canW ? startXPct + dxPct : current.xPct,
+                yPct: canH ? startYPct + dyPct : current.yPct,
+                widthPct: canW ? newW : current.widthPct,
+                heightPct: canH ? newH : current.heightPct
+            };
+        } else if (action === 'tr') {
+            const newW = startWPct + dxPct;
+            const newH = startHPct - dyPct;
+            const canW = newW >= 5 && startXPct + newW <= 100;
+            const canH = newH >= 5 && startYPct + dyPct >= 0;
+            return {
+                ...current,
+                yPct: canH ? startYPct + dyPct : current.yPct,
+                widthPct: canW ? newW : current.widthPct,
+                heightPct: canH ? newH : current.heightPct
+            };
+        } else if (action === 'bl') {
+            const newW = startWPct - dxPct;
+            const newH = startHPct + dyPct;
+            const canW = newW >= 5 && startXPct + dxPct >= 0;
+            const canH = newH >= 5 && startYPct + newH <= 100;
+            return {
+                ...current,
+                xPct: canW ? startXPct + dxPct : current.xPct,
+                widthPct: canW ? newW : current.widthPct,
+                heightPct: canH ? newH : current.heightPct
+            };
+        } else if (action === 'br') {
+            const newW = startWPct + dxPct;
+            const newH = startHPct + dyPct;
+            const canW = newW >= 5 && startXPct + newW <= 100;
+            const canH = newH >= 5 && startYPct + newH <= 100;
+            return {
+                ...current,
+                widthPct: canW ? newW : current.widthPct,
+                heightPct: canH ? newH : current.heightPct
+            };
+        }
+        return current;
+    };
+
+    if (boxId === 'subtitle') {
+        setSubtitlePosition((prev: any) => {
+            const startXPct = prev.xPct;
+            const startYPct = prev.yPct;
+            const startWPct = prev.widthPct;
+            const startHPct = prev.heightPct;
+
+            const onPointerMove = (moveEv: PointerEvent) => {
+                latestDx = moveEv.clientX - startX;
+                latestDy = moveEv.clientY - startY;
+                if (!rafId) {
+                    rafId = requestAnimationFrame(() => {
+                        rafId = null;
+                        if (!isDragging) return;
+                        const dxPct = (latestDx / (videoRectRef.current.width || rect.width)) * 100;
+                        const dyPct = (latestDy / (videoRectRef.current.height || rect.height)) * 100;
+                        setSubtitlePosition((current: any) => applyMovement(current, startXPct, startYPct, startWPct, startHPct, dxPct, dyPct));
+                    });
+                }
+            };
+
+            const onPointerUp = () => {
+                isDragging = false;
+                if (rafId) cancelAnimationFrame(rafId);
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+            };
+
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+            return prev;
+        });
+        return;
+    }
+
+    setBlurBoxes(prev => {
+        const box = prev.find(b => b.id === boxId);
+        if (!box) return prev;
+        const startXPct = box.xPct;
+        const startYPct = box.yPct;
+        const startWPct = box.widthPct;
+        const startHPct = box.heightPct;
+
+        const onPointerMove = (moveEv: PointerEvent) => {
+            latestDx = moveEv.clientX - startX;
+            latestDy = moveEv.clientY - startY;
+            if (!rafId) {
+                rafId = requestAnimationFrame(() => {
+                    rafId = null;
+                    if (!isDragging) return;
+                    // Note here we changed this to use videoRectRef instead of rect to match video boundaries
+                    const dxPct = (latestDx / (videoRectRef.current.width || rect.width)) * 100;
+                    const dyPct = (latestDy / (videoRectRef.current.height || rect.height)) * 100;
+                    setBlurBoxes(current => current.map(b => {
+                        if (b.id !== boxId) return b;
+                        return applyMovement(b, startXPct, startYPct, startWPct, startHPct, dxPct, dyPct);
+                    }));
+                });
             }
-          });
         };
 
         const onPointerUp = () => {
-          window.removeEventListener('pointermove', onPointerMove);
-          window.removeEventListener('pointerup', onPointerUp);
+            isDragging = false;
+            if (rafId) cancelAnimationFrame(rafId);
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
         };
 
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('pointerup', onPointerUp);
         return prev;
-      });
-      return;
-    }
-
-    setBlurBoxes(prev => {
-      const box = prev.find(b => b.id === boxId);
-      if (!box) return prev;
-      const startXPct = box.xPct;
-      const startYPct = box.yPct;
-      const startWPct = box.widthPct;
-      const startHPct = box.heightPct;
-
-      const onPointerMove = (moveEv: PointerEvent) => {
-        const dx = moveEv.clientX - startX;
-        const dy = moveEv.clientY - startY;
-        const dxPct = (dx / rect.width) * 100;
-        const dyPct = (dy / rect.height) * 100;
-
-        setBlurBoxes(current => current.map(b => {
-          if (b.id !== boxId) return b;
-          if (isResize) {
-            return {
-              ...b,
-              widthPct: Math.max(5, Math.min(100 - b.xPct, startWPct + dxPct)),
-              heightPct: Math.max(5, Math.min(100 - b.yPct, startHPct + dyPct))
-            };
-          } else {
-            return {
-              ...b,
-              xPct: Math.max(0, Math.min(100 - b.widthPct, startXPct + dxPct)),
-              yPct: Math.max(0, Math.min(100 - b.heightPct, startYPct + dyPct))
-            };
-          }
-        }));
-      };
-
-      const onPointerUp = () => {
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', onPointerUp);
-      };
-
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-      
-      return prev;
     });
-  };
-
-
-  useEffect(() => {
+};
+useEffect(() => {
     if (videoFile) {
       const url = URL.createObjectURL(videoFile);
       setVideoPreviewUrl(url);
@@ -404,6 +488,7 @@ function App() {
     formData.append('geminiApiKey', geminiKey);
     formData.append('blurBoxes', JSON.stringify(blurBoxes));
     formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
+    if (selectedFontId) formData.append('selectedFontId', selectedFontId);
 
     try {
       const response = await axios.post('/api/process-recap', formData, {
@@ -673,34 +758,39 @@ function App() {
                     
                     
                     <div
-                      onPointerDown={(e) => handlePointerDown(e, 'subtitle', false)}
-                      className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400 bg-green-500/20' : 'border-gray-400 border-dashed bg-gray-500/10'} cursor-move transition-colors flex items-center justify-center`}
+                      onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
+                      className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400 bg-transparent' : 'border-gray-400 border-dashed bg-gray-500/10'} cursor-move transition-colors flex items-center justify-center overflow-hidden`}
                       style={{
                         left: `${subtitlePosition.xPct}%`,
                         top: `${subtitlePosition.yPct}%`,
                         width: `${subtitlePosition.widthPct}%`,
-                        height: `${subtitlePosition.heightPct}%`
+                        height: `${subtitlePosition.heightPct}%`,
+                        fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
                       }}
                     >
-                      <span className="text-white font-bold drop-shadow-md text-xs sm:text-sm">နမူနာ စာတန်း</span>
+                      <span className="text-white font-bold drop-shadow-md text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
                       {selectedElement === 'subtitle' && (
-                        <div 
-                          onPointerDown={(e) => handlePointerDown(e, 'subtitle', true)}
-                          className="absolute -bottom-2 -right-2 w-4 h-4 bg-green-500 border-2 border-white rounded-full cursor-nwse-resize"
-                        />
+                        <>
+                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize" />
+                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize" />
+                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize" />
+                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize" />
+                        </>
                       )}
                     </div>
 
                     {blurBoxes.map((box) => (
                       <div
                         key={box.id}
-                        onPointerDown={(e) => handlePointerDown(e, box.id, false)}
-                        className={`absolute border-2 ${selectedElement === box.id ? 'border-indigo-400 bg-indigo-500/20' : 'border-gray-400 border-dashed bg-gray-500/20'} cursor-move backdrop-blur-sm transition-colors`}
+                        onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
+                        className={`absolute border-2 ${selectedElement === box.id ? 'border-indigo-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors`}
                         style={{
                           left: `${box.xPct}%`,
                           top: `${box.yPct}%`,
                           width: `${box.widthPct}%`,
-                          height: `${box.heightPct}%`
+                          height: `${box.heightPct}%`,
+                          backdropFilter: `blur(${box.strength * 1.2}px)`,
+                          WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
                         }}
                       >
                         {selectedElement === box.id && (
@@ -714,10 +804,10 @@ function App() {
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                               </button>
                             </div>
-                            <div 
-                              onPointerDown={(e) => handlePointerDown(e, box.id, true)}
-                              className="absolute -bottom-2 -right-2 w-4 h-4 bg-indigo-500 border-2 border-white rounded-full cursor-nwse-resize"
-                            />
+                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize" />
+                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize" />
+                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize" />
+                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize" />
                           </>
                         )}
                       </div>
@@ -765,6 +855,29 @@ function App() {
                               onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
                               className="w-32 accent-indigo-500 cursor-pointer"
                             />
+                            <details className="mt-2 text-xs">
+                              <summary className="text-gray-400 cursor-pointer hover:text-white mb-1">Advanced (manual values)</summary>
+                              <div className="grid grid-cols-2 gap-2 mt-1">
+                                <div><label className="text-gray-500 block">X %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.xPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, xPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                                <div><label className="text-gray-500 block">Y %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.yPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, yPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                                <div><label className="text-gray-500 block">W %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.widthPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, widthPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                                <div><label className="text-gray-500 block">H %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.heightPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, heightPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                              </div>
+                            </details>
+                          </div>
+                        )}
+                        {selectedElement === 'subtitle' && (
+                          <div className="pt-2 border-t border-white/10" onPointerDown={e => e.stopPropagation()}>
+                            <span className="text-xs font-semibold text-white block mb-1">Subtitle Position</span>
+                            <details className="mt-1 text-xs">
+                              <summary className="text-gray-400 cursor-pointer hover:text-white mb-1">Advanced (manual values)</summary>
+                              <div className="grid grid-cols-2 gap-2 mt-1">
+                                <div><label className="text-gray-500 block">X %</label><input type="number" value={Math.round(subtitlePosition.xPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, xPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                                <div><label className="text-gray-500 block">Y %</label><input type="number" value={Math.round(subtitlePosition.yPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, yPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                                <div><label className="text-gray-500 block">W %</label><input type="number" value={Math.round(subtitlePosition.widthPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, widthPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                                <div><label className="text-gray-500 block">H %</label><input type="number" value={Math.round(subtitlePosition.heightPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, heightPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
+                              </div>
+                            </details>
                           </div>
                         )}
                       </div>
@@ -777,6 +890,59 @@ function App() {
                     <span className="text-[10px] text-gray-600">MP4, MOV supported</span>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Fonts Panel */}
+            <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto mt-6 mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-xl">🔤</span>
+                <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">My Fonts</h3>
+              </div>
+              
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-1">
+                  <p className="text-xs text-gray-500 mb-3">Upload your custom TrueType (.ttf) or OpenType (.otf) fonts for burned-in subtitles.</p>
+                  
+                  <div className="flex items-center gap-3">
+                    <label className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold text-xs rounded-lg cursor-pointer transition-colors border border-gray-700">
+                      Upload Font
+                      <input type="file" accept=".ttf,.otf" className="hidden" onChange={handleFontUpload} />
+                    </label>
+                    {fontUploadStatus && <span className="text-xs text-indigo-400 font-medium">{fontUploadStatus}</span>}
+                  </div>
+                </div>
+                
+                <div className="flex-1 bg-gray-950/50 border border-gray-800 rounded-xl p-3 min-h-[120px] max-h-[200px] overflow-y-auto custom-scrollbar">
+                  {fonts.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-xs text-gray-600">No custom fonts uploaded yet</div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <label 
+                        className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedFontId === null ? 'bg-indigo-900/30 border border-indigo-500/50' : 'hover:bg-gray-800/50 border border-transparent'}`}
+                      >
+                        <input type="radio" name="fontSelection" checked={selectedFontId === null} onChange={() => setSelectedFontId(null)} className="hidden" />
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === null ? 'border-indigo-400' : 'border-gray-600'}`}>
+                          {selectedFontId === null && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+                        </div>
+                        <span className="text-sm text-gray-300 font-medium">Default (Noto Sans Myanmar)</span>
+                      </label>
+
+                      {fonts.map(font => (
+                        <label 
+                          key={font.id}
+                          className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedFontId === font.id ? 'bg-indigo-900/30 border border-indigo-500/50' : 'hover:bg-gray-800/50 border border-transparent'}`}
+                        >
+                          <input type="radio" name="fontSelection" checked={selectedFontId === font.id} onChange={() => setSelectedFontId(font.id)} className="hidden" />
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === font.id ? 'border-indigo-400' : 'border-gray-600'}`}>
+                            {selectedFontId === font.id && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+                          </div>
+                          <span className="text-sm text-gray-200" style={{ fontFamily: `font_${font.id}` }}>{font.originalName}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

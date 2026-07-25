@@ -5,6 +5,7 @@ import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, g
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
+import db from '../services/db.js';
 
 // Pipeline steps
 const STEPS = {
@@ -904,6 +905,22 @@ export const processRecapPipeline = async (jobId) => {
                         const subDir = path.join(tmpDir, jobId + "_subs");
                         if (!fs.existsSync(subDir)) fs.mkdirSync(subDir, { recursive: true });
 
+                        let fontfileOption = "font='Noto Sans Myanmar'";
+                        if (job.selectedFontId) {
+                            try {
+                                const row = db.prepare('SELECT storedFilename FROM fonts WHERE id = ?').get(job.selectedFontId);
+                                if (row) {
+                                    const fontPath = path.join(process.cwd(), 'public', 'fonts', row.storedFilename);
+                                    if (fs.existsSync(fontPath)) {
+                                        // FFmpeg needs escaped colons for Windows paths if applicable, but we are in Linux container
+                                        fontfileOption = "fontfile='" + fontPath.replace(/:/g, '\\:') + "'";
+                                    }
+                                }
+                            } catch (err) {
+                                console.error("Error fetching custom font", err);
+                            }
+                        }
+
                         let filterComplex = '';
                         let lastMap = '[0:v]';
                         
@@ -915,8 +932,7 @@ export const processRecapPipeline = async (jobId) => {
                             
                             const nextMap = "[v_sub" + i + "]";
                             
-                            const font = 'Noto Sans Myanmar';
-                            const drawCmd = "drawtext=font='" + font + "':textfile='" + escapedPath + "':fontsize=" + fontsize + ":fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=8:x=" + bx + "+(" + bw + "-text_w)/2:y=" + by + "+(" + bh + "-text_h)/2:enable='between(t," + sub.start + "," + sub.end + ")'";
+                            const drawCmd = "drawtext=" + fontfileOption + ":textfile='" + escapedPath + "':fontsize=" + fontsize + ":fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=8:x=" + bx + "+(" + bw + "-text_w)/2:y=" + by + "+(" + bh + "-text_h)/2:enable='between(t," + sub.start + "," + sub.end + ")'";
                             
                             filterComplex += lastMap + drawCmd + nextMap + ";";
                             lastMap = nextMap;
