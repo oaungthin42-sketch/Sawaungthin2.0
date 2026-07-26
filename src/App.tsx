@@ -7,6 +7,71 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 
+
+const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement> }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const updateProgress = () => {
+      if (video.duration) {
+        setProgress((video.currentTime / video.duration) * 100);
+      }
+    };
+    
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+
+    video.addEventListener('timeupdate', updateProgress);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+
+    return () => {
+      video.removeEventListener('timeupdate', updateProgress);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+    };
+  }, [videoRef]);
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (video) {
+      if (video.paused) video.play();
+      else video.pause();
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (video && video.duration) {
+      const newTime = (Number(e.target.value) / 100) * video.duration;
+      video.currentTime = newTime;
+      setProgress(Number(e.target.value));
+    }
+  };
+
+  return (
+    <div className="w-full mt-3 flex items-center gap-3 bg-gray-900/60 p-2 rounded-xl border border-gray-800">
+      <button onClick={togglePlay} className="text-white hover:text-indigo-400 focus:outline-none transition-colors">
+        {isPlaying ? <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <Play size={20} className="fill-current" />}
+      </button>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="0.1"
+        value={progress || 0}
+        onChange={handleSeek}
+        className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+      />
+    </div>
+  );
+};
+
 function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
@@ -569,13 +634,13 @@ useEffect(() => {
       {/* Dynamic Header */}
       <header className="border-b border-gray-900 bg-gray-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <Video className="w-5.5 h-5.5 text-white" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center logo-glow">
+              <img src="/logo-superclick.png" alt="SuperClick" className="w-8 h-8 object-contain" />
             </div>
-            <div>
-              <h1 className="text-lg font-bold font-display tracking-tight text-white">Movie Recap AI Studio</h1>
-              <p className="text-[11px] text-gray-500 font-medium">Professional Burmese Video Reconstructor</p>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold font-display tracking-tight text-white truncate">SuperClick</h1>
+              <p className="text-[11px] text-gray-500 font-medium hidden sm:block truncate">Professional Burmese Video Reconstructor</p>
             </div>
           </div>
 
@@ -596,10 +661,10 @@ useEffect(() => {
             </button>
             <button 
               onClick={() => setShowSettings(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 text-gray-300 hover:text-white font-semibold text-xs transition-all active:scale-95"
+              className="flex items-center gap-2 px-2 sm:px-4 py-2 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 text-gray-300 hover:text-white font-semibold text-xs transition-all active:scale-95"
             >
               <Settings className="w-4 h-4 text-indigo-400" />
-              ဆက်တင်များ (Settings)
+              <span className="hidden sm:inline">ဆက်တင်များ (Settings)</span>
             </button>
           </div>
         </div>
@@ -811,7 +876,8 @@ useEffect(() => {
                     onChange={handleVideoSelect}
                   />
                   {videoFile && videoPreviewUrl ? (
-                    <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-col w-full">
+                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
                       <video
                         ref={videoRef}
                         src={videoPreviewUrl}
@@ -837,6 +903,7 @@ useEffect(() => {
                             Remove
                           </button>
                         </div>
+                      </div>
                       </div>
                     </div>
                   ) : (
@@ -934,6 +1001,7 @@ useEffect(() => {
                 <div className="flex flex-col md:flex-row gap-6">
                   <div className="w-full md:w-2/3">
                     {videoFile && videoPreviewUrl ? (
+                      <div className="flex flex-col w-full">
                       <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
                         <video
                           ref={videoRef}
@@ -990,6 +1058,8 @@ useEffect(() => {
                             </div>
                           ))}
                         </div>
+                      </div>
+                      <VideoSeekBar videoRef={videoRef} />
                       </div>
                     ) : (
                       <div className="w-full aspect-[9/16] bg-gray-900 rounded-xl flex items-center justify-center text-gray-500 text-sm">Please upload a video first</div>
@@ -1049,6 +1119,7 @@ useEffect(() => {
                 <div className="flex flex-col md:flex-row gap-6">
                   <div className="w-full md:w-2/3">
                     {videoFile && videoPreviewUrl ? (
+                      <div className="flex flex-col w-full">
                       <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
                         <video
                           ref={videoRef}
@@ -1094,6 +1165,8 @@ useEffect(() => {
                             )}
                           </div>
                         </div>
+                      </div>
+                      <VideoSeekBar videoRef={videoRef} />
                       </div>
                     ) : (
                       <div className="w-full aspect-[9/16] bg-gray-900 rounded-xl flex items-center justify-center text-gray-500 text-sm">Please upload a video first</div>

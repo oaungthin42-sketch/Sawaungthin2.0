@@ -21,3 +21,11 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(156, 163, 175, 0.3);
 }
+
+@keyframes logoGlowPulse {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(255,193,7,0.5)) brightness(1); }
+  50% { filter: drop-shadow(0 0 14px rgba(255,193,7,0.9)) brightness(1.15); }
+}
+.logo-glow {
+  animation: logoGlowPulse 2.2s ease-in-out infinite;
+}

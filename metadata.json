@@ -1,6 +1,8 @@
 {
-  "name": "Video-Audio Auto Sync",
+  "name": "SuperClick",
   "description": "A single-page web app that adjusts video playback speed to perfectly match an uploaded audio track.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
