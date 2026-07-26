@@ -189,7 +189,7 @@ router.post('/fonts/upload', (req, res) => {
 
         const fontId = uuidv4();
         const storedFilename = req.file.filename;
-        const originalName = req.file.originalname;
+        const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
 
         const stmt = db.prepare(`INSERT INTO fonts (id, originalName, storedFilename) VALUES (?, ?, ?)`);
         stmt.run(fontId, originalName, storedFilename);
@@ -247,7 +247,7 @@ router.post('/process-recap', handleUpload, (req, res) => {
     createJob(jobId, {
         videoPath: videoFile.path,
         audioPath: null,
-        originalFilename: videoFile.originalname,
+        originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'),
         blurBoxes: blurBoxes,
         subtitlePosition: subtitlePosition,
         selectedFontId: selectedFontId
@@ -293,7 +293,7 @@ router.post('/process', handleUpload, (req, res) => {
      const jobId = uuidv4();
      const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
-     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: videoFile.originalname, blurBoxes: blurBoxes, subtitlePosition: subtitlePosition, selectedFontId: selectedFontId });
+     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'), blurBoxes: blurBoxes, subtitlePosition: subtitlePosition, selectedFontId: selectedFontId });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      

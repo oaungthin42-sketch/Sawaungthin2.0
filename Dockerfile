@@ -17,6 +17,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     fonts-noto-core \
     fonts-noto-unhinted \
     fonts-sil-padauk \
+    chromium \
     fontconfig \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
