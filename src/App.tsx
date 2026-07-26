@@ -14,44 +14,11 @@ function App() {
   const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   
-  const [fonts, setFonts] = useState<any[]>([]);
-  const [selectedFontId, setSelectedFontId] = useState<string | null>(null);
-  const [fontUploadStatus, setFontUploadStatus] = useState<string>('');
+  const [subtitleColor, setSubtitleColor] = useState<string>('white');
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
 
-  const fetchFonts = async () => {
-    try {
-      const res = await axios.get('/api/fonts');
-      setFonts(res.data);
-      res.data.forEach((font: any) => {
-        const fontFace = new FontFace(`font_${font.id}`, `url(${font.url})`);
-        fontFace.load().then(f => document.fonts.add(f)).catch(e => console.warn("Failed to load font", e));
-      });
-    } catch(e) {
-      console.error(e);
-    }
-  };
 
-  const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const formData = new FormData();
-      formData.append('font', file);
-      setFontUploadStatus('Uploading...');
-      try {
-        await axios.post('/api/fonts/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        setFontUploadStatus('Uploaded!');
-        fetchFonts();
-        setTimeout(() => setFontUploadStatus(''), 2000);
-      } catch (err: any) {
-        setFontUploadStatus('Error: ' + (err.response?.data?.error || err.message));
-        setTimeout(() => setFontUploadStatus(''), 4000);
-      }
-    }
-  };
 
   
   const previewContainerRef = useRef<HTMLDivElement>(null);
@@ -496,7 +463,7 @@ useEffect(() => {
     formData.append('geminiApiKey', geminiKey);
     formData.append('blurBoxes', JSON.stringify(blurBoxes));
     formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
-    if (selectedFontId) formData.append('selectedFontId', selectedFontId);
+    formData.append('subtitleColor', subtitleColor);
 
     try {
       const response = await axios.post('/api/process-recap', formData, {
@@ -648,7 +615,7 @@ useEffect(() => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-all duration-300">
             <div className="bg-gray-950 border border-gray-800/80 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
                 <div className="flex justify-between items-center px-6 py-5 border-b border-gray-800/50">
-                    <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                    <h2 className="text-lg sm:text-xl font-bold text-gray-100 flex items-center gap-2">
                         <Menu className="w-5 h-5 text-indigo-400" />
                         Completed Videos (Last 24h)
                     </h2>
@@ -656,7 +623,7 @@ useEffect(() => {
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                     </button>
                 </div>
-                <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1">
                     {completedJobsList.length === 0 ? (
                         <div className="text-center py-10 text-gray-500">
                             No completed videos in the last 24 hours.
@@ -707,14 +674,14 @@ useEffect(() => {
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowVoiceDrawer(false)} />
           <div className="relative w-full max-w-sm bg-gray-950 border-l border-gray-800 shadow-2xl h-full flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="p-6 border-b border-gray-900 flex items-center justify-between">
-              <h2 className="text-xl font-bold font-display text-white">Choose Voice</h2>
+            <div className="p-4 sm:p-6 border-b border-gray-900 flex items-center justify-between">
+              <h2 className="text-lg sm:text-xl font-bold font-display text-white">Choose Voice</h2>
               <button onClick={() => setShowVoiceDrawer(false)} className="p-2 text-gray-500 hover:text-white rounded-lg hover:bg-gray-800 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             </div>
             
-            <div className="p-6 flex-1 overflow-y-auto">
+            <div className="p-4 sm:p-6 flex-1 overflow-y-auto">
               {/* Voice Gender Tabs */}
               <div className="flex bg-gray-900 p-1 rounded-xl mb-6">
                 <button 
@@ -825,7 +792,7 @@ useEffect(() => {
             {currentStep === 1 && (
               <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">🎬</span>
+                  <span className="text-lg sm:text-xl">🎬</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Upload Video</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-5">Upload the original video you want to process.</p>
@@ -844,7 +811,7 @@ useEffect(() => {
                     onChange={handleVideoSelect}
                   />
                   {videoFile && videoPreviewUrl ? (
-                    <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
+                    <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
                       <video
                         ref={videoRef}
                         src={videoPreviewUrl}
@@ -885,7 +852,7 @@ useEffect(() => {
             {/* Step 2: Narration Mode */}
               <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">📝</span>
+                  <span className="text-lg sm:text-xl">📝</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Narration Mode</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-6">Choose how the AI should explain the video.</p>
@@ -921,7 +888,7 @@ useEffect(() => {
             {/* Step 3: Voice Selection */}
               <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">🎙️</span>
+                  <span className="text-lg sm:text-xl">🎙️</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Voice Selection</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-6">Choose the Voice for your generated audio track.</p>
@@ -959,7 +926,7 @@ useEffect(() => {
             {currentStep === 2 && (
               <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">🌫️</span>
+                  <span className="text-lg sm:text-xl">🌫️</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur Mask Editor</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-6">Hide sensitive areas in the video like faces or watermarks.</p>
@@ -967,7 +934,7 @@ useEffect(() => {
                 <div className="flex flex-col md:flex-row gap-6">
                   <div className="w-full md:w-2/3">
                     {videoFile && videoPreviewUrl ? (
-                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
+                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
                         <video
                           ref={videoRef}
                           src={videoPreviewUrl}
@@ -979,17 +946,14 @@ useEffect(() => {
                           
                           {/* Subtitles faintly visible */}
                           <div
-                            className="absolute border-2 border-gray-500/20 bg-gray-500/5 transition-colors flex items-center justify-center overflow-hidden pointer-events-none"
+                            className="absolute border-2 border-dashed border-yellow-400/70 transition-colors pointer-events-none"
                             style={{
                               left: `${subtitlePosition.xPct}%`,
                               top: `${subtitlePosition.yPct}%`,
                               width: `${subtitlePosition.widthPct}%`,
-                              height: `${subtitlePosition.heightPct}%`,
-                              fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
+                              height: `${subtitlePosition.heightPct}%`
                             }}
-                          >
-                            <span className="text-white/50 font-bold text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
-                          </div>
+                          />
 
                           {/* Blur Boxes */}
                           {blurBoxes.map((box) => (
@@ -1077,7 +1041,7 @@ useEffect(() => {
             {currentStep === 3 && (
               <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">🔤</span>
+                  <span className="text-lg sm:text-xl">🔤</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Subtitle Position</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-6">Drag and resize the box to set where subtitles will appear.</p>
@@ -1085,7 +1049,7 @@ useEffect(() => {
                 <div className="flex flex-col md:flex-row gap-6">
                   <div className="w-full md:w-2/3">
                     {videoFile && videoPreviewUrl ? (
-                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
+                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
                         <video
                           ref={videoRef}
                           src={videoPreviewUrl}
@@ -1117,7 +1081,6 @@ useEffect(() => {
                               top: `${subtitlePosition.yPct}%`,
                               width: `${subtitlePosition.widthPct}%`,
                               height: `${subtitlePosition.heightPct}%`,
-                              fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
                             }}
                           >
                             <span className="text-white font-bold drop-shadow-md text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
@@ -1156,73 +1119,26 @@ useEffect(() => {
                       ) : (
                         <div className="text-xs text-gray-500 py-6 text-center">Click "Edit Size" or select the subtitle box on the video to manually adjust dimensions.</div>
                       )}
+
+                      <div className="mt-4 pt-4 border-t border-gray-800">
+                        <label className="text-gray-400 text-xs font-bold mb-3 block">Subtitle Color</label>
+                        <div className="flex gap-3">
+                          <button onClick={() => setSubtitleColor('white')} className={`w-8 h-8 rounded-full bg-white border-2 ${subtitleColor === 'white' ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-gray-600'}`} title="White" />
+                          <button onClick={() => setSubtitleColor('yellow')} className={`w-8 h-8 rounded-full bg-yellow-400 border-2 ${subtitleColor === 'yellow' ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-gray-600'}`} title="Yellow" />
+                          <button onClick={() => setSubtitleColor('blue')} className={`w-8 h-8 rounded-full bg-blue-500 border-2 ${subtitleColor === 'blue' ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-gray-600'}`} title="Blue" />
+                        </div>
+                      </div>
+
                     </div>
                   </div>
                 </div>
-              </div>
+              </div></div>)}
 
-            {/* Step 6: My Fonts */}
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-xl">🔤</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">My Fonts</h3>
-                </div>
-                
-                <div className="flex flex-col md:flex-row gap-6">
-                  <div className="flex-1">
-                    <p className="text-xs text-gray-500 mb-4">Upload your custom TrueType (.ttf) or OpenType (.otf) fonts for burned-in subtitles.</p>
-                    
-                    <div className="flex flex-col gap-3">
-                      <label className={`flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-700 hover:border-indigo-500 bg-gray-950/50 hover:bg-indigo-950/20 text-gray-300 font-semibold text-sm rounded-xl cursor-pointer transition-all ${fontUploadStatus === 'Uploading...' ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <UploadCloud className="w-5 h-5 text-indigo-400" />
-                        {fontUploadStatus === 'Uploading...' ? 'Uploading...' : 'Upload Custom Font'}
-                        <input type="file" accept=".ttf,.otf" className="hidden" onChange={handleFontUpload} disabled={fontUploadStatus === 'Uploading...'} />
-                      </label>
-                      {fontUploadStatus && <div className="text-xs text-center text-indigo-400 font-medium bg-indigo-950/30 py-2 rounded-lg">{fontUploadStatus}</div>}
-                    </div>
-                  </div>
-                  
-                  <div className="flex-1 bg-gray-950/80 border border-gray-800 rounded-xl p-3 min-h-[200px] max-h-[300px] overflow-y-auto custom-scrollbar">
-                    {fonts.length === 0 ? (
-                      <div className="flex h-full flex-col items-center justify-center text-center px-4">
-                        <span className="text-2xl mb-2">📂</span>
-                        <span className="text-xs text-gray-500">No custom fonts uploaded yet. Using default Noto Sans Myanmar.</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        <label 
-                          className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${selectedFontId === null ? 'bg-indigo-600 shadow-md text-white' : 'hover:bg-gray-800/80 bg-gray-900/50 text-gray-300'}`}
-                        >
-                          <input type="radio" name="fontSelection" checked={selectedFontId === null} onChange={() => setSelectedFontId(null)} className="hidden" />
-                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === null ? 'border-white' : 'border-gray-500'}`}>
-                            {selectedFontId === null && <div className="w-2 h-2 rounded-full bg-white" />}
-                          </div>
-                          <span className="text-sm font-bold">Default (Noto Sans Myanmar)</span>
-                        </label>
-
-                        {fonts.map(font => (
-                          <label 
-                            key={font.id}
-                            className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${selectedFontId === font.id ? 'bg-indigo-600 shadow-md text-white' : 'hover:bg-gray-800/80 bg-gray-900/50 text-gray-300'}`}
-                          >
-                            <input type="radio" name="fontSelection" checked={selectedFontId === font.id} onChange={() => setSelectedFontId(font.id)} className="hidden" />
-                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === font.id ? 'border-white' : 'border-gray-500'}`}>
-                              {selectedFontId === font.id && <div className="w-2 h-2 rounded-full bg-white" />}
-                            </div>
-                            <span className="text-lg" style={{ fontFamily: `font_${font.id}` }}>{font.originalName}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-</div>)}
             {/* Step 7: Final Preview */}
             {currentStep === 4 && (
               <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">✨</span>
+                  <span className="text-lg sm:text-xl">✨</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Final Preview</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-6">Review your settings before starting the AI generation.</p>
@@ -1259,7 +1175,6 @@ useEffect(() => {
                               top: `${subtitlePosition.yPct}%`,
                               width: `${subtitlePosition.widthPct}%`,
                               height: `${subtitlePosition.heightPct}%`,
-                              fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
                             }}
                           >
                             <span className="text-white font-bold drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] text-center w-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
@@ -1274,7 +1189,7 @@ useEffect(() => {
             {/* Step 8: Render / Actions */}
               <div className="flex flex-col items-center justify-center pt-8 max-w-md mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-8 duration-700">
                 <div className="text-center mb-4">
-                  <h2 className="text-2xl font-bold font-display text-white mb-2">Ready to Render</h2>
+                  <h2 className="text-xl sm:text-2xl font-bold font-display text-white mb-2">Ready to Render</h2>
                   <p className="text-gray-400 text-sm">Your video is configured and ready for AI processing.</p>
                 </div>
                 {isKeysConfigured ? (
@@ -1379,7 +1294,7 @@ useEffect(() => {
                 <div className="w-16 h-16 rounded-2xl bg-red-950/20 border border-red-900/30 flex items-center justify-center text-red-500 mb-4 animate-bounce">
                   <AlertCircle className="w-8 h-8" />
                 </div>
-                <h2 className="text-xl font-bold font-display text-red-400 mb-2">ပြန်ဆိုစနစ် ချို့ယွင်းချက်ရှိပါသည် (Failed)</h2>
+                <h2 className="text-lg sm:text-xl font-bold font-display text-red-400 mb-2">ပြန်ဆိုစနစ် ချို့ယွင်းချက်ရှိပါသည် (Failed)</h2>
                 <div className="px-4 py-2 bg-red-950/20 border border-red-900/30 rounded-lg max-w-lg">
                   <p className="text-red-300/80 text-xs font-mono break-words">{errorMsg}</p>
                 </div>

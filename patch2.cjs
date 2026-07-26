@@ -1,56 +1,31 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/workers/processor.js', 'utf8');
+let code = fs.readFileSync('src/App.tsx', 'utf8');
 
-const target = `                                <body style="margin:0; padding:0; background:transparent;">
-                                    <div style="
-                                        font-size:\${fontsize}px; 
-                                        color:white; 
-                                        text-align:center; 
-                                        -webkit-text-stroke: \${Math.max(2, Math.floor(fontsize/20))}px black; 
-                                        white-space:pre-wrap; 
-                                        width:\${pos.widthPct}vw; 
-                                        position:absolute; 
-                                        left:\${pos.xPct}vw; 
-                                        top:\${pos.yPct}vh; 
-                                        text-shadow: 0px 4px 10px rgba(0,0,0,0.8);
-                                        line-height:1.2;
-                                        transform: translateY(-50%);
-                                    ">\${sub.text}</div>
-                                </body>
-                                </html>
-                                \`;
-                                await page.setContent(html);
-                                await page.screenshot({ path: pngPath, omitBackground: true });`;
+// 1. Remove font states, add subtitleColor
+code = code.replace(
+  "  const [fonts, setFonts] = useState<any[]>([]);\n  const [selectedFontId, setSelectedFontId] = useState<string | null>(null);\n  const [fontUploadStatus, setFontUploadStatus] = useState<string>('');",
+  "  const [subtitleColor, setSubtitleColor] = useState<string>('white');"
+);
 
-const replacement = `                                <body style="margin:0; padding:0; background:transparent;">
-                                    <div style="
-                                        font-size:\${fontsize}px; 
-                                        color:white; 
-                                        text-align:center; 
-                                        -webkit-text-stroke: \${Math.max(2, Math.floor(fontsize/20))}px black; 
-                                        white-space:pre-wrap; 
-                                        width:\${pos.widthPct}vw; 
-                                        height:\${pos.heightPct}vh; 
-                                        position:absolute; 
-                                        left:\${pos.xPct}vw; 
-                                        top:\${pos.yPct}vh; 
-                                        display:flex; 
-                                        align-items:center; 
-                                        justify-content:center; 
-                                        text-shadow: 0px 4px 10px rgba(0,0,0,0.8);
-                                        line-height:1.2;
-                                    ">\${sub.text}</div>
-                                </body>
-                                </html>
-                                \`;
-                                await page.setContent(html);
-                                await page.evaluate(() => document.fonts.ready);
-                                await page.screenshot({ path: pngPath, omitBackground: true });`;
+// 2. Remove fetchFonts
+code = code.replace(/  const fetchFonts = async \(\) => \{[\s\S]*?  \};\n/m, "");
 
-if (!code.includes(target)) {
-    console.error("Target not found!");
-    process.exit(1);
-}
+// 3. Remove handleFontUpload
+code = code.replace(/  const handleFontUpload = async \([\s\S]*?  \};\n/m, "");
 
-code = code.replace(target, replacement);
-fs.writeFileSync('src/workers/processor.js', code, 'utf8');
+// 4. Remove useEffect calling fetchFonts
+code = code.replace(/  useEffect\(\(\) => \{\n    fetchFonts\(\);\n  \}, \[\]\);\n/m, "");
+
+// 5. Add subtitleColor to handleJobSubmission form data
+code = code.replace(
+  "formData.append('subtitlePosition', JSON.stringify(subtitlePosition));",
+  "formData.append('subtitlePosition', JSON.stringify(subtitlePosition));\n    formData.append('subtitleColor', subtitleColor);"
+);
+
+// 6. Remove selectedFontId from formData
+code = code.replace(
+  /    if \(selectedFontId\) \{\n      formData.append\('selectedFontId', selectedFontId\);\n    \}\n/m,
+  ""
+);
+
+fs.writeFileSync('src/App.tsx', code, 'utf8');

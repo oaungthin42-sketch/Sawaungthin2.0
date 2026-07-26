@@ -1,14 +1,11 @@
 const fs = require('fs');
-let content = fs.readFileSync('src/routes/api.js', 'utf8');
+let code = fs.readFileSync('src/routes/api.js', 'utf8');
 
-content = content.replace(
-/const originalName = req\.file\.originalname;/g,
-"const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');"
-);
+// 1. Remove fontStorage and fontUpload
+code = code.replace(/const fontStorage = multer\.diskStorage\(\{[\s\S]*?\}\);\nconst fontUpload = multer\(\{[\s\S]*?\}\);\n/, "");
 
-content = content.replace(
-/originalFilename: videoFile\.originalname/g,
-"originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8')"
-);
+// 2. Remove /fonts/upload and /fonts
+code = code.replace(/router\.post\('\/fonts\/upload', \([\s\S]*?\}\);\n\}\);\n/m, "");
+code = code.replace(/router\.get\('\/fonts', \([\s\S]*?\}\);\n/m, "");
 
-fs.writeFileSync('src/routes/api.js', content, 'utf8');
+fs.writeFileSync('src/routes/api.js', code, 'utf8');

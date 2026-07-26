@@ -24,28 +24,6 @@ if (process.env.MAX_UPLOAD_SIZE_MB) {
     }
 }
 
-const fontStorage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = path.join(process.cwd(), 'public', 'fonts');
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, uuidv4() + ext);
-    }
-});
-const fontUpload = multer({
-    storage: fontStorage,
-    fileFilter: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        if (ext === '.ttf' || ext === '.otf') {
-            cb(null, true);
-        } else {
-            cb(new Error('Only .ttf and .otf font files are allowed'));
-        }
-    }
-});
 
 const upload = multer({ 
     dest: tmpDir,
@@ -182,44 +160,7 @@ router.post('/preview-voice', async (req, res) => {
 
 
 
-router.post('/fonts/upload', (req, res) => {
-    fontUpload.single('font')(req, res, function(err) {
-        if (err) return res.status(400).json({ error: err.message });
-        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-        const storedFilename = req.file.filename;
-        const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
-
-        // Check for existing font with same name
-        const existing = db.prepare('SELECT id, storedFilename FROM fonts WHERE originalName = ?').get(originalName);
-        let fontId;
-        if (existing) {
-            fontId = existing.id;
-            // Optionally delete old file
-            try {
-                const oldPath = path.join(process.cwd(), 'public', 'fonts', existing.storedFilename);
-                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-            } catch(e) {}
-            
-            db.prepare('UPDATE fonts SET storedFilename = ? WHERE id = ?').run(storedFilename, fontId);
-        } else {
-            fontId = uuidv4();
-            db.prepare('INSERT INTO fonts (id, originalName, storedFilename) VALUES (?, ?, ?)').run(fontId, originalName, storedFilename);
-        }
-
-        res.json({ id: fontId, originalName, url: `/fonts/${storedFilename}` });
-    });
-});
-
-router.get('/fonts', (req, res) => {
-    const rows = db.prepare(`SELECT id, originalName, storedFilename FROM fonts`).all();
-    const fonts = rows.map(r => ({
-        id: r.id,
-        originalName: r.originalName,
-        url: `/fonts/${r.storedFilename}`
-    }));
-    res.json(fonts);
-});
 
 // Settings Routes
 router.get('/settings', (req, res) => {

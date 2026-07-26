@@ -1,12 +1,7 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/workers/processor.js', 'utf8');
+let code = fs.readFileSync('src/App.tsx', 'utf8');
 
-code = code.replace(
-    /\} catch\(e\) \{\s*console\.error\("\[SUBTITLE\] Error burning subtitles:", e\);\s*\}/g,
-    `} catch(e) {
-                    console.error("[SUBTITLE] Error burning subtitles:", e);
-                    state.warnings.push("⚠ Subtitles could not be burned in: " + e.message);
-                }`
-);
+// Remove Step 6 My Fonts
+code = code.replace(/\s*\{\/\*\s*Step 6: My Fonts\s*\*\/\}[\s\S]*?\{fonts\.length === 0 \? \([\s\S]*?\}\)\s*\}\s*<\/div>\s*<\/div>\s*<\/div>\s*<\/div>\s*<\/div>\s*\)\s*\}/, "");
 
-fs.writeFileSync('src/workers/processor.js', code, 'utf8');
+fs.writeFileSync('src/App.tsx', code, 'utf8');

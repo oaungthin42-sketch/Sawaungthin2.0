@@ -919,27 +919,10 @@ export const processRecapPipeline = async (jobId) => {
                         if (fontsize > 80) fontsize = 80;
 
                         let fontName = "Padauk";
-                        if (job.selectedFontId) {
-                            try {
-                                const row = db.prepare('SELECT storedFilename FROM fonts WHERE id = ?').get(job.selectedFontId);
-                                if (row) {
-                                    const fontPath = path.join(process.cwd(), 'public', 'fonts', row.storedFilename);
-                                    if (fs.existsSync(fontPath)) {
-                                        try {
-                                            const { execSync } = require('child_process');
-                                            const familyRaw = execSync('fc-scan --format "%{family}\n" "' + fontPath + '"').toString().trim();
-                                            if (familyRaw) {
-                                                fontName = familyRaw.split(',')[0].trim();
-                                            }
-                                        } catch(e) {
-                                            console.error("Font scan error", e);
-                                        }
-                                    }
-                                }
-                            } catch (err) {
-                                console.error("Error fetching custom font", err);
-                            }
-                        }
+
+                        let primaryColor = "&H00FFFFFF"; // white
+                        if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
+                        if (job.subtitleColor === "blue") primaryColor = "&H00FF0000";
 
                         console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
                         
@@ -951,7 +934,7 @@ export const processRecapPipeline = async (jobId) => {
                             return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
                         };
                         
-                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
                         
                         const assLines = subtitles.map(sub => {
                             const startStr = toAssTime(sub.start);
@@ -963,9 +946,7 @@ export const processRecapPipeline = async (jobId) => {
                         const assPath = path.join(tmpDir, jobId + ".ass");
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
                         
-                        const filterComplex = job.selectedFontId
-                            ? `[0:v]ass='${assPath.replace(/:/g, '\\:')}':fontsdir='${path.join(process.cwd(), 'public', 'fonts').replace(/:/g, '\\:')}'[v]`
-                            : `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                        const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
                         
                         const subArgs = [
                             '-i', finalOutPath,

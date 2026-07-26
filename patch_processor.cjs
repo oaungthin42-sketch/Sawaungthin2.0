@@ -1,63 +1,27 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/workers/processor.js', 'utf8');
 
-const blurTarget = `                        lastMap = nextMap;
-                    }
-                    
-                    const blurArgs = [
-                        '-i', finalOutPath,
-                        '-filter_complex', filterComplex,
-                        '-map', lastMap, '-map', '0:a?',
-                        '-c:a', 'copy',
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        '-y', blurTmpPath
-                    ];
-                    
-                    await runFFmpeg(blurArgs, tmpDir);
-                    
-                    if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                        fs.unlinkSync(finalOutPath);
-                        fs.renameSync(blurTmpPath, finalOutPath);
-                    } else {
-                        console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
-                    }`;
+// 1. Remove selectedFontId block and set fontName
+code = code.replace(/let fontName = "Padauk";[\s\S]*?console\.log\("\[SUBTITLE\] Burning " \+ subtitles\.length \+ " subtitles using libass\.\.\."\);/,
+  `let fontName = "Padauk";
 
-const blurReplacement = `                        lastMap = nextMap;
-                    }
-                    
-                    console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
-                    console.log("[BLUR] filterComplex:", filterComplex);
-                    
-                    if (!filterComplex || filterComplex.trim() === '') {
-                        console.error('[BLUR] filterComplex was empty, skipping blur step.');
-                    } else {
-                        const blurArgs = [
-                            '-i', finalOutPath,
-                            '-filter_complex', filterComplex.replace(/;\\s*$/, ""),
-                            '-map', lastMap, '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            '-y', blurTmpPath
-                        ];
-                        
-                        await runFFmpeg(blurArgs, tmpDir);
-                        
-                        if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                            fs.unlinkSync(finalOutPath);
-                            fs.renameSync(blurTmpPath, finalOutPath);
-                        } else {
-                            console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
-                            state.warnings.push("⚠ Blur could not be applied: FFmpeg failed to produce output file");
-                        }
-                    }`;
+                        let primaryColor = "&H00FFFFFF"; // white
+                        if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
+                        if (job.subtitleColor === "blue") primaryColor = "&H00FF0000";
 
-if (code.includes(blurTarget)) {
-    code = code.replace(blurTarget, blurReplacement);
-    console.log("BLUR PATCH SUCCESS");
-} else {
-    console.log("BLUR PATCH FAILED");
-}
+                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");`
+);
+
+// 2. Update ASS Header (use primaryColor, set bold to -1)
+code = code.replace(
+  /Style: Default,\$\{fontName\},\$\{fontsize\},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,0,8,\$\{marginL\},\$\{marginR\},\$\{marginV\},1/,
+  "Style: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1"
+);
+
+// 3. Simplify filterComplex
+code = code.replace(
+  /const filterComplex = job\.selectedFontId[\s\S]*?: `\[0:v\]ass='\$\{assPath\.replace\(\/:\/g, '\\\\:'\)\}'\[v\]`;/,
+  "const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\\\:')}'[v]`;"
+);
 
 fs.writeFileSync('src/workers/processor.js', code, 'utf8');

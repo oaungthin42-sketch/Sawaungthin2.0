@@ -1,22 +1,14 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/App.tsx', 'utf8');
 
-const target = `<h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 mb-4 flex items-center gap-2">`;
-const replacement = `{analysisData.warnings && analysisData.warnings.length > 0 && (
-                  <div className="mb-4 bg-orange-950/40 border border-orange-900/50 p-4 rounded-xl flex flex-col gap-2">
-                    <h4 className="text-orange-400 font-bold text-xs uppercase flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4" />
-                      Warnings during processing:
-                    </h4>
-                    <ul className="list-disc pl-5 text-orange-300/80 text-sm space-y-1">
-                      {analysisData.warnings.map((w: string, i: number) => (
-                        <li key={i}>{w}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 mb-4 flex items-center gap-2">`;
+// 1. Remove font states and add subtitleColor state
+code = code.replace(
+  /const \[fonts, setFonts\] = useState<any\[\]>\(\[\]\);\s*const \[selectedFontId, setSelectedFontId\] = useState<string \| null>\(null\);\s*const \[fontUploadStatus, setFontUploadStatus\] = useState<string>\(''\);/,
+  "const [subtitleColor, setSubtitleColor] = useState<string>('white');"
+);
 
-code = code.replace(target, replacement);
+// 2. Remove fetchFonts and handleFontUpload and useEffect
+code = code.replace(/const fetchFonts = async \(\) => \{[\s\S]*?fetchFonts\(\);\n  \}, \[\]\);/m, "");
 
-fs.writeFileSync('src/App.tsx', code, 'utf8');
+code = code.replace(/const handleFontUpload = async[^\n]*\n([\s\S]*?)};\n/m, "");
+// handleFontUpload might be slightly different. Let's find exactly.
