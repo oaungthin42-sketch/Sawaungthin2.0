@@ -56,7 +56,7 @@ export const processRecapPipeline = async (jobId) => {
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
 
     const statePath = path.join(cacheDir, 'state.json');
-    let state = {};
+    let state = { warnings: [] };
     if (fs.existsSync(statePath)) {
         try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
     }
@@ -1074,6 +1074,7 @@ export const processRecapPipeline = async (jobId) => {
                     }
                 } catch(e) {
                     console.error("[SUBTITLE] Error burning subtitles:", e);
+                    state.warnings.push("⚠ Subtitles could not be burned in: " + e.message);
                 }
             }
             advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
@@ -1116,6 +1117,7 @@ export const processRecapPipeline = async (jobId) => {
             currentStep: 'Done',
             completed_at: Date.now(),
             result: {
+                warnings: state.warnings,
                 metadata: { duration: state.originalVideoDuration, finalDuration: state.audioDuration },
                 scenes: state.scenes,
                 originalTranscript: state.originalTranscript,

@@ -1173,10 +1173,10 @@ useEffect(() => {
                     <p className="text-xs text-gray-500 mb-4">Upload your custom TrueType (.ttf) or OpenType (.otf) fonts for burned-in subtitles.</p>
                     
                     <div className="flex flex-col gap-3">
-                      <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-700 hover:border-indigo-500 bg-gray-950/50 hover:bg-indigo-950/20 text-gray-300 font-semibold text-sm rounded-xl cursor-pointer transition-all">
+                      <label className={`flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-700 hover:border-indigo-500 bg-gray-950/50 hover:bg-indigo-950/20 text-gray-300 font-semibold text-sm rounded-xl cursor-pointer transition-all ${fontUploadStatus === 'Uploading...' ? 'opacity-50 pointer-events-none' : ''}`}>
                         <UploadCloud className="w-5 h-5 text-indigo-400" />
-                        Upload Custom Font
-                        <input type="file" accept=".ttf,.otf" className="hidden" onChange={handleFontUpload} />
+                        {fontUploadStatus === 'Uploading...' ? 'Uploading...' : 'Upload Custom Font'}
+                        <input type="file" accept=".ttf,.otf" className="hidden" onChange={handleFontUpload} disabled={fontUploadStatus === 'Uploading...'} />
                       </label>
                       {fontUploadStatus && <div className="text-xs text-center text-indigo-400 font-medium bg-indigo-950/30 py-2 rounded-lg">{fontUploadStatus}</div>}
                     </div>
@@ -1432,6 +1432,19 @@ useEffect(() => {
             {/* Final Video Render Screen */}
             {analysisData.videoUrl && (
               <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-xl">
+                {analysisData.warnings && analysisData.warnings.length > 0 && (
+                  <div className="mb-4 bg-orange-950/40 border border-orange-900/50 p-4 rounded-xl flex flex-col gap-2">
+                    <h4 className="text-orange-400 font-bold text-xs uppercase flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      Warnings during processing:
+                    </h4>
+                    <ul className="list-disc pl-5 text-orange-300/80 text-sm space-y-1">
+                      {analysisData.warnings.map((w: string, i: number) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 mb-4 flex items-center gap-2">
                   <Volume2 className="w-4 h-4 text-indigo-400" />
                   ရလဒ်ဗီဒီယိုကြည့်ရှုရန် (Play Final Output)
