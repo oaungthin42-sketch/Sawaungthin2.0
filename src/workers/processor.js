@@ -978,17 +978,21 @@ export const processRecapPipeline = async (jobId) => {
                                         -webkit-text-stroke: ${Math.max(2, Math.floor(fontsize/20))}px black; 
                                         white-space:pre-wrap; 
                                         width:${pos.widthPct}vw; 
+                                        height:${pos.heightPct}vh; 
                                         position:absolute; 
                                         left:${pos.xPct}vw; 
                                         top:${pos.yPct}vh; 
+                                        display:flex; 
+                                        align-items:center; 
+                                        justify-content:center; 
                                         text-shadow: 0px 4px 10px rgba(0,0,0,0.8);
                                         line-height:1.2;
-                                        transform: translateY(-50%);
                                     ">${sub.text}</div>
                                 </body>
                                 </html>
                                 `;
                                 await page.setContent(html);
+                                await page.evaluate(() => document.fonts.ready);
                                 await page.screenshot({ path: pngPath, omitBackground: true });
                                 
                                 pngInputs.push('-loop', '1', '-i', pngPath);
