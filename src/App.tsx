@@ -103,11 +103,11 @@ function App() {
 
     let displayWidth, displayHeight;
     if (videoRatio > containerRatio) {
-      displayWidth = container.width;
-      displayHeight = container.width / videoRatio;
-    } else {
       displayHeight = container.height;
       displayWidth = container.height * videoRatio;
+    } else {
+      displayWidth = container.width;
+      displayHeight = container.width / videoRatio;
     }
 
     const rect = {

@@ -197,14 +197,16 @@ router.post('/process-recap', handleUpload, (req, res) => {
     const jobId = uuidv4();
     const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
-     const selectedFontId = req.body.selectedFontId || null;
+    const selectedFontId = req.body.selectedFontId || null;
+    const subtitleColor = req.body.subtitleColor || "white";
     createJob(jobId, {
         videoPath: videoFile.path,
         audioPath: null,
         originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'),
         blurBoxes: blurBoxes,
         subtitlePosition: subtitlePosition,
-        selectedFontId: selectedFontId
+        selectedFontId: selectedFontId,
+        subtitleColor: subtitleColor
     });
     setJobKeys(jobId, { geminiApiKey });
     
@@ -247,7 +249,10 @@ router.post('/process', handleUpload, (req, res) => {
      const jobId = uuidv4();
      const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
-     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'), blurBoxes: blurBoxes, subtitlePosition: subtitlePosition, selectedFontId: selectedFontId });
+     const selectedFontId = req.body.selectedFontId || null;
+     const subtitleColor = req.body.subtitleColor || "white";
+     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'), blurBoxes: blurBoxes, subtitlePosition: subtitlePosition, selectedFontId: selectedFontId,
+        subtitleColor: subtitleColor });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      
