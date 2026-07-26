@@ -964,8 +964,8 @@ export const processRecapPipeline = async (jobId) => {
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
                         
                         const filterComplex = job.selectedFontId
-                            ? `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}':fontsdir='${path.join(process.cwd(), 'public', 'fonts').replace(/:/g, '\\:')}':charenc=UTF-8[v]`
-                            : `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}':charenc=UTF-8[v]`;
+                            ? `[0:v]ass='${assPath.replace(/:/g, '\\:')}':fontsdir='${path.join(process.cwd(), 'public', 'fonts').replace(/:/g, '\\:')}'[v]`
+                            : `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
                         
                         const subArgs = [
                             '-i', finalOutPath,
