@@ -37,6 +37,7 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN blurBoxes TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitlePosition TEXT`); } catch (e) {}
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN selectedFontId TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleColor TEXT`); } catch (e) {}
 
 try {
     db.exec(`
