@@ -423,9 +423,9 @@ export const processRecapPipeline = async (jobId) => {
                             '-map', '[v]',
                             '-t', target_dur,
                             '-c:v', 'libx264',
-                            '-preset', 'ultrafast',
+                            '-preset', 'fast',
                             '-threads', '2',
-                            '-crf', '28',
+                            '-crf', '20',
                             '-f', 'mpegts',
                             '-y', segFileTmp
                         ];
@@ -783,6 +783,7 @@ export const processRecapPipeline = async (jobId) => {
             advanceStep(STEPS.EXPORT, 99, 'Export Complete');
         }
 
+        // TODO(future optimization): Merge the blur pass and subtitle-burn pass into a SINGLE ffmpeg filter_complex call instead of two separate full re-encodes, to avoid stacking generation loss and to save processing time.
         // 11.5 BLUR BOXES
         if (!hasCompletedStep(job.currentStep, STEPS.BLUR_BOXES)) {
             if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
