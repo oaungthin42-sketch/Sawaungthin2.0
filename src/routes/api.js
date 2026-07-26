@@ -124,7 +124,7 @@ router.post('/preview-voice', async (req, res) => {
     if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
     
     try {
-        const previewText = "ကြိုဆိုပါတယ်။ ဒီနေ့မှာတော့ စိတ်ဝင်စားဖို့ကောင်းတဲ့ ဇာတ်လမ်းတစ်ပုဒ်ကို အတူတူကြည့်ရှုသွားကြမှာဖြစ်ပါတယ်။";
+        const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
         const ttsClient = new EdgeTTS({ 
             voice: config.edgeVoice,
             pitch: config.pitch,
