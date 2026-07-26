@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { 
-  UploadCloud, Video, AlertCircle, CheckCircle, Loader2, Download, 
+  UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Settings, Play, ShieldAlert, RefreshCw, Menu, 
   Volume2, ArrowRight, Check 
 } from 'lucide-react';
