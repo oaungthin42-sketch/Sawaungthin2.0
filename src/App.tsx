@@ -765,19 +765,15 @@ useEffect(() => {
         <div className="mb-8">
           <div className="flex items-center justify-between overflow-x-auto pb-4 custom-scrollbar max-w-5xl mx-auto px-4">
             {[
-              "Upload Video",
-              "Narration Mode",
-              "Voice Selection",
+              "Upload & Voice",
               "Blur Mask",
-              "Subtitles",
-              "My Fonts",
-              "Final Preview",
+              "Subtitles & Fonts",
               "Render"
             ].map((stepLabel, i) => {
               const stepNum = i + 1;
-              const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 8);
-              const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 8);
-              const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 8 && videoFile));
+              const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 4);
+              const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 4);
+              const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 4 && videoFile));
 
               return (
                 <div key={stepNum} className="flex items-center flex-1 last:flex-none">
@@ -793,7 +789,7 @@ useEffect(() => {
                     </div>
                     <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
                   </button>
-                  {i < 7 && (
+                  {i < 3 && (
                     <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
                   )}
                 </div>
@@ -827,7 +823,7 @@ useEffect(() => {
             
             {/* Step 1: Upload Video */}
             {currentStep === 1 && (
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">🎬</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Upload Video</h3>
@@ -885,10 +881,8 @@ useEffect(() => {
                   )}
                 </div>
               </div>
-            )}
 
             {/* Step 2: Narration Mode */}
-            {currentStep === 2 && (
               <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">📝</span>
@@ -923,10 +917,8 @@ useEffect(() => {
                   {!currentDialogueMode && !currentColloquialMode ? 'Current: Normal (Direct Translation)' : 'Multiple modes can be combined.'}
                 </p>
               </div>
-            )}
 
             {/* Step 3: Voice Selection */}
-            {currentStep === 3 && (
               <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">🎙️</span>
@@ -962,11 +954,10 @@ useEffect(() => {
                     </button>
                 </div>
               </div>
-            )}
-
+</div>)}
             {/* Step 4: Blur Mask Editor */}
-            {currentStep === 4 && (
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {currentStep === 2 && (
+              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">🌫️</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur Mask Editor</h3>
@@ -1081,11 +1072,10 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-            )}
-
+</div>)}
             {/* Step 5: Subtitle Editor */}
-            {currentStep === 5 && (
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {currentStep === 3 && (
+              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">🔤</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Subtitle Position</h3>
@@ -1170,10 +1160,8 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-            )}
 
             {/* Step 6: My Fonts */}
-            {currentStep === 6 && (
               <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xl">🔤</span>
@@ -1229,11 +1217,10 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-            )}
-
+</div>)}
             {/* Step 7: Final Preview */}
-            {currentStep === 7 && (
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {currentStep === 4 && (
+              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">✨</span>
                   <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Final Preview</h3>
@@ -1283,10 +1270,8 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-            )}
 
             {/* Step 8: Render / Actions */}
-            {currentStep === 8 && (
               <div className="flex flex-col items-center justify-center pt-8 max-w-md mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-8 duration-700">
                 <div className="text-center mb-4">
                   <h2 className="text-2xl font-bold font-display text-white mb-2">Ready to Render</h2>
@@ -1312,8 +1297,7 @@ useEffect(() => {
                   </button>
                 )}
               </div>
-            )}
-            
+            </div>)}
             {/* Navigation Controls */}
             <div className="flex items-center justify-between max-w-5xl mx-auto mt-8 pt-4 border-t border-gray-900">
               <button
@@ -1324,9 +1308,9 @@ useEffect(() => {
                 Back
               </button>
               
-              {currentStep < 8 && (
+              {currentStep < 4 && (
                 <button
-                  onClick={() => setCurrentStep(prev => Math.min(8, prev + 1))}
+                  onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))}
                   disabled={currentStep === 1 && !videoFile}
                   className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >

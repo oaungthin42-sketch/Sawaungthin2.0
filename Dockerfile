@@ -15,6 +15,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     g++ \
     make \
     fonts-noto-core \
+    fonts-noto-unhinted \
+    fonts-sil-padauk \
     fontconfig \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*

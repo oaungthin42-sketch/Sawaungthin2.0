@@ -805,15 +805,24 @@ export const processRecapPipeline = async (jobId) => {
                         const box = parsedBoxes[i];
                         const x = Math.round((box.xPct / 100) * 1080);
                         const y = Math.round((box.yPct / 100) * 1920);
-                        const w = Math.round((box.widthPct / 100) * 1080);
-                        const h = Math.round((box.heightPct / 100) * 1920);
+                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * 1080);
+                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * 1920);
+                        const w = Math.max(2, x2 - x);
+                        const h = Math.max(2, y2 - y);
+
+                        const pad = 6;
+                        const cx = Math.max(0, x - pad);
+                        const cy = Math.max(0, y - pad);
+                        const cw = Math.min(1080 - cx, w + pad * 2);
+                        const ch = Math.min(1920 - cy, h + pad * 2);
+
                         const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
                         
                         // we need to crop the region, blur it, and overlay it.
                         // to do this without complex splitting, we can use the following approach:
                         // [lastMap] split=2 [split_main_i] [split_blur_i];
-                        // [split_blur_i] crop=w:h:x:y,boxblur=strength [blurred_i];
-                        // [split_main_i][blurred_i] overlay=x:y [out_i]
+                        // [split_blur_i] crop=cw:ch:cx:cy,boxblur=strength [blurred_i];
+                        // [split_main_i][blurred_i] overlay=cx:cy [out_i]
                         
                         const nextMap = `[v${i}]`;
                         const mainSplit = `[main${i}]`;
@@ -821,8 +830,8 @@ export const processRecapPipeline = async (jobId) => {
                         const blurred = `[blurred${i}]`;
                         
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                        filterComplex += `${blurSplit}crop=${w}:${h}:${x}:${y},boxblur=${strength}:${strength}${blurred};`;
-                        filterComplex += `${mainSplit}${blurred}overlay=${x}:${y}${nextMap};`;
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${strength}:${strength}${blurred};`;
+                        filterComplex += `${mainSplit}${blurred}overlay=${cx}:${cy}${nextMap};`;
                         
                         lastMap = nextMap;
                     }
@@ -900,7 +909,7 @@ export const processRecapPipeline = async (jobId) => {
                         if (fontsize < 24) fontsize = 24;
                         if (fontsize > 80) fontsize = 80;
 
-                        let fontName = "Noto Sans Myanmar";
+                        let fontName = "Padauk";
                         let fontsDirOpt = "";
                         if (job.selectedFontId) {
                             try {
@@ -915,13 +924,34 @@ export const processRecapPipeline = async (jobId) => {
                                             if (familyRaw) {
                                                 fontName = familyRaw.split(',')[0].trim();
                                             }
+                                            // Validate Myanmar Unicode support (U+1000 - U+109F)
+                                            const charsetRaw = execSync('fc-scan --format "%{charset}\\n" "' + fontPath + '"').toString().trim();
+                                            // charset is represented as space-separated ranges/numbers in hex.
+                                            // A simple way is to check if it covers 1000.
+                                            // Wait, maybe we can just do a regex for 1000 or something in that range.
+                                            // Let's implement a small JS parser for the charset or just throw if not containing 1000.
+                                            let hasMyanmar = false;
+                                            const blocks = charsetRaw.split(' ');
+                                            for (let b of blocks) {
+                                                if (!b) continue;
+                                                const [start, end] = b.split('-').map(x => parseInt(x, 16));
+                                                if (start <= 0x1000 && (end === undefined || end >= 0x1000)) {
+                                                    hasMyanmar = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (!hasMyanmar) {
+                                                throw new Error("this font does not support Myanmar Unicode text");
+                                            }
                                         } catch(e) {
-                                            console.error("fc-scan error", e);
+                                            console.error("Font validation error", e);
+                                            throw e; // propagate up
                                         }
                                     }
                                 }
                             } catch (err) {
                                 console.error("Error fetching custom font", err);
+                                throw new Error(err.message === "this font does not support Myanmar Unicode text" ? err.message : "Error loading font");
                             }
                         }
 
@@ -956,9 +986,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         });
 
                         const assPath = path.join(tmpDir, jobId + ".ass");
-                        fs.writeFileSync(assPath, assHeader + assLines.join('\n') + '\n', 'utf8');
+                        fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
 
-                        const filterComplex = `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}'${fontsDirOpt}[v]`;
+                        const filterComplex = `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}':charenc=UTF-8${fontsDirOpt}[v]`;
 
                         const subArgs = [
                             '-i', finalOutPath,
