@@ -837,23 +837,31 @@ export const processRecapPipeline = async (jobId) => {
                         lastMap = nextMap;
                     }
                     
-                    const blurArgs = [
-                        '-i', finalOutPath,
-                        '-filter_complex', filterComplex,
-                        '-map', lastMap, '-map', '0:a?',
-                        '-c:a', 'copy',
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        '-y', blurTmpPath
-                    ];
+                    console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
+                    console.log("[BLUR] filterComplex:", filterComplex);
                     
-                    await runFFmpeg(blurArgs, tmpDir);
-                    
-                    if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                        fs.unlinkSync(finalOutPath);
-                        fs.renameSync(blurTmpPath, finalOutPath);
+                    if (!filterComplex || filterComplex.trim() === '') {
+                        console.error('[BLUR] filterComplex was empty, skipping blur step.');
                     } else {
-                        console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
+                        const blurArgs = [
+                            '-i', finalOutPath,
+                            '-filter_complex', filterComplex.replace(/;\s*$/, ""),
+                            '-map', lastMap, '-map', '0:a?',
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            '-y', blurTmpPath
+                        ];
+                        
+                        await runFFmpeg(blurArgs, tmpDir);
+                        
+                        if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
+                            fs.unlinkSync(finalOutPath);
+                            fs.renameSync(blurTmpPath, finalOutPath);
+                        } else {
+                            console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
+                            state.warnings.push("⚠ Blur could not be applied: FFmpeg failed to produce output file");
+                        }
                     }
                 }
             } catch(e) {
@@ -911,20 +919,21 @@ export const processRecapPipeline = async (jobId) => {
                         if (fontsize > 80) fontsize = 80;
 
                         let fontName = "Padauk";
-                        let fontCss = `font-family: 'Padauk', 'Noto Sans Myanmar', sans-serif;`;
                         if (job.selectedFontId) {
                             try {
                                 const row = db.prepare('SELECT storedFilename FROM fonts WHERE id = ?').get(job.selectedFontId);
                                 if (row) {
                                     const fontPath = path.join(process.cwd(), 'public', 'fonts', row.storedFilename);
                                     if (fs.existsSync(fontPath)) {
-                                        fontCss = `
-                                        @font-face {
-                                            font-family: 'CustomFont';
-                                            src: url('file://${fontPath}');
+                                        try {
+                                            const { execSync } = require('child_process');
+                                            const familyRaw = execSync('fc-scan --format "%{family}\n" "' + fontPath + '"').toString().trim();
+                                            if (familyRaw) {
+                                                fontName = familyRaw.split(',')[0].trim();
+                                            }
+                                        } catch(e) {
+                                            console.error("Font scan error", e);
                                         }
-                                        body { font-family: 'CustomFont', 'Padauk', sans-serif !important; }
-                                        `;
                                     }
                                 }
                             } catch (err) {
@@ -932,150 +941,57 @@ export const processRecapPipeline = async (jobId) => {
                             }
                         }
 
-                        // Generate PNGs using Puppeteer
-                        let browserPath = '/usr/bin/chromium';
-                        if (!fs.existsSync(browserPath)) {
-                            browserPath = '/app/applet/puppeteer-cache/chrome/linux-150.0.7871.24/chrome-linux64/chrome';
-                        }
+                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
                         
-                        let browser;
-                        let usePuppeteer = false;
-                        try {
-                            browser = await puppeteer.launch({
-                                executablePath: browserPath,
-                                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-                            });
-                            usePuppeteer = true;
-                        } catch(e) {
-                            console.error("[SUBTITLE] Failed to launch Puppeteer:", e);
-                        }
-
-                        if (usePuppeteer) {
-                            console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using Puppeteer PNG overlays...");
-                            const page = await browser.newPage();
-                            await page.setViewport({ width: 1080, height: 1920 });
-                            
-                            const pngInputs = [];
-                            let filterComplexStr = "";
-                            let overlayLastOut = "0:v";
-                            
-                            for (let i = 0; i < subtitles.length; i++) {
-                                const sub = subtitles[i];
-                                const pngPath = path.join(tmpDir, `${jobId}_sub_${i}.png`);
-                                
-                                const html = `
-                                <html>
-                                <head>
-                                <style>
-                                ${fontCss}
-                                </style>
-                                </head>
-                                <body style="margin:0; padding:0; background:transparent;">
-                                    <div style="
-                                        font-size:${fontsize}px; 
-                                        color:white; 
-                                        text-align:center; 
-                                        -webkit-text-stroke: ${Math.max(2, Math.floor(fontsize/20))}px black; 
-                                        white-space:pre-wrap; 
-                                        width:${pos.widthPct}vw; 
-                                        height:${pos.heightPct}vh; 
-                                        position:absolute; 
-                                        left:${pos.xPct}vw; 
-                                        top:${pos.yPct}vh; 
-                                        display:flex; 
-                                        align-items:center; 
-                                        justify-content:center; 
-                                        text-shadow: 0px 4px 10px rgba(0,0,0,0.8);
-                                        line-height:1.2;
-                                    ">${sub.text}</div>
-                                </body>
-                                </html>
-                                `;
-                                await page.setContent(html);
-                                await page.evaluate(() => document.fonts.ready);
-                                await page.screenshot({ path: pngPath, omitBackground: true });
-                                
-                                pngInputs.push('-loop', '1', '-i', pngPath);
-                                
-                                const currentOut = `v${i}`;
-                                // overlay inputs: video is overlayLastOut, image is i+1 (since 0 is video)
-                                filterComplexStr += `[${overlayLastOut}][${i+1}:v]overlay=x=0:y=0:enable='between(t,${sub.start},${sub.end})'[${currentOut}]; `;
-                                overlayLastOut = currentOut;
-                            }
-                            await browser.close();
-                            
-                            const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
-                            const subArgs = [
-                                '-i', finalOutPath,
-                                ...pngInputs,
-                                '-filter_complex', filterComplexStr,
-                                '-map', `[${overlayLastOut}]`,
-                                '-map', '0:a?',
-                                '-c:a', 'copy',
-                                '-c:v', 'libx264',
-                                '-preset', 'fast',
-                                '-y', subTmpPath
-                            ];
-                            
-                            await runFFmpeg(subArgs, tmpDir);
-                            
-                            if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                                fs.unlinkSync(finalOutPath);
-                                fs.renameSync(subTmpPath, finalOutPath);
-                            } else {
-                                console.error("[SUBTITLE] Error: subtitle burn failed to produce output file, skipping.");
-                            }
+                        const toAssTime = (sec) => {
+                            const h = Math.floor(sec / 3600);
+                            const m = Math.floor((sec % 3600) / 60);
+                            const s = Math.floor(sec % 60);
+                            const cs = Math.floor((sec % 1) * 100);
+                            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+                        };
+                        
+                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,8,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+                        
+                        const assLines = subtitles.map(sub => {
+                            const startStr = toAssTime(sub.start);
+                            const endStr = toAssTime(sub.end);
+                            const assText = sub.text.replace(/\n/g, '\\N');
+                            return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                        });
+                        
+                        const assPath = path.join(tmpDir, jobId + ".ass");
+                        fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
+                        
+                        const filterComplex = job.selectedFontId
+                            ? `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}':fontsdir='${path.join(process.cwd(), 'public', 'fonts').replace(/:/g, '\\:')}':charenc=UTF-8[v]`
+                            : `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}':charenc=UTF-8[v]`;
+                        
+                        const subArgs = [
+                            '-i', finalOutPath,
+                            '-filter_complex', filterComplex,
+                            '-map', '[v]',
+                            '-map', '0:a?',
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            '-y', subTmpPath
+                        ];
+                        
+                        await runFFmpeg(subArgs, tmpDir);
+                        
+                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                            fs.unlinkSync(finalOutPath);
+                            fs.renameSync(subTmpPath, finalOutPath);
                         } else {
-                            console.log("[SUBTITLE] Falling back to libass...");
-                            // Fallback to old ASS implementation
-                            const toAssTime = (sec) => {
-                                const h = Math.floor(sec / 3600);
-                                const m = Math.floor((sec % 3600) / 60);
-                                const s = Math.floor(sec % 60);
-                                const cs = Math.floor((sec % 1) * 100);
-                                return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
-                            };
-                            
-                            const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,8,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-                            
-                            const assLines = subtitles.map(sub => {
-                                const startStr = toAssTime(sub.start);
-                                const endStr = toAssTime(sub.end);
-                                const assText = sub.text.replace(/\n/g, '\\N');
-                                return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
-                            });
-                            
-                            const assPath = path.join(tmpDir, jobId + ".ass");
-                            fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
-                            
-                            const filterComplex = `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}':charenc=UTF-8[v]`;
-                            
-                            const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
-                            const subArgs = [
-                                '-i', finalOutPath,
-                                '-filter_complex', filterComplex,
-                                '-map', '[v]',
-                                '-map', '0:a?',
-                                '-c:a', 'copy',
-                                '-c:v', 'libx264',
-                                '-preset', 'fast',
-                                '-y', subTmpPath
-                            ];
-                            
-                            await runFFmpeg(subArgs, tmpDir);
-                            
-                            if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                                fs.unlinkSync(finalOutPath);
-                                fs.renameSync(subTmpPath, finalOutPath);
-                            } else {
-                                console.error("[SUBTITLE] Error: subtitle burn failed to produce output file, skipping.");
-                            }
+                            console.error("[SUBTITLE] Error: subtitle burn failed to produce output file, skipping.");
+                            state.warnings.push("⚠ Subtitles could not be burned in: FFmpeg failed to produce output file");
                         }
                     }
-                } catch(e) {
-                    console.error("[SUBTITLE] Error burning subtitles:", e);
-                    state.warnings.push("⚠ Subtitles could not be burned in: " + e.message);
-                }
+                    } catch(e) {
+                        console.error("[SUBTITLE] Error burning subtitles:", e);
+                        state.warnings.push("⚠ Subtitles could not be burned in: " + e.message);
+                    }
             }
             advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
         }

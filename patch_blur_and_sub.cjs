@@ -1,8 +1,16 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/workers/processor.js', 'utf8');
 
-const blurTarget = `                        lastMap = nextMap;
+const blurTarget = `                    console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
+                    console.log("[BLUR] filterComplex:", filterComplex);
+                    
+                    if (!filterComplex || filterComplex.trim() === '') {
+                        console.error('[BLUR] filterComplex was empty, skipping blur step.');
+                        return; // Wait, actually I shouldn't return, just skip calling ffmpeg
                     }
+                    
+                    // trim trailing semicolon
+                    filterComplex = filterComplex.replace(/;\\s*$/, '');
                     
                     const blurArgs = [
                         '-i', finalOutPath,
@@ -21,20 +29,21 @@ const blurTarget = `                        lastMap = nextMap;
                         fs.renameSync(blurTmpPath, finalOutPath);
                     } else {
                         console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
+                        state.warnings.push("⚠ Blur could not be applied: FFmpeg failed to produce output file");
                     }`;
 
-const blurReplacement = `                        lastMap = nextMap;
-                    }
-                    
-                    console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
+const blurReplacement = `                    console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
                     console.log("[BLUR] filterComplex:", filterComplex);
                     
                     if (!filterComplex || filterComplex.trim() === '') {
                         console.error('[BLUR] filterComplex was empty, skipping blur step.');
                     } else {
+                        // trim trailing semicolon
+                        filterComplex = filterComplex.replace(/;\\s*$/, '');
+                        
                         const blurArgs = [
                             '-i', finalOutPath,
-                            '-filter_complex', filterComplex.replace(/;\\s*$/, ""),
+                            '-filter_complex', filterComplex,
                             '-map', lastMap, '-map', '0:a?',
                             '-c:a', 'copy',
                             '-c:v', 'libx264',
@@ -55,9 +64,9 @@ const blurReplacement = `                        lastMap = nextMap;
 
 if (code.includes(blurTarget)) {
     code = code.replace(blurTarget, blurReplacement);
-    console.log("BLUR PATCH SUCCESS");
+    console.log("blur patch success");
 } else {
-    console.log("BLUR PATCH FAILED");
+    console.error("blurTarget not found");
 }
 
 fs.writeFileSync('src/workers/processor.js', code, 'utf8');
