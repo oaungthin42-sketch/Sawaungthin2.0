@@ -17,6 +17,8 @@ function App() {
   const [fonts, setFonts] = useState<any[]>([]);
   const [selectedFontId, setSelectedFontId] = useState<string | null>(null);
   const [fontUploadStatus, setFontUploadStatus] = useState<string>('');
+  const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
 
   const fetchFonts = async () => {
     try {
@@ -100,7 +102,11 @@ function App() {
   };
 
   const handlePointerDown = (e: React.PointerEvent, boxId: string, action: 'move' | 'tl' | 'tr' | 'bl' | 'br') => {
+    e.preventDefault();
     e.stopPropagation();
+    if (e.target instanceof HTMLElement) {
+      e.target.setPointerCapture(e.pointerId);
+    }
     setSelectedElement(boxId);
     if (!previewContainerRef.current) return;
     const rect = previewContainerRef.current.getBoundingClientRect();
@@ -175,6 +181,7 @@ function App() {
             const startHPct = prev.heightPct;
 
             const onPointerMove = (moveEv: PointerEvent) => {
+                if (moveEv.cancelable) moveEv.preventDefault();
                 latestDx = moveEv.clientX - startX;
                 latestDy = moveEv.clientY - startY;
                 if (!rafId) {
@@ -195,7 +202,7 @@ function App() {
                 window.removeEventListener('pointerup', onPointerUp);
             };
 
-            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointermove', onPointerMove, { passive: false });
             window.addEventListener('pointerup', onPointerUp);
             return prev;
         });
@@ -211,13 +218,13 @@ function App() {
         const startHPct = box.heightPct;
 
         const onPointerMove = (moveEv: PointerEvent) => {
+            if (moveEv.cancelable) moveEv.preventDefault();
             latestDx = moveEv.clientX - startX;
             latestDy = moveEv.clientY - startY;
             if (!rafId) {
                 rafId = requestAnimationFrame(() => {
                     rafId = null;
                     if (!isDragging) return;
-                    // Note here we changed this to use videoRectRef instead of rect to match video boundaries
                     const dxPct = (latestDx / (videoRectRef.current.width || rect.width)) * 100;
                     const dyPct = (latestDy / (videoRectRef.current.height || rect.height)) * 100;
                     setBlurBoxes(current => current.map(b => {
@@ -235,11 +242,12 @@ function App() {
             window.removeEventListener('pointerup', onPointerUp);
         };
 
-        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointermove', onPointerMove, { passive: false });
         window.addEventListener('pointerup', onPointerUp);
         return prev;
     });
 };
+
 useEffect(() => {
     if (videoFile) {
       const url = URL.createObjectURL(videoFile);
@@ -694,13 +702,113 @@ useEffect(() => {
           setShowKeys={setShowKeys}
         />
 
+      {/* Voice Drawer */}
+      {showVoiceDrawer && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowVoiceDrawer(false)} />
+          <div className="relative w-full max-w-sm bg-gray-950 border-l border-gray-800 shadow-2xl h-full flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="p-6 border-b border-gray-900 flex items-center justify-between">
+              <h2 className="text-xl font-bold font-display text-white">Choose Voice</h2>
+              <button onClick={() => setShowVoiceDrawer(false)} className="p-2 text-gray-500 hover:text-white rounded-lg hover:bg-gray-800 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto">
+              {/* Voice Gender Tabs */}
+              <div className="flex bg-gray-900 p-1 rounded-xl mb-6">
+                <button 
+                  onClick={() => setSelectedGender('male')}
+                  className={`flex-1 text-center py-2.5 text-sm font-bold rounded-lg transition-all ${selectedGender === 'male' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
+                >
+                  👨 Male Voices
+                </button>
+                <button 
+                  onClick={() => setSelectedGender('female')}
+                  className={`flex-1 text-center py-2.5 text-sm font-bold rounded-lg transition-all ${selectedGender === 'female' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
+                >
+                  👩 Female Voices
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {voices.filter(v => v.gender === selectedGender).map(v => {
+                  const isSelected = currentVoiceId === v.id;
+                  return (
+                    <div 
+                      key={v.id}
+                      onClick={() => { saveSetting('EDGE_TTS_VOICE', v.id); }}
+                      className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${isSelected ? 'bg-indigo-950/40 border-indigo-500 shadow-sm' : 'bg-gray-900/40 border-gray-800 hover:bg-gray-800/80 hover:border-gray-700'}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-indigo-400' : 'bg-gray-700'}`} />
+                        <span className={`font-bold ${isSelected ? 'text-indigo-200' : 'text-gray-300'}`}>{v.name}</span>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
+                        disabled={previewingVoice !== null}
+                        className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${previewingVoice === v.id ? 'bg-indigo-500 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}
+                      >
+                        {previewingVoice === v.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+                {/* WIZARD PROGRESS BAR */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between overflow-x-auto pb-4 custom-scrollbar max-w-5xl mx-auto px-4">
+            {[
+              "Upload Video",
+              "Narration Mode",
+              "Voice Selection",
+              "Blur Mask",
+              "Subtitles",
+              "My Fonts",
+              "Final Preview",
+              "Render"
+            ].map((stepLabel, i) => {
+              const stepNum = i + 1;
+              const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 8);
+              const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 8);
+              const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 8 && videoFile));
+
+              return (
+                <div key={stepNum} className="flex items-center flex-1 last:flex-none">
+                  <button
+                    onClick={() => {
+                        if (status === 'idle' && isClickable) setCurrentStep(stepNum);
+                    }}
+                    disabled={!isClickable}
+                    className={`flex flex-col items-center gap-2 ${isActive ? 'text-indigo-400' : isCompleted ? 'text-emerald-400 cursor-pointer hover:text-emerald-300' : 'text-gray-600'}`}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${isActive ? 'bg-indigo-950/50 border-indigo-500 shadow-lg shadow-indigo-500/20' : isCompleted ? 'bg-emerald-950/30 border-emerald-500' : 'bg-gray-900 border-gray-800'}`}>
+                      {isCompleted ? <Check className="w-4 h-4" /> : stepNum}
+                    </div>
+                    <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
+                  </button>
+                  {i < 7 && (
+                    <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* 1. IDEAL WORKSPACE (IDLE STATE) */}
         {status === 'idle' && (
           <div className="space-y-6">
             
             {/* Security Quick Alert if keys are missing */}
             {!isKeysConfigured && (
-              <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 max-w-3xl mx-auto">
                 <div className="flex gap-3">
                   <ShieldAlert className="w-5.5 h-5.5 text-amber-500 shrink-0 mt-0.5" />
                   <div>
@@ -716,374 +824,521 @@ useEffect(() => {
                 </button>
               </div>
             )}
-
-            {/* Video Upload Area (Full width but styled elegantly as a top section) */}
-            <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xl">🎬</span>
-                <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">မူရင်းဗီဒီယို (Original Video)</h3>
-              </div>
-              <p className="text-xs text-gray-500 mb-5">ဇာတ်လမ်းရှင်းပြချက် ဗီဒီယိုကို ဤနေရာတွင် ထည့်သွင်းပေးပါ။</p>
-
-              <div 
-                className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`}
-                onDragOver={handleDragOver}
-                onDrop={handleVideoDrop}
-                onClick={() => videoInputRef.current?.click()}
-              >
-                <input 
-                  type="file" 
-                  ref={videoInputRef} 
-                  className="hidden" 
-                  accept="video/*"
-                  onChange={handleVideoSelect}
-                />
-                                
-                {videoFile && videoPreviewUrl ? (
-                  <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
-                    <video
-                      ref={videoRef}
-                      src={videoPreviewUrl}
-                      muted
-                      playsInline
-                      preload="metadata"
-                      onLoadedMetadata={(e) => {
-                        e.currentTarget.currentTime = 0.1;
-                        updateVideoRect();
-                      }}
-                      className="w-full h-full object-contain"
-                    />
-                    <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
-                    
-                    
-                    
-                    <div
-                      onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
-                      className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400 bg-transparent' : 'border-gray-400 border-dashed bg-gray-500/10'} cursor-move transition-colors flex items-center justify-center overflow-hidden`}
-                      style={{
-                        left: `${subtitlePosition.xPct}%`,
-                        top: `${subtitlePosition.yPct}%`,
-                        width: `${subtitlePosition.widthPct}%`,
-                        height: `${subtitlePosition.heightPct}%`,
-                        fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
-                      }}
-                    >
-                      <span className="text-white font-bold drop-shadow-md text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
-                      {selectedElement === 'subtitle' && (
-                        <>
-                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize" />
-                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize" />
-                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize" />
-                          <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize" />
-                        </>
-                      )}
-                    </div>
-
-                    {blurBoxes.map((box) => (
-                      <div
-                        key={box.id}
-                        onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
-                        className={`absolute border-2 ${selectedElement === box.id ? 'border-indigo-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors`}
-                        style={{
-                          left: `${box.xPct}%`,
-                          top: `${box.yPct}%`,
-                          width: `${box.widthPct}%`,
-                          height: `${box.heightPct}%`,
-                          backdropFilter: `blur(${box.strength * 1.2}px)`,
-                          WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
-                        }}
-                      >
-                        {selectedElement === box.id && (
-                          <>
-                            <div className="absolute -top-8 left-0 bg-gray-900 border border-gray-700 rounded-md p-1 flex items-center gap-2 cursor-default" onPointerDown={e => e.stopPropagation()}>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setBlurBoxes(prev => prev.filter(b => b.id !== box.id)); setSelectedElement(null); }}
-                                className="text-red-400 hover:text-red-300 p-1"
-                                title="Delete Blur Box"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                              </button>
-                            </div>
-                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize" />
-                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize" />
-                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize" />
-                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize" />
-                          </>
-                        )}
-                      </div>
-                    ))}
-                    </div>
-
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-between p-4 opacity-100 transition-opacity pointer-events-none">
-                      <div className="self-end pointer-events-auto flex items-center gap-2">
-                        {blurBoxes.length < 3 && (
-                          <button 
-                            onClick={addBlurBox}
-                            className="px-3 py-1.5 bg-indigo-600/80 hover:bg-indigo-500/80 backdrop-blur-md border border-white/10 text-white font-semibold text-[11px] rounded-lg transition-all shadow-sm"
-                          >
-                            + Add Blur Box
-                          </button>
-                        )}
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setVideoFile(null); setBlurBoxes([]); setSelectedElement(null); }}
-                          className="px-3 py-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md border border-white/10 text-white font-semibold text-[11px] rounded-lg transition-all shadow-sm"
-                        >
-                          ဗီဒီယိုဖျက်ရန် (Remove)
-                        </button>
-                      </div>
-                      <div className="self-end">
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
-                          className="px-3 py-1.5 bg-black/50 hover:bg-red-500/80 backdrop-blur-md border border-white/10 text-white font-semibold text-[11px] rounded-lg transition-all shadow-sm"
-                        >
-                          ဗီဒီယိုဖျက်ရန် (Remove)
-                        </button>
-                      </div>
-                      <div className="bg-black/40 backdrop-blur-sm self-start px-3 py-2 rounded-lg border border-white/10 max-w-full pointer-events-auto flex flex-col gap-2">
-                        <div>
-                          <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
-                          <span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
-                        </div>
-                        {selectedElement && blurBoxes.find(b => b.id === selectedElement) && (
-                          <div className="pt-2 border-t border-white/10" onPointerDown={e => e.stopPropagation()}>
-                            <label className="text-xs text-gray-300 block mb-1">Blur Strength: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
-                            <input 
-                              type="range" 
-                              min="1" 
-                              max="30" 
-                              value={blurBoxes.find(b => b.id === selectedElement)?.strength}
-                              onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
-                              className="w-32 accent-indigo-500 cursor-pointer"
-                            />
-                            <details className="mt-2 text-xs">
-                              <summary className="text-gray-400 cursor-pointer hover:text-white mb-1">Advanced (manual values)</summary>
-                              <div className="grid grid-cols-2 gap-2 mt-1">
-                                <div><label className="text-gray-500 block">X %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.xPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, xPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                                <div><label className="text-gray-500 block">Y %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.yPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, yPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                                <div><label className="text-gray-500 block">W %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.widthPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, widthPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                                <div><label className="text-gray-500 block">H %</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.heightPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, heightPct: parseInt(e.target.value)} : b))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                              </div>
-                            </details>
-                          </div>
-                        )}
-                        {selectedElement === 'subtitle' && (
-                          <div className="pt-2 border-t border-white/10" onPointerDown={e => e.stopPropagation()}>
-                            <span className="text-xs font-semibold text-white block mb-1">Subtitle Position</span>
-                            <details className="mt-1 text-xs">
-                              <summary className="text-gray-400 cursor-pointer hover:text-white mb-1">Advanced (manual values)</summary>
-                              <div className="grid grid-cols-2 gap-2 mt-1">
-                                <div><label className="text-gray-500 block">X %</label><input type="number" value={Math.round(subtitlePosition.xPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, xPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                                <div><label className="text-gray-500 block">Y %</label><input type="number" value={Math.round(subtitlePosition.yPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, yPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                                <div><label className="text-gray-500 block">W %</label><input type="number" value={Math.round(subtitlePosition.widthPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, widthPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                                <div><label className="text-gray-500 block">H %</label><input type="number" value={Math.round(subtitlePosition.heightPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, heightPct: parseInt(e.target.value)}))} className="w-full bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-white" /></div>
-                              </div>
-                            </details>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-3 text-center text-gray-500">
-                    <UploadCloud className="w-12 h-12 text-gray-600 mb-1" />
-                    <span className="text-sm font-semibold text-gray-300">ဗီဒီယို ဆွဲထည့်ပါ သို့မဟုတ် နှိပ်ပါ (Drag or Click)</span>
-                    <span className="text-[10px] text-gray-600">MP4, MOV supported</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Fonts Panel */}
-            <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto mt-6 mb-6">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-xl">🔤</span>
-                <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">My Fonts</h3>
-              </div>
-              
-              <div className="flex flex-col md:flex-row gap-6">
-                <div className="flex-1">
-                  <p className="text-xs text-gray-500 mb-3">Upload your custom TrueType (.ttf) or OpenType (.otf) fonts for burned-in subtitles.</p>
-                  
-                  <div className="flex items-center gap-3">
-                    <label className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold text-xs rounded-lg cursor-pointer transition-colors border border-gray-700">
-                      Upload Font
-                      <input type="file" accept=".ttf,.otf" className="hidden" onChange={handleFontUpload} />
-                    </label>
-                    {fontUploadStatus && <span className="text-xs text-indigo-400 font-medium">{fontUploadStatus}</span>}
-                  </div>
+            
+            {/* Step 1: Upload Video */}
+            {currentStep === 1 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">🎬</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Upload Video</h3>
                 </div>
+                <p className="text-xs text-gray-500 mb-5">Upload the original video you want to process.</p>
                 
-                <div className="flex-1 bg-gray-950/50 border border-gray-800 rounded-xl p-3 min-h-[120px] max-h-[200px] overflow-y-auto custom-scrollbar">
-                  {fonts.length === 0 ? (
-                    <div className="flex h-full items-center justify-center text-xs text-gray-600">No custom fonts uploaded yet</div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <label 
-                        className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedFontId === null ? 'bg-indigo-900/30 border border-indigo-500/50' : 'hover:bg-gray-800/50 border border-transparent'}`}
-                      >
-                        <input type="radio" name="fontSelection" checked={selectedFontId === null} onChange={() => setSelectedFontId(null)} className="hidden" />
-                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === null ? 'border-indigo-400' : 'border-gray-600'}`}>
-                          {selectedFontId === null && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
-                        </div>
-                        <span className="text-sm text-gray-300 font-medium">Default (Noto Sans Myanmar)</span>
-                      </label>
-
-                      {fonts.map(font => (
-                        <label 
-                          key={font.id}
-                          className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedFontId === font.id ? 'bg-indigo-900/30 border border-indigo-500/50' : 'hover:bg-gray-800/50 border border-transparent'}`}
-                        >
-                          <input type="radio" name="fontSelection" checked={selectedFontId === font.id} onChange={() => setSelectedFontId(font.id)} className="hidden" />
-                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === font.id ? 'border-indigo-400' : 'border-gray-600'}`}>
-                            {selectedFontId === font.id && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+                <div 
+                  className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`}
+                  onDragOver={handleDragOver}
+                  onDrop={handleVideoDrop}
+                  onClick={() => videoInputRef.current?.click()}
+                >
+                  <input 
+                    type="file" 
+                    ref={videoInputRef} 
+                    className="hidden" 
+                    accept="video/*"
+                    onChange={handleVideoSelect}
+                  />
+                  {videoFile && videoPreviewUrl ? (
+                    <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
+                      <video
+                        ref={videoRef}
+                        src={videoPreviewUrl}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        onLoadedMetadata={(e) => {
+                          e.currentTarget.currentTime = 0.1;
+                          updateVideoRect();
+                        }}
+                        className="w-full h-full object-contain"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
+                          <div>
+                            <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
+                            <span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
                           </div>
-                          <span className="text-sm text-gray-200" style={{ fontFamily: `font_${font.id}` }}>{font.originalName}</span>
-                        </label>
-                      ))}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setVideoFile(null); setBlurBoxes([]); setSelectedElement(null); }}
+                            className="px-3 py-1.5 bg-red-500/80 hover:bg-red-500 text-white font-semibold text-xs rounded-lg transition-all"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 text-center text-gray-500">
+                      <UploadCloud className="w-12 h-12 text-gray-600 mb-1" />
+                      <span className="text-sm font-semibold text-gray-300">Drag & Drop or Click to Upload</span>
+                      <span className="text-[10px] text-gray-600">MP4, MOV supported</span>
                     </div>
                   )}
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Reorganized Clean Two-Column Layout for Settings */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch max-w-5xl mx-auto">
-              
-              {/* Left Column: ဘာသာပြန်စနစ် */}
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 flex flex-col gap-6 shadow-sm">
-                <div>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-lg">📝</span>
-                    <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">ဘာသာပြန်စနစ်</h3>
-                  </div>
-                  <p className="text-xs text-gray-500">ဇာတ်လမ်းပြောမည့်ပုံစံနှင့် လေသံပုံစံကို သတ်မှတ်ပါ။</p>
+            {/* Step 2: Narration Mode */}
+            {currentStep === 2 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">📝</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Narration Mode</h3>
                 </div>
-
-                {/* ဘာသာပြန်ပုံစံ (Modifiers) */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">ဘာသာပြန်ပုံစံ (Narration Mode)</label>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      onClick={() => saveSetting('DIALOGUE_MODE', currentDialogueMode ? 'false' : 'true')}
-                      className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${currentDialogueMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                    >
-                      <div>
-                        <span className="text-xs font-bold block">Dialogue (A-B)</span>
-                        <span className="text-[10px] text-gray-500">သူတစ်ပြန် ကိုယ်တစ်ပြန်</span>
-                      </div>
-                      {currentDialogueMode && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
-                    </button>
-                    
-                    <button
-                      onClick={() => saveSetting('COLLOQUIAL_MODE', currentColloquialMode ? 'false' : 'true')}
-                      className={`flex items-center justify-between p-3.5 rounded-xl border text-left transition-all ${currentColloquialMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                    >
-                      <div>
-                        <span className="text-xs font-bold block">Colloquial</span>
-                        <span className="text-[10px] text-gray-500">လက်သုံးစကား / သဘာဝကျကျ</span>
-                      </div>
-                      {currentColloquialMode && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-3 text-center opacity-70">
-                    {!currentDialogueMode && !currentColloquialMode ? 'လက်ရှိ: Normal (မူရင်းအတိုင်း)' : 'နှစ်ခုလုံးတွဲသုံးနိုင်သည်'}
-                  </p>
+                <p className="text-xs text-gray-500 mb-6">Choose how the AI should explain the video.</p>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button
+                    onClick={() => saveSetting('DIALOGUE_MODE', currentDialogueMode ? 'false' : 'true')}
+                    className={`flex flex-col p-4 rounded-xl border text-left transition-all ${currentDialogueMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
+                  >
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-bold">Dialogue (A-B)</span>
+                      {currentDialogueMode && <Check className="w-4 h-4 text-indigo-400" />}
+                    </div>
+                    <span className="text-xs text-gray-500">Conversational style, switching between speakers.</span>
+                  </button>
+                     
+                  <button
+                    onClick={() => saveSetting('COLLOQUIAL_MODE', currentColloquialMode ? 'false' : 'true')}
+                    className={`flex flex-col p-4 rounded-xl border text-left transition-all ${currentColloquialMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
+                  >
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-bold">Colloquial</span>
+                      {currentColloquialMode && <Check className="w-4 h-4 text-indigo-400" />}
+                    </div>
+                    <span className="text-xs text-gray-500">Natural, everyday spoken language instead of formal text.</span>
+                  </button>
                 </div>
+                <p className="text-xs text-gray-500 mt-6 text-center opacity-70">
+                  {!currentDialogueMode && !currentColloquialMode ? 'Current: Normal (Direct Translation)' : 'Multiple modes can be combined.'}
+                </p>
               </div>
+            )}
 
-              {/* Right Column: မြန်မာအသံ */}
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 flex flex-col gap-5 shadow-sm">
-                <div>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-lg">🎙️</span>
-                    <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">မြန်မာအသံ</h3>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-1">ဗီဒီယိုနောက်ခံပြောမည့် မြန်မာအသံနှင့် လေသံရှင်ကို ရွေးချယ်ပါ။</p>
+            {/* Step 3: Voice Selection */}
+            {currentStep === 3 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">🎙️</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Voice Selection</h3>
                 </div>
-
-                {/* Selected Voice Display Badge */}
-                <div className="flex items-center justify-between p-3.5 rounded-xl bg-indigo-950/15 border border-indigo-900/30 text-indigo-300">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-lg">📢</span>
+                <p className="text-xs text-gray-500 mb-6">Choose the Voice for your generated audio track.</p>
+                
+                <div className="bg-indigo-950/15 border border-indigo-900/30 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-indigo-900/50 flex items-center justify-center text-indigo-400">
+                      <Volume2 className="w-6 h-6" />
+                    </div>
                     <div>
-                      <span className="text-[10px] text-indigo-400 uppercase tracking-wider font-bold block">ရွေးချယ်ထားသော အသံ</span>
-                      <span className="text-xs font-bold text-indigo-200">{selectedVoiceName}</span>
+                      <span className="text-[10px] text-indigo-400/80 uppercase tracking-wider font-bold block mb-1">Current Voice</span>
+                      <span className="text-lg font-bold text-indigo-200">{selectedVoiceName}</span>
                     </div>
                   </div>
-                  <div className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />
-                </div>
-
-                {/* Voice Gender Tabs */}
-                <div className="flex bg-gray-950/80 p-0.5 rounded-lg border border-gray-800/60">
                   <button 
-                    onClick={() => setSelectedGender('male')}
-                    className={`flex-1 text-center py-2 text-xs font-bold rounded-md transition-all ${selectedGender === 'male' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                    onClick={() => setShowVoiceDrawer(true)}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-95"
                   >
-                    👨 အမျိုးသားအသံ
-                  </button>
-                  <button 
-                    onClick={() => setSelectedGender('female')}
-                    className={`flex-1 text-center py-2 text-xs font-bold rounded-md transition-all ${selectedGender === 'female' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                  >
-                    👩 အမျိုးသမီးအသံ
+                    Choose Voice
                   </button>
                 </div>
-
-                {/* Voice Cards */}
-                <div className="flex-1 space-y-2 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
-                  {voices.filter(v => v.gender === selectedGender).map(v => {
-                    const isSelected = currentVoiceId === v.id;
-                    return (
-                      <div 
-                        key={v.id}
-                        onClick={() => saveSetting('EDGE_TTS_VOICE', v.id)}
-                        className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${isSelected ? 'bg-indigo-950/30 border-indigo-500 text-indigo-300 ring-1 ring-indigo-500/20' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                      >
-                        <div className="flex items-center gap-2.5 overflow-hidden">
-                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-indigo-400' : 'bg-gray-700'}`} />
-                          <span className="text-xs font-bold truncate">{v.name}</span>
-                        </div>
-                        
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
-                          disabled={previewingVoice !== null}
-                          className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all shrink-0 ${previewingVoice === v.id ? 'bg-indigo-500 text-white' : 'bg-gray-800/80 hover:bg-gray-700 text-gray-300 active:scale-90'}`}
-                        >
-                          {previewingVoice === v.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-                    );
-                  })}
+                <div className="mt-4 flex items-center gap-3">
+                    <button
+                      onClick={() => handlePreviewVoice(currentVoiceId)}
+                      disabled={previewingVoice !== null}
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      {previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                      Preview Current Voice
+                    </button>
                 </div>
               </div>
+            )}
 
-            </div>
+            {/* Step 4: Blur Mask Editor */}
+            {currentStep === 4 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">🌫️</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur Mask Editor</h3>
+                </div>
+                <p className="text-xs text-gray-500 mb-6">Hide sensitive areas in the video like faces or watermarks.</p>
+                
+                <div className="flex flex-col md:flex-row gap-6">
+                  <div className="w-full md:w-2/3">
+                    {videoFile && videoPreviewUrl ? (
+                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
+                        <video
+                          ref={videoRef}
+                          src={videoPreviewUrl}
+                          muted
+                          playsInline
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
+                          
+                          {/* Subtitles faintly visible */}
+                          <div
+                            className="absolute border-2 border-gray-500/20 bg-gray-500/5 transition-colors flex items-center justify-center overflow-hidden pointer-events-none"
+                            style={{
+                              left: `${subtitlePosition.xPct}%`,
+                              top: `${subtitlePosition.yPct}%`,
+                              width: `${subtitlePosition.widthPct}%`,
+                              height: `${subtitlePosition.heightPct}%`,
+                              fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
+                            }}
+                          >
+                            <span className="text-white/50 font-bold text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
+                          </div>
 
-            {/* Row 3: Prominent Center Action Button */}
-            <div className="flex justify-center pt-4 max-w-xs mx-auto">
-              {isKeysConfigured ? (
+                          {/* Blur Boxes */}
+                          {blurBoxes.map((box) => (
+                            <div
+                              key={box.id}
+                              onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
+                              className={`absolute border-2 ${selectedElement === box.id ? 'border-indigo-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors touch-none`}
+                              style={{
+                                left: `${box.xPct}%`,
+                                top: `${box.yPct}%`,
+                                width: `${box.widthPct}%`,
+                                height: `${box.heightPct}%`,
+                                backdropFilter: `blur(${box.strength * 1.2}px)`,
+                                WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
+                              }}
+                            >
+                              {selectedElement === box.id && (
+                                <>
+                                  <div className="absolute -top-8 left-0 bg-gray-900 border border-gray-700 rounded-md p-1 flex items-center gap-2 cursor-default" onPointerDown={e => e.stopPropagation()}>
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); setBlurBoxes(prev => prev.filter(b => b.id !== box.id)); setSelectedElement(null); }}
+                                      className="text-red-400 hover:text-red-300 p-1"
+                                      title="Delete Blur Box"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                    </button>
+                                  </div>
+                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize touch-none" />
+                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize touch-none" />
+                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize touch-none" />
+                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize touch-none" />
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full aspect-[9/16] bg-gray-900 rounded-xl flex items-center justify-center text-gray-500 text-sm">Please upload a video first</div>
+                    )}
+                  </div>
+                  
+                  <div className="w-full md:w-1/3 flex flex-col gap-4">
+                    <button 
+                      onClick={addBlurBox}
+                      disabled={blurBoxes.length >= 3 || !videoFile}
+                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all"
+                    >
+                      + Add Blur Box
+                    </button>
+                    {blurBoxes.length >= 3 && <p className="text-xs text-amber-500 text-center">Maximum 3 blur boxes allowed</p>}
+
+                    {selectedElement && blurBoxes.find(b => b.id === selectedElement) ? (
+                      <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
+                        <h4 className="text-sm font-bold text-gray-300 mb-4">Edit Blur Settings</h4>
+                        <label className="text-xs text-gray-400 block mb-2">Blur Strength: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
+                        <input 
+                          type="range" 
+                          min="1" 
+                          max="30" 
+                          value={blurBoxes.find(b => b.id === selectedElement)?.strength}
+                          onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
+                          className="w-full accent-indigo-500 cursor-pointer mb-4"
+                        />
+                        <details className="mt-2 text-xs">
+                          <summary className="text-gray-400 cursor-pointer hover:text-white mb-2">Advanced (manual values)</summary>
+                          <div className="grid grid-cols-2 gap-3 mt-2">
+                            <div><label className="text-gray-500 block mb-1">X Pos (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.xPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, xPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                            <div><label className="text-gray-500 block mb-1">Y Pos (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.yPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, yPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                            <div><label className="text-gray-500 block mb-1">Width (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.widthPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, widthPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                            <div><label className="text-gray-500 block mb-1">Height (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.heightPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, heightPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                          </div>
+                        </details>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-950/50 border border-gray-800/50 rounded-xl p-4 text-center text-xs text-gray-500 flex items-center justify-center h-32">
+                        Select a blur box on the video to edit its settings
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 5: Subtitle Editor */}
+            {currentStep === 5 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">🔤</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Subtitle Position</h3>
+                </div>
+                <p className="text-xs text-gray-500 mb-6">Drag and resize the box to set where subtitles will appear.</p>
+                
+                <div className="flex flex-col md:flex-row gap-6">
+                  <div className="w-full md:w-2/3">
+                    {videoFile && videoPreviewUrl ? (
+                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
+                        <video
+                          ref={videoRef}
+                          src={videoPreviewUrl}
+                          muted
+                          playsInline
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
+                          
+                          {/* Blur Boxes faintly visible */}
+                          {blurBoxes.map((box) => (
+                            <div
+                              key={box.id}
+                              className="absolute border-2 border-indigo-500/30 bg-indigo-500/10 pointer-events-none"
+                              style={{
+                                left: `${box.xPct}%`,
+                                top: `${box.yPct}%`,
+                                width: `${box.widthPct}%`,
+                                height: `${box.heightPct}%`,
+                              }}
+                            />
+                          ))}
+
+                          <div
+                            onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
+                            className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400 bg-transparent' : 'border-gray-400 border-dashed bg-gray-500/10'} cursor-move transition-colors flex items-center justify-center overflow-hidden touch-none`}
+                            style={{
+                              left: `${subtitlePosition.xPct}%`,
+                              top: `${subtitlePosition.yPct}%`,
+                              width: `${subtitlePosition.widthPct}%`,
+                              height: `${subtitlePosition.heightPct}%`,
+                              fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
+                            }}
+                          >
+                            <span className="text-white font-bold drop-shadow-md text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
+                            {selectedElement === 'subtitle' && (
+                              <>
+                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize touch-none" />
+                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize touch-none" />
+                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize touch-none" />
+                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize touch-none" />
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full aspect-[9/16] bg-gray-900 rounded-xl flex items-center justify-center text-gray-500 text-sm">Please upload a video first</div>
+                    )}
+                  </div>
+                  
+                  <div className="w-full md:w-1/3">
+                    <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
+                      <h4 className="text-sm font-bold text-gray-300 mb-4 flex items-center justify-between">
+                        Subtitle Settings
+                        <button onClick={() => setSelectedElement(selectedElement === 'subtitle' ? null : 'subtitle')} className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 bg-indigo-500/10 rounded-md">Edit Size</button>
+                      </h4>
+                      {selectedElement === 'subtitle' ? (
+                        <details className="mt-2 text-xs">
+                          <summary className="text-gray-400 cursor-pointer hover:text-white mb-2">Advanced (manual values)</summary>
+                          <div className="grid grid-cols-2 gap-3 mt-2">
+                            <div><label className="text-gray-500 block mb-1">X Pos (%)</label><input type="number" value={Math.round(subtitlePosition.xPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, xPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                            <div><label className="text-gray-500 block mb-1">Y Pos (%)</label><input type="number" value={Math.round(subtitlePosition.yPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, yPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                            <div><label className="text-gray-500 block mb-1">Width (%)</label><input type="number" value={Math.round(subtitlePosition.widthPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, widthPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                            <div><label className="text-gray-500 block mb-1">Height (%)</label><input type="number" value={Math.round(subtitlePosition.heightPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, heightPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
+                          </div>
+                        </details>
+                      ) : (
+                        <div className="text-xs text-gray-500 py-6 text-center">Click "Edit Size" or select the subtitle box on the video to manually adjust dimensions.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 6: My Fonts */}
+            {currentStep === 6 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-xl">🔤</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">My Fonts</h3>
+                </div>
+                
+                <div className="flex flex-col md:flex-row gap-6">
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-500 mb-4">Upload your custom TrueType (.ttf) or OpenType (.otf) fonts for burned-in subtitles.</p>
+                    
+                    <div className="flex flex-col gap-3">
+                      <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-700 hover:border-indigo-500 bg-gray-950/50 hover:bg-indigo-950/20 text-gray-300 font-semibold text-sm rounded-xl cursor-pointer transition-all">
+                        <UploadCloud className="w-5 h-5 text-indigo-400" />
+                        Upload Custom Font
+                        <input type="file" accept=".ttf,.otf" className="hidden" onChange={handleFontUpload} />
+                      </label>
+                      {fontUploadStatus && <div className="text-xs text-center text-indigo-400 font-medium bg-indigo-950/30 py-2 rounded-lg">{fontUploadStatus}</div>}
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 bg-gray-950/80 border border-gray-800 rounded-xl p-3 min-h-[200px] max-h-[300px] overflow-y-auto custom-scrollbar">
+                    {fonts.length === 0 ? (
+                      <div className="flex h-full flex-col items-center justify-center text-center px-4">
+                        <span className="text-2xl mb-2">📂</span>
+                        <span className="text-xs text-gray-500">No custom fonts uploaded yet. Using default Noto Sans Myanmar.</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <label 
+                          className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${selectedFontId === null ? 'bg-indigo-600 shadow-md text-white' : 'hover:bg-gray-800/80 bg-gray-900/50 text-gray-300'}`}
+                        >
+                          <input type="radio" name="fontSelection" checked={selectedFontId === null} onChange={() => setSelectedFontId(null)} className="hidden" />
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === null ? 'border-white' : 'border-gray-500'}`}>
+                            {selectedFontId === null && <div className="w-2 h-2 rounded-full bg-white" />}
+                          </div>
+                          <span className="text-sm font-bold">Default (Noto Sans Myanmar)</span>
+                        </label>
+
+                        {fonts.map(font => (
+                          <label 
+                            key={font.id}
+                            className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${selectedFontId === font.id ? 'bg-indigo-600 shadow-md text-white' : 'hover:bg-gray-800/80 bg-gray-900/50 text-gray-300'}`}
+                          >
+                            <input type="radio" name="fontSelection" checked={selectedFontId === font.id} onChange={() => setSelectedFontId(font.id)} className="hidden" />
+                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedFontId === font.id ? 'border-white' : 'border-gray-500'}`}>
+                              {selectedFontId === font.id && <div className="w-2 h-2 rounded-full bg-white" />}
+                            </div>
+                            <span className="text-lg" style={{ fontFamily: `font_${font.id}` }}>{font.originalName}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 7: Final Preview */}
+            {currentStep === 7 && (
+              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">✨</span>
+                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Final Preview</h3>
+                </div>
+                <p className="text-xs text-gray-500 mb-6">Review your settings before starting the AI generation.</p>
+                
+                <div className="flex flex-col items-center">
+                  <div className="w-full max-w-sm">
+                    {videoFile && videoPreviewUrl ? (
+                      <div className="relative w-full aspect-[9/16] mx-auto rounded-xl overflow-hidden shadow-2xl shadow-indigo-900/20 bg-black border border-gray-800">
+                        <video
+                          src={videoPreviewUrl}
+                          muted
+                          playsInline
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute inset-0 pointer-events-none" style={{ left: `0px`, top: `0px`, width: `100%`, height: `100%` }}>
+                          {blurBoxes.map((box) => (
+                            <div
+                              key={box.id}
+                              className="absolute"
+                              style={{
+                                left: `${box.xPct}%`,
+                                top: `${box.yPct}%`,
+                                width: `${box.widthPct}%`,
+                                height: `${box.heightPct}%`,
+                                backdropFilter: `blur(${box.strength * 1.2}px)`,
+                                WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
+                              }}
+                            />
+                          ))}
+                          <div
+                            className="absolute flex items-center justify-center"
+                            style={{
+                              left: `${subtitlePosition.xPct}%`,
+                              top: `${subtitlePosition.yPct}%`,
+                              width: `${subtitlePosition.widthPct}%`,
+                              height: `${subtitlePosition.heightPct}%`,
+                              fontFamily: selectedFontId ? `font_${selectedFontId}` : 'inherit'
+                            }}
+                          >
+                            <span className="text-white font-bold drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] text-center w-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 8: Render / Actions */}
+            {currentStep === 8 && (
+              <div className="flex flex-col items-center justify-center pt-8 max-w-md mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                <div className="text-center mb-4">
+                  <h2 className="text-2xl font-bold font-display text-white mb-2">Ready to Render</h2>
+                  <p className="text-gray-400 text-sm">Your video is configured and ready for AI processing.</p>
+                </div>
+                {isKeysConfigured ? (
+                  <button
+                    onClick={startAnalysis}
+                    disabled={!videoFile}
+                    className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:from-gray-800 disabled:to-gray-800 disabled:opacity-40 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all shadow-xl shadow-indigo-900/40 active:scale-95 hover:scale-[1.02] disabled:scale-100 disabled:cursor-not-allowed group"
+                  >
+                    <Play className="w-6 h-6 fill-white group-hover:scale-110 transition-transform" />
+                    <span>Start AI Processing</span>
+                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 py-4 px-8 rounded-2xl font-bold text-lg transition-all active:scale-95 flex items-center justify-center gap-3"
+                  >
+                    <ShieldAlert className="w-6 h-6" />
+                    <span>Please add API Keys</span>
+                  </button>
+                )}
+              </div>
+            )}
+            
+            {/* Navigation Controls */}
+            <div className="flex items-center justify-between max-w-5xl mx-auto mt-8 pt-4 border-t border-gray-900">
+              <button
+                onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
+                disabled={currentStep === 1}
+                className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Back
+              </button>
+              
+              {currentStep < 8 && (
                 <button
-                  onClick={startAnalysis}
-                  disabled={!videoFile}
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:from-gray-800 disabled:to-gray-800 disabled:opacity-40 text-white py-3.5 px-6 rounded-xl font-bold text-sm transition-all shadow-lg shadow-indigo-950/30 active:scale-98 hover:scale-[1.02] disabled:scale-100 disabled:cursor-not-allowed"
+                  onClick={() => setCurrentStep(prev => Math.min(8, prev + 1))}
+                  disabled={currentStep === 1 && !videoFile}
+                  className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  <Play className="w-4 h-4 fill-white" />
-                  <span>စတင်လုပ်ဆောင်မည်</span>
+                  Next Step
                   <ArrowRight className="w-4 h-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 py-3.5 px-6 rounded-xl font-bold text-sm transition-all active:scale-98 flex items-center justify-center gap-2"
-                >
-                  <ShieldAlert className="w-4 h-4" />
-                  <span>API Keys အရင်ထည့်ပေးပါ</span>
                 </button>
               )}
             </div>
 
           </div>
         )}
+
 
         {/* 2. PROCESSING PIPELINE WORKSPACE */}
         {(status === 'uploading' || status === 'analyzing') && (
