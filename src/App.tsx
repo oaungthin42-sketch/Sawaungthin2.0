@@ -859,7 +859,7 @@ useEffect(() => {
                           e.currentTarget.currentTime = 0.1;
                           updateVideoRect();
                         }}
-                        className="w-full h-full object-contain"
+                        className="w-full h-full object-cover"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity">
                         <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
@@ -982,7 +982,7 @@ useEffect(() => {
                           src={videoPreviewUrl}
                           muted
                           playsInline
-                          className="w-full h-full object-contain"
+                          className="w-full h-full object-cover"
                         />
                         <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                           
@@ -1101,7 +1101,7 @@ useEffect(() => {
                           src={videoPreviewUrl}
                           muted
                           playsInline
-                          className="w-full h-full object-contain"
+                          className="w-full h-full object-cover"
                         />
                         <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                           
@@ -1248,7 +1248,7 @@ useEffect(() => {
                           src={videoPreviewUrl}
                           muted
                           playsInline
-                          className="w-full h-full object-contain"
+                          className="w-full h-full object-cover"
                         />
                         <div className="absolute inset-0 pointer-events-none" style={{ left: `0px`, top: `0px`, width: `100%`, height: `100%` }}>
                           {blurBoxes.map((box) => (

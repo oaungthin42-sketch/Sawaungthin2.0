@@ -830,7 +830,7 @@ export const processRecapPipeline = async (jobId) => {
                     const blurArgs = [
                         '-i', finalOutPath,
                         '-filter_complex', filterComplex,
-                        '-map', lastMap,
+                        '-map', lastMap, '-map', '0:a?',
                         '-c:a', 'copy',
                         '-c:v', 'libx264',
                         '-preset', 'fast',
@@ -882,7 +882,7 @@ export const processRecapPipeline = async (jobId) => {
                     }
 
                     if (subtitles.length > 0) {
-                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles...");
+                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
                         const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
                         
                         let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
@@ -892,28 +892,32 @@ export const processRecapPipeline = async (jobId) => {
                             } catch(e) {}
                         }
                         
-                        const bx = Math.round((pos.xPct / 100) * 1080);
-                        const by = Math.round((pos.yPct / 100) * 1920);
-                        const bw = Math.round((pos.widthPct / 100) * 1080);
-                        const bh = Math.round((pos.heightPct / 100) * 1920);
+                        const marginL = Math.round((pos.xPct / 100) * 1080);
+                        const marginR = Math.round(1080 - ((pos.xPct + pos.widthPct) / 100) * 1080);
+                        const marginV = Math.round((pos.yPct / 100) * 1920);
                         
-                        let fontsize = Math.round(bh * 0.6);
+                        let fontsize = Math.round(((pos.heightPct / 100) * 1920) * 0.6);
                         if (fontsize < 24) fontsize = 24;
                         if (fontsize > 80) fontsize = 80;
 
-                        // Create text files for each subtitle line to avoid quoting issues
-                        const subDir = path.join(tmpDir, jobId + "_subs");
-                        if (!fs.existsSync(subDir)) fs.mkdirSync(subDir, { recursive: true });
-
-                        let fontfileOption = "font='Noto Sans Myanmar'";
+                        let fontName = "Noto Sans Myanmar";
+                        let fontsDirOpt = "";
                         if (job.selectedFontId) {
                             try {
+                                const { execSync } = require('child_process');
                                 const row = db.prepare('SELECT storedFilename FROM fonts WHERE id = ?').get(job.selectedFontId);
                                 if (row) {
                                     const fontPath = path.join(process.cwd(), 'public', 'fonts', row.storedFilename);
                                     if (fs.existsSync(fontPath)) {
-                                        // FFmpeg needs escaped colons for Windows paths if applicable, but we are in Linux container
-                                        fontfileOption = "fontfile='" + fontPath.replace(/:/g, '\\:') + "'";
+                                        fontsDirOpt = ":fontsdir='" + path.dirname(fontPath).replace(/:/g, '\\:') + "'";
+                                        try {
+                                            const familyRaw = execSync('fc-scan --format "%{family}\\n" "' + fontPath + '"').toString().trim();
+                                            if (familyRaw) {
+                                                fontName = familyRaw.split(',')[0].trim();
+                                            }
+                                        } catch(e) {
+                                            console.error("fc-scan error", e);
+                                        }
                                     }
                                 }
                             } catch (err) {
@@ -921,29 +925,46 @@ export const processRecapPipeline = async (jobId) => {
                             }
                         }
 
-                        let filterComplex = '';
-                        let lastMap = '[0:v]';
-                        
-                        for (let i = 0; i < subtitles.length; i++) {
-                            const sub = subtitles[i];
-                            const txtPath = path.join(subDir, "sub_" + i + ".txt");
-                            fs.writeFileSync(txtPath, sub.text, 'utf8');
-                            const escapedPath = txtPath.replace(/:/g, '\\:');
-                            
-                            const nextMap = "[v_sub" + i + "]";
-                            
-                            const drawCmd = "drawtext=" + fontfileOption + ":textfile='" + escapedPath + "':fontsize=" + fontsize + ":fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=8:x=" + bx + "+(" + bw + "-text_w)/2:y=" + by + "+(" + bh + "-text_h)/2:enable='between(t," + sub.start + "," + sub.end + ")'";
-                            
-                            filterComplex += lastMap + drawCmd + nextMap + ";";
-                            lastMap = nextMap;
-                        }
-                        
-                        filterComplex = filterComplex.replace(/;$/, '');
+                        const toAssTime = (sec) => {
+                            const h = Math.floor(sec / 3600);
+                            const m = Math.floor((sec % 3600) / 60);
+                            const s = Math.floor(sec % 60);
+                            const cs = Math.floor((sec % 1) * 100);
+                            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+                        };
+
+                        const assHeader = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 1
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,${fontName},${fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,8,0,8,${marginL},${marginR},${marginV},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+                        const assLines = subtitles.map(sub => {
+                            const startStr = toAssTime(sub.start);
+                            const endStr = toAssTime(sub.end);
+                            // Replace newlines with ASS newline N
+                            const assText = sub.text.replace(/\n/g, '\\N');
+                            return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                        });
+
+                        const assPath = path.join(tmpDir, jobId + ".ass");
+                        fs.writeFileSync(assPath, assHeader + assLines.join('\n') + '\n', 'utf8');
+
+                        const filterComplex = `[0:v]subtitles='${assPath.replace(/:/g, '\\:')}'${fontsDirOpt}[v]`;
 
                         const subArgs = [
                             '-i', finalOutPath,
                             '-filter_complex', filterComplex,
-                            '-map', lastMap,
+                            '-map', '[v]',
+                            '-map', '0:a?',
                             '-c:a', 'copy',
                             '-c:v', 'libx264',
                             '-preset', 'fast',
@@ -965,7 +986,6 @@ export const processRecapPipeline = async (jobId) => {
             }
             advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
         }
-
         // 12. SPEED ADJUST
         if (!hasCompletedStep(job.currentStep, STEPS.SPEED_ADJUST)) {
             advanceStep(STEPS.SPEED_ADJUST, 99, 'Adjusting Final Speed');
