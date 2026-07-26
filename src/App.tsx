@@ -890,7 +890,7 @@ useEffect(() => {
                         }}
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
                           <div>
                             <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
