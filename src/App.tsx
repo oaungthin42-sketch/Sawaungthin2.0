@@ -1,5 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
+declare global {
+  interface Window {
+    google: any;
+  }
+}
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Settings, Play, ShieldAlert, RefreshCw, Menu, 
@@ -73,6 +78,50 @@ const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement
 };
 
 function App() {
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+
+  useEffect(() => {
+    axios.get('/api/auth/me').then(res => {
+      setUser(res.data.user);
+    }).catch(err => {
+      setUser(null);
+    }).finally(() => {
+      setAuthLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+        if (window.google && window.google.accounts) {
+            window.google.accounts.id.initialize({
+                client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || 'dummy',
+                callback: handleCredentialResponse
+            });
+            window.google.accounts.id.renderButton(
+                document.getElementById('google-signin-button'),
+                { theme: 'outline', size: 'large' }
+            );
+        }
+    }
+  }, [authLoading, user]);
+
+  const handleCredentialResponse = (response: any) => {
+    axios.post('/api/auth/google', { credential: response.credential }).then(res => {
+      setUser(res.data.user);
+      setAuthError('');
+    }).catch(err => {
+        setAuthError(err.response?.data?.error || 'Login failed');
+    });
+  };
+
+  const logout = () => {
+      axios.post('/api/auth/logout').then(() => {
+          setUser(null);
+      });
+  };
+
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
@@ -628,6 +677,35 @@ useEffect(() => {
   const hasGeminiKey = !!localStorage.getItem('GEMINI_API_KEY');
   const isKeysConfigured = hasGeminiKey;
 
+  if (authLoading) {
+    return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-white px-4">
+        <div className="w-16 h-16 rounded-xl flex items-center justify-center logo-glow mb-6">
+          <img src="/logo-superclick.png" alt="SuperClick" className="w-12 h-12 object-contain" />
+        </div>
+        <h1 className="text-3xl font-display font-bold mb-2">SuperClick</h1>
+        <p className="text-gray-400 mb-8 text-center max-w-sm">Sign in to start reconstructing professional Burmese videos.</p>
+        <div id="google-signin-button" className="bg-white rounded p-1"></div>
+        {authError && <p className="text-red-400 mt-4 bg-red-400/10 px-4 py-2 rounded-lg border border-red-400/20">{authError}</p>}
+      </div>
+    );
+  }
+
+  if (user.status === 'suspended') {
+      return (
+        <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-white px-4">
+          <ShieldAlert className="w-16 h-16 text-red-500 mb-4" />
+          <h1 className="text-2xl font-bold mb-2 text-red-400">Account Suspended</h1>
+          <p className="text-gray-400 mb-6">Your account has been suspended.</p>
+          <button onClick={logout} className="px-4 py-2 bg-gray-800 rounded-lg text-sm font-medium hover:bg-gray-700">Logout</button>
+        </div>
+      );
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-indigo-500/30 selection:text-white">
       
@@ -645,6 +723,12 @@ useEffect(() => {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-gray-900 border border-gray-800 rounded-full">
+              <span className="text-xs text-gray-400">{user.name}</span>
+              {user.role === 'admin' && <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded">ADMIN</span>}
+            </div>
+            <button onClick={logout} className="text-xs text-gray-400 hover:text-white transition-colors">Logout</button>
+
             {/* Status dot warning if keys are missing */}
             {!isKeysConfigured && (
               <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-amber-400 text-xs font-semibold animate-pulse">

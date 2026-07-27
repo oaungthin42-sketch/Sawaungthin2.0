@@ -4,6 +4,8 @@ import cors from 'cors';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import apiRoutes from './src/routes/api.js';
+import authRoutes from './src/routes/auth.js';
+import session from 'express-session';
 
 import { initModels } from './src/ai/index.js';
 import { recoverStuckJobs } from './src/services/jobManager.js';
@@ -13,10 +15,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'superclick_secret_key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+  }
+}));
+
 // Serve outputs
 app.use('/output', express.static(path.join(process.cwd(), 'public', 'output')));
 
 // Setup API routes
+app.use('/api/auth', authRoutes);
 app.use('/api', apiRoutes);
 
 async function startServer() {

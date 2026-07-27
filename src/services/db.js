@@ -49,3 +49,19 @@ try {
         )
     `);
 } catch (e) {}
+
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            googleId TEXT UNIQUE,
+            email TEXT UNIQUE,
+            name TEXT,
+            role TEXT DEFAULT 'user',
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+} catch (e) {
+    console.error("Error creating users table", e);
+}
