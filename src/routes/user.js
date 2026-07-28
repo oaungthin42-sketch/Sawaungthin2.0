@@ -98,6 +98,16 @@ router.get('/admin/feedback', authMiddleware, adminOnly, (req, res) => {
     }
 });
 
+router.post('/admin/feedback/:id/reply', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const { reply } = req.body;
+        db.prepare('UPDATE feedback SET adminReply = ? WHERE id = ?').run(reply, req.params.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to reply to feedback' });
+    }
+});
+
 router.get('/admin/jobs', authMiddleware, adminOnly, (req, res) => {
     try {
         const jobs = db.prepare(`

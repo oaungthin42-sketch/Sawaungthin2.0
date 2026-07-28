@@ -38,8 +38,8 @@ router.post('/google', async (req, res) => {
             
             const id = uuidv4();
             const stmt = db.prepare(`
-                INSERT INTO users (id, googleId, email, name, role, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO users (id, googleId, email, name, role, status, credits)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
             `);
             stmt.run(id, googleId, email, name, role, 'active');
             user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);

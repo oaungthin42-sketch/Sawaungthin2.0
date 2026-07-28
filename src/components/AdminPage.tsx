@@ -29,6 +29,7 @@ interface Feedback {
     userEmail: string;
     rating: number;
     comment: string;
+    adminReply?: string;
     created_at: string;
     jobId: string;
 }
@@ -59,6 +60,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     const [search, setSearch] = useState('');
     const [creditAmounts, setCreditAmounts] = useState<Record<string, number>>({});
     const [creditInputs, setCreditInputs] = useState<Record<string, string>>({});
+    const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
 
@@ -100,8 +102,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
         try {
             await axios.post(`/api/user/admin/users/${userId}/credits`, { amount });
             fetchData();
+            setCreditInputs(prev => ({ ...prev, [userId]: '' }));
         } catch (err: any) {
             alert(err.response?.data?.error || 'Failed to update credits');
+        }
+    };
+
+    const handleReplyFeedback = async (feedbackId: string) => {
+        const reply = replyInputs[feedbackId];
+        if (!reply) return;
+        try {
+            await axios.post(`/api/user/admin/feedback/${feedbackId}/reply`, { reply });
+            fetchData();
+            setReplyInputs(prev => ({ ...prev, [feedbackId]: '' }));
+        } catch (err: any) {
+            alert(err.response?.data?.error || 'Failed to send reply');
         }
     };
 
@@ -268,8 +283,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                                 onChange={e => setCreditInputs({...creditInputs, [user.id]: e.target.value})}
                                                                 className="w-16 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500" 
                                                             />
-                                                            <button onClick={() => handleCredits(user.id, Number(creditInputs[user.id] || 0))} className="px-2 py-1 bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white rounded-lg transition-all text-xs font-bold">Add</button>
-                                                            <button onClick={() => handleCredits(user.id, -Number(creditInputs[user.id] || 0))} className="px-2 py-1 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all text-xs font-bold">Subtract</button>
+                                                            {(() => {
+                                                                const amt = Number(creditInputs[user.id]);
+                                                                const isValid = creditInputs[user.id] && !isNaN(amt) && amt > 0;
+                                                                return (
+                                                                    <>
+                                                                        <button disabled={!isValid} onClick={() => handleCredits(user.id, amt)} className="px-2 py-1 bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white rounded-lg transition-all text-xs font-bold disabled:opacity-30 disabled:pointer-events-none">Add</button>
+                                                                        <button disabled={!isValid} onClick={() => handleCredits(user.id, -amt)} className="px-2 py-1 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all text-xs font-bold disabled:opacity-30 disabled:pointer-events-none">Subtract</button>
+                                                                    </>
+                                                                );
+                                                            })()}
                                                         </div>
                                                     </div>
                                                 </td>
@@ -343,7 +366,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                         <span className="text-xs text-gray-500">{item.userEmail}</span>
                                                     </div>
                                                     <p className="text-gray-300 text-sm leading-relaxed">{item.comment || <span className="italic text-gray-600">No comment provided</span>}</p>
+                                                    {item.adminReply && (
+                                                        <div className="mt-2 p-3 bg-indigo-900/20 border border-indigo-500/20 rounded-xl">
+                                                            <p className="text-xs font-bold text-indigo-400 mb-1">Admin Reply</p>
+                                                            <p className="text-sm text-indigo-100">{item.adminReply}</p>
+                                                        </div>
+                                                    )}
                                                     <div className="text-[10px] text-gray-600 font-mono">Job ID: {item.jobId || 'N/A'}</div>
+                                                    <div className="mt-4 flex flex-col gap-2">
+                                                        <textarea 
+                                                            placeholder="Write a reply..."
+                                                            value={replyInputs[item.id] || ''}
+                                                            onChange={e => setReplyInputs({ ...replyInputs, [item.id]: e.target.value })}
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 resize-none h-20"
+                                                        />
+                                                        <button 
+                                                            disabled={!replyInputs[item.id]}
+                                                            onClick={() => handleReplyFeedback(item.id)}
+                                                            className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
+                                                        >
+                                                            Send Reply
+                                                        </button>
+                                                    </div>
                                                 </div>
                                                 <div className="text-xs text-gray-500 text-right">
                                                     {new Date(item.created_at).toLocaleString()}

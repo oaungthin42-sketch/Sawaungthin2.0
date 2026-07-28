@@ -5,10 +5,11 @@ import { Video, CreditCard, History, Zap, ArrowRight, Play } from 'lucide-react'
 interface DashboardProps {
     credits: number | null;
     userName: string;
+    userRole: string;
     onStartNew: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, onStartNew }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, userRole, onStartNew }) => {
     return (
         <div className="space-y-8 animate-in fade-in duration-700">
             {/* Welcome Banner */}
@@ -44,7 +45,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, onStart
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Active Balance</span>
                     </div>
                     <div className="flex flex-col items-center">
-                        {credits !== null ? <CreditGauge credits={credits} /> : <div className="text-5xl font-bold font-mono text-white tracking-tighter">...</div>}
+                        {userRole === 'admin'
+                            ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2 mt-4">∞ Unlimited</div>
+                            : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-5xl font-bold font-mono text-white tracking-tighter">...</div>)}
                     </div>
                 </div>
 

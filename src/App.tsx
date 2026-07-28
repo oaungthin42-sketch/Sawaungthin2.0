@@ -293,6 +293,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (activeView === 'tool' && user) {
+      axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
+    }
+  }, [activeView, user]);
+
+  useEffect(() => {
     if (videoFile) {
       const url = URL.createObjectURL(videoFile);
       setVideoPreviewUrl(url);
@@ -461,6 +467,11 @@ function App() {
   const startAnalysis = async () => {
     if (!videoFile) return;
 
+    if (user?.role !== 'admin' && (credits === null || credits <= 0)) {
+        setActiveView('credits');
+        return;
+    }
+
     setStatus('uploading');
     setProgressPct(5);
 
@@ -600,7 +611,7 @@ function App() {
   }
 
   const renderContent = () => {
-      if (credits === 0 && user?.role !== 'admin' && activeView !== 'credits') {
+      if (activeView === 'tool' && credits !== null && credits <= 0 && user?.role !== 'admin') {
           return (
               <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center space-y-12">
                   <div className="w-24 h-24 bg-red-950 text-red-500 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-red-900/50 mb-4">
@@ -624,6 +635,7 @@ function App() {
           return <Dashboard 
                     credits={credits} 
                     userName={user?.name || ''} 
+                    userRole={user?.role || 'user'}
                     onStartNew={() => setActiveView('tool')} 
                  />;
       }
@@ -677,7 +689,9 @@ function App() {
                       <CreditCard className="w-8 h-8" />
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-6">Your Credit Balance</h2>
-                  {credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>}
+                  {user?.role === 'admin'
+                      ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2">∞ Unlimited</div>
+                      : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>)}
                   <p className="text-gray-400 my-8">Credits are used for processing high-quality Burmese AI reconstructions.</p>
                   
                   <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
@@ -922,7 +936,7 @@ function App() {
                               <h2 className="text-2xl font-bold text-white mb-2">Ready to Render</h2>
                               <p className="text-gray-400 text-sm">Your Burmese video reconstruction is configured. AI processing will begin now.</p>
                            </div>
-                           {credits !== null && credits <= 0 ? (
+                           {credits !== null && credits <= 0 && user?.role !== 'admin' ? (
                              <div className="w-full p-4 bg-amber-950/20 border border-amber-900/30 rounded-2xl text-center">
                                <p className="text-amber-400 text-sm font-bold">Insufficient Credits</p>
                              </div>
@@ -1032,7 +1046,9 @@ function App() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 bg-gray-900 border border-gray-800 rounded-full">
-                  {credits !== null ? <CreditGauge credits={credits} size="small" /> : <span className="text-xs text-indigo-400 font-bold">... Credits</span>}
+                  {user?.role === 'admin'
+                    ? <span className="text-amber-400 font-bold flex items-center gap-1">∞ Unlimited</span>
+                    : (credits !== null ? <CreditGauge credits={credits} size="small" /> : <span className="text-xs text-indigo-400 font-bold">... Credits</span>)}
                   <div className="w-px h-3 bg-gray-800" />
                   <span className="text-xs text-gray-400">{user?.name}</span>
                 </div>

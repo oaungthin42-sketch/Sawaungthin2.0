@@ -68,7 +68,7 @@ try {
 
 try { db.exec(`ALTER TABLE users ADD COLUMN geminiApiKeyEncrypted TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN userId TEXT`); } catch (e) {}
-try { db.exec(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 3`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN last_login DATETIME`); } catch (e) {}
 
 try {
@@ -85,6 +85,10 @@ try {
 } catch (e) {
     console.error("Error creating feedback table", e);
 }
+
+try {
+    db.exec(`ALTER TABLE feedback ADD COLUMN adminReply TEXT`);
+} catch (e) {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS payment_requests (
