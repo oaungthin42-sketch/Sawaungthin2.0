@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { SettingsModal } from './components/SettingsModal';
 import { AdminPage } from './components/AdminPage';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -7,7 +6,7 @@ import { FeedbackForm } from './components/FeedbackForm';
 import { CreditGauge } from './components/CreditGauge';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
-  Settings, Play, Menu, 
+  Play, Menu, 
   Volume2, ArrowRight, Check, X, CreditCard, Star
 } from 'lucide-react';
 import axios from 'axios';
@@ -112,14 +111,11 @@ function App() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [pollTimer, setPollTimer] = useState<any>(null);
 
-  const [showSettings, setShowSettings] = useState(false);
   const [voices, setVoices] = useState<any[]>([]);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
   const [settings, setSettings] = useState<any>({});
   const [editSettings, setEditSettings] = useState<any>({});
-  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
-  const [settingsSaving, setSettingsSaving] = useState(false);
   const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
 
   const [uploadingSlip, setUploadingSlip] = useState(false);
@@ -255,28 +251,12 @@ function App() {
   };
 
   const saveSetting = async (key: string, value: string) => {
-    setSettingsSaving(true);
     try {
       const res = await axios.post('/api/settings', { key, value });
       setSettings(res.data);
       setEditSettings({ ...editSettings, [key]: undefined });
     } catch (e) {
       console.error("Failed to save setting", e);
-    } finally {
-      setSettingsSaving(false);
-    }
-  };
-
-  const deleteSetting = async (key: string) => {
-    setSettingsSaving(true);
-    try {
-      const res = await axios.post('/api/settings', { key, value: null });
-      setSettings(res.data);
-      setEditSettings({ ...editSettings, [key]: undefined });
-    } catch (e) {
-      console.error("Failed to delete setting", e);
-    } finally {
-      setSettingsSaving(false);
     }
   };
 
@@ -881,6 +861,33 @@ function App() {
                                     <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
                                 </div>
                             </div>
+                            
+                            {user?.role === 'admin' && (
+                                <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto">
+                                    <div className="flex flex-col gap-1.5 mb-4">
+                                        <span className="text-sm font-semibold text-gray-300">ရလဒ်ဗီဒီယို အသံနှုန်း (Output Speed)</span>
+                                        <span className="text-xs text-gray-500 font-medium">ထုတ်လုပ်ပြီးသား ဗီဒီယိုတစ်ခုလုံးရဲ့ ပြေးနှုန်းကို ချိန်ညှိပါ — video နဲ့ အသံ နှစ်ခုစလုံး တညီတည်း မြန်/နှေး သွားမှာဖြစ်ပါတယ်။</span>
+                                    </div>
+                                    <div className="relative">
+                                        <select 
+                                            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 appearance-none"
+                                            value={editSettings['OUTPUT_SPEED_MULTIPLIER'] !== undefined ? editSettings['OUTPUT_SPEED_MULTIPLIER'] : (settings['OUTPUT_SPEED_MULTIPLIER']?.value || "1.0")}
+                                            onChange={(e) => {
+                                                setEditSettings({ ...editSettings, 'OUTPUT_SPEED_MULTIPLIER': e.target.value });
+                                                saveSetting('OUTPUT_SPEED_MULTIPLIER', e.target.value);
+                                            }}
+                                        >
+                                            <option value="1.0">1x (Default)</option>
+                                            <option value="1.25">1.25x</option>
+                                            <option value="1.5">1.5x</option>
+                                            <option value="1.75">1.75x</option>
+                                            <option value="2.0">2x</option>
+                                            <option value="2.5">2.5x</option>
+                                            <option value="3.0">3x</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                       )}
 
@@ -1110,9 +1117,6 @@ function App() {
                   <div className="w-px h-3 bg-gray-800" />
                   <span className="text-xs text-gray-400">{user?.name}</span>
                 </div>
-                {user?.role === 'admin' && (
-                  <button onClick={() => setShowSettings(true)} className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 hover:border-indigo-500/50 text-gray-400 hover:text-indigo-400 transition-all"><Settings size={20} /></button>
-                )}
               </div>
           </header>
 
@@ -1120,19 +1124,6 @@ function App() {
               {renderContent()}
           </main>
       </div>
-
-      <SettingsModal 
-        showSettings={showSettings} 
-        setShowSettings={setShowSettings} 
-        settings={settings} 
-        editSettings={editSettings}
-        setEditSettings={setEditSettings}
-        saveSetting={saveSetting}
-        deleteSetting={deleteSetting}
-        settingsSaving={settingsSaving}
-        showKeys={showKeys}
-        setShowKeys={setShowKeys}
-      />
 
       {showVoiceDrawer && (
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4">
