@@ -145,8 +145,8 @@ function App() {
         await axios.post('/api/user/payment-request', formData);
         setSlipUploadSuccess(true);
         setSlipFile(null);
-    } catch (e) {
-        alert('Failed to upload slip.');
+    } catch (e: any) {
+        alert(e.response?.data?.error || 'Failed to upload slip.');
     } finally {
         setUploadingSlip(false);
     }
@@ -187,10 +187,9 @@ function App() {
   };
 
   useEffect(() => {
-    fetchVoices();
-  }, []);
-
-  useEffect(() => {
+    if (user) {
+      fetchVoices();
+    }
     if (user?.role === 'admin') {
       fetchSettings();
     }

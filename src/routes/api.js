@@ -114,14 +114,18 @@ router.get('/diagnostic', async (req, res) => {
 });
 
 // Voices Routes
-router.get('/voices', (req, res) => {
+router.get('/voices', authMiddleware, (req, res) => {
     res.json(VOICES);
 });
 
-router.post('/preview-voice', async (req, res) => {
+router.post('/preview-voice', authMiddleware, async (req, res) => {
     const { voiceId } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });
     
+    if (req.user.credits <= 0) {
+        return res.status(400).json({ error: 'Insufficient Credits' });
+    }
+
     const config = getVoiceConfig(voiceId);
     if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
     

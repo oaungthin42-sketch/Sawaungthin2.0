@@ -10,6 +10,7 @@ interface User {
     status: string;
     credits: number;
     created_at: string;
+    last_login: string | null;
 }
 
 interface Job {
@@ -56,9 +57,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [creditAmounts, setCreditAmounts] = useState<Record<string, number>>({});
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const fetchData = async () => {
         setLoading(true);
+        setErrorMsg(null);
         try {
             if (activeTab === 'users') {
                 const res = await axios.get('/api/user/admin/users');
@@ -73,8 +76,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                 const res = await axios.get('/api/user/admin/payment-requests');
                 setPayments(res.data);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to fetch data', err);
+            setErrorMsg(err.response?.data?.error || err.message || 'Failed to fetch data');
         } finally {
             setLoading(false);
         }
@@ -88,8 +92,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
         try {
             await axios.post(`/api/user/admin/users/${userId}/credits`, { amount });
             fetchData();
-        } catch (err) {
-            alert('Failed to update credits');
+        } catch (err: any) {
+            alert(err.response?.data?.error || 'Failed to update credits');
         }
     };
 
@@ -98,8 +102,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
             const action = user.status === 'active' ? 'suspend' : 'activate';
             await axios.post(`/api/user/admin/users/${user.id}/${action}`);
             fetchData();
-        } catch (err) {
-            alert('Failed to update status');
+        } catch (err: any) {
+            alert(err.response?.data?.error || 'Failed to update status');
         }
     };
 
@@ -107,8 +111,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
         try {
             await axios.post(`/api/user/admin/payment-requests/${id}/approve`, { credits });
             fetchData();
-        } catch (e) {
-            alert('Failed to approve payment');
+        } catch (e: any) {
+            alert(e.response?.data?.error || 'Failed to approve payment');
         }
     };
 
@@ -116,8 +120,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
         try {
             await axios.post(`/api/user/admin/payment-requests/${id}/reject`);
             fetchData();
-        } catch (e) {
-            alert('Failed to reject payment');
+        } catch (e: any) {
+            alert(e.response?.data?.error || 'Failed to reject payment');
         }
     };
 
@@ -158,8 +162,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                             </div>
                         </div>
                     </div>
+                    
+                    {errorMsg && (
+                        <div className="w-full mt-4 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl font-medium">
+                            {errorMsg}
+                        </div>
+                    )}
 
-                    <div className="flex items-center gap-2 p-1 bg-gray-900 border border-gray-800 rounded-2xl">
+                    <div className="flex items-center gap-2 p-1 bg-gray-900 border border-gray-800 rounded-2xl mt-6 sm:mt-0">
                         <button 
                             onClick={() => setActiveTab('users')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
@@ -213,6 +223,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
                                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
                                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Credits</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Last Login</th>
                                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
                                         </tr>
                                     </thead>
@@ -240,6 +251,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                                                             <button onClick={() => handleCredits(user.id, -5)} className="p-1.5 bg-gray-800 hover:bg-red-600 text-gray-400 hover:text-white rounded-lg transition-all active:scale-90"><Minus className="w-4 h-4" /></button>
                                                         </div>
                                                     </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className="text-xs font-medium text-gray-400">
+                                                        {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                                                    </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
                                                     <button onClick={() => toggleStatus(user)} disabled={user.role === 'admin'} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none ${user.status === 'active' ? 'bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white shadow-lg shadow-red-900/20' : 'bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white shadow-lg shadow-green-900/20'}`}>

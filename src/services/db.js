@@ -69,6 +69,7 @@ try {
 try { db.exec(`ALTER TABLE users ADD COLUMN geminiApiKeyEncrypted TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN userId TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 3`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN last_login DATETIME`); } catch (e) {}
 
 try {
     db.exec(`

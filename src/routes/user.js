@@ -27,7 +27,7 @@ router.get('/credits', authMiddleware, (req, res) => {
 
 router.get('/admin/users', authMiddleware, adminOnly, (req, res) => {
     try {
-        const users = db.prepare('SELECT id, email, name, role, status, credits, created_at FROM users ORDER BY created_at DESC').all();
+        const users = db.prepare('SELECT id, email, name, role, status, credits, created_at, last_login FROM users ORDER BY last_login DESC').all();
         res.json(users);
     } catch (e) {
         res.status(500).json({ error: 'Failed to fetch users' });

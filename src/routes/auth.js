@@ -31,9 +31,9 @@ router.post('/google', async (req, res) => {
         const googleId = payload.sub;
 
         let user = db.prepare('SELECT * FROM users WHERE googleId = ?').get(googleId);
+        const adminEmail = process.env.ADMIN_EMAIL;
 
         if (!user) {
-            const adminEmail = process.env.ADMIN_EMAIL;
             const role = (adminEmail && email === adminEmail) ? 'admin' : 'user';
             
             const id = uuidv4();
@@ -43,12 +43,18 @@ router.post('/google', async (req, res) => {
             `);
             stmt.run(id, googleId, email, name, role, 'active');
             user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+        } else {
+            if (adminEmail && email === adminEmail && user.role !== 'admin') {
+                db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(user.id);
+                user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+            }
         }
 
         if (user.status === 'suspended') {
             return res.status(403).json({ error: 'Your account has been suspended' });
         }
 
+        db.prepare("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?").run(user.id);
         req.session.userId = user.id;
         res.json({ success: true, user });
 
