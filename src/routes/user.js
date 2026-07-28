@@ -1,10 +1,57 @@
 import express from 'express';
 import db from '../services/db.js';
 import { encrypt, decrypt } from '../services/settings.js';
-import { authMiddleware } from './auth.js';
+import { authMiddleware, adminOnly } from './auth.js';
 import axios from 'axios';
 
 const router = express.Router();
+
+router.get('/credits', authMiddleware, (req, res) => {
+    try {
+        const user = db.prepare('SELECT credits FROM users WHERE id = ?').get(req.user.id);
+        res.json({ credits: user.credits });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch credits' });
+    }
+});
+
+router.get('/admin/users', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const users = db.prepare('SELECT id, email, name, role, status, credits, created_at FROM users ORDER BY created_at DESC').all();
+        res.json(users);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch users' });
+    }
+});
+
+router.post('/admin/users/:id/credits', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const { amount } = req.body;
+        const userId = req.params.id;
+        db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(amount, userId);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to update credits' });
+    }
+});
+
+router.post('/admin/users/:id/suspend', authMiddleware, adminOnly, (req, res) => {
+    try {
+        db.prepare("UPDATE users SET status = 'suspended' WHERE id = ?").run(req.params.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to suspend user' });
+    }
+});
+
+router.post('/admin/users/:id/activate', authMiddleware, adminOnly, (req, res) => {
+    try {
+        db.prepare("UPDATE users SET status = 'active' WHERE id = ?").run(req.params.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to activate user' });
+    }
+});
 
 router.get('/api-key', authMiddleware, (req, res) => {
     try {

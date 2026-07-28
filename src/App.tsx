@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { BYOKModal } from './components/BYOKModal';
+import { AdminPage } from './components/AdminPage';
 declare global {
   interface Window {
     google: any;
@@ -87,6 +88,7 @@ function App() {
     axios.get('/api/auth/me').then(res => {
       setUser(res.data.user);
       axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
+      axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
     }).catch(err => {
       setUser(null);
     }).finally(() => {
@@ -113,6 +115,7 @@ function App() {
     axios.post('/api/auth/google', { credential: response.credential }).then(res => {
       setUser(res.data.user);
       axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
+      axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
       setAuthError('');
     }).catch(err => {
         setAuthError(err.response?.data?.error || 'Login failed');
@@ -135,6 +138,8 @@ function App() {
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
   const [showBYOKModal, setShowBYOKModal] = useState(false);
   const [isKeysConfigured, setIsKeysConfigured] = useState(false);
+  const [credits, setCredits] = useState<number | null>(null);
+  const [showAdminPage, setShowAdminPage] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
 
 
@@ -589,6 +594,9 @@ useEffect(() => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
+      // Update credits
+      axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
+
       const newJobId = response.data.jobId;
       
       // Track in localstorage
@@ -710,6 +718,10 @@ useEffect(() => {
       );
   }
 
+  if (showAdminPage && user.role === 'admin') {
+      return <AdminPage onBack={() => setShowAdminPage(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-indigo-500/30 selection:text-white">
       
@@ -728,8 +740,17 @@ useEffect(() => {
 
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-gray-900 border border-gray-800 rounded-full">
+              <span className="text-xs text-indigo-400 font-bold">{credits ?? '...'} Credits</span>
+              <div className="w-px h-3 bg-gray-800 mx-1" />
               <span className="text-xs text-gray-400">{user.name}</span>
-              {user.role === 'admin' && <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded">ADMIN</span>}
+              {user.role === 'admin' && (
+                  <button 
+                    onClick={() => setShowAdminPage(true)}
+                    className="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded hover:bg-indigo-500/40 transition-colors ml-1"
+                  >
+                    ADMIN
+                  </button>
+              )}
             </div>
             <button onClick={() => setShowBYOKModal(true)} className="text-xs text-gray-400 hover:text-white transition-colors">API Key</button>
             <button onClick={logout} className="text-xs text-gray-400 hover:text-white transition-colors">Logout</button>
@@ -1355,15 +1376,25 @@ useEffect(() => {
                   <p className="text-gray-400 text-sm">Your video is configured and ready for AI processing.</p>
                 </div>
                 {isKeysConfigured ? (
-                  <button
-                    onClick={startAnalysis}
-                    disabled={!videoFile}
-                    className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:from-gray-800 disabled:to-gray-800 disabled:opacity-40 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all shadow-xl shadow-indigo-900/40 active:scale-95 hover:scale-[1.02] disabled:scale-100 disabled:cursor-not-allowed group"
-                  >
-                    <Play className="w-6 h-6 fill-white group-hover:scale-110 transition-transform" />
-                    <span>Start AI Processing</span>
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                  </button>
+                  credits !== null && credits <= 0 ? (
+                    <button
+                        disabled
+                        className="w-full flex items-center justify-center gap-3 bg-gray-800 text-gray-500 py-4 px-8 rounded-2xl font-bold text-lg cursor-not-allowed"
+                    >
+                        <ShieldAlert className="w-5 h-5" />
+                        Insufficient Credits
+                    </button>
+                  ) : (
+                    <button
+                        onClick={startAnalysis}
+                        disabled={!videoFile}
+                        className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:from-gray-800 disabled:to-gray-800 disabled:opacity-40 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all shadow-xl shadow-indigo-900/40 active:scale-95 hover:scale-[1.02] disabled:scale-100 disabled:cursor-not-allowed group"
+                    >
+                        <Play className="w-6 h-6 fill-white group-hover:scale-110 transition-transform" />
+                        <span>Start AI Processing</span>
+                        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  )
                 ) : (
                   <button
                     onClick={() => setShowSettings(true)}

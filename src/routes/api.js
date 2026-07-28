@@ -198,11 +198,23 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
     }
 
+    // Credits check
+    if (user.credits <= 0) {
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ error: 'Insufficient Credits' });
+    }
+
     const jobId = uuidv4();
     const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
     const selectedFontId = req.body.selectedFontId || null;
     const subtitleColor = req.body.subtitleColor || "white";
+
+    // Transactional-ish update (SQLite is simple)
+    db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+
     createJob(jobId, {
         videoPath: videoFile.path,
         audioPath: null,
@@ -210,7 +222,8 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
         blurBoxes: blurBoxes,
         subtitlePosition: subtitlePosition,
         selectedFontId: selectedFontId,
-        subtitleColor: subtitleColor
+        subtitleColor: subtitleColor,
+        userId: user.id
     });
     setJobKeys(jobId, { geminiApiKey });
     
@@ -251,14 +264,34 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      if (!geminiApiKey) {
          return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
      }
+
+     // Credits check
+     if (user.credits <= 0) {
+         if (req.file && fs.existsSync(req.file.path)) {
+             fs.unlinkSync(req.file.path);
+         }
+         return res.status(400).json({ error: 'Insufficient Credits' });
+     }
      
      const jobId = uuidv4();
      const blurBoxes = req.body.blurBoxes || '[]';
      const subtitlePosition = req.body.subtitlePosition || null;
      const selectedFontId = req.body.selectedFontId || null;
      const subtitleColor = req.body.subtitleColor || "white";
-     createJob(jobId, { videoPath: videoFile.path, audioPath: audioFile ? audioFile.path : null, originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'), blurBoxes: blurBoxes, subtitlePosition: subtitlePosition, selectedFontId: selectedFontId,
-        subtitleColor: subtitleColor });
+
+     // Transactional-ish update (SQLite is simple)
+     db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+
+     createJob(jobId, { 
+         videoPath: videoFile.path, 
+         audioPath: audioFile ? audioFile.path : null, 
+         originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'), 
+         blurBoxes: blurBoxes, 
+         subtitlePosition: subtitlePosition, 
+         selectedFontId: selectedFontId,
+         subtitleColor: subtitleColor,
+         userId: user.id
+     });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });
      
