@@ -46,6 +46,9 @@ COPY . .
 RUN /opt/venv/bin/python3 src/ai/download_model.py
 
 # Build the client-side React code with Vite
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+
 RUN npm run build
 
 
