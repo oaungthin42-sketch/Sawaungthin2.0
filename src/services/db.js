@@ -65,3 +65,5 @@ try {
 } catch (e) {
     console.error("Error creating users table", e);
 }
+
+try { db.exec(`ALTER TABLE users ADD COLUMN geminiApiKeyEncrypted TEXT`); } catch (e) {}

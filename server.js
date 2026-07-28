@@ -5,6 +5,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import apiRoutes from './src/routes/api.js';
 import authRoutes from './src/routes/auth.js';
+import userRoutes from './src/routes/user.js';
 import session from 'express-session';
 
 import { initModels } from './src/ai/index.js';
@@ -31,6 +32,7 @@ app.use('/output', express.static(path.join(process.cwd(), 'public', 'output')))
 
 // Setup API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/user', userRoutes);
 app.use('/api', apiRoutes);
 
 async function startServer() {

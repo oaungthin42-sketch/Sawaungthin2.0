@@ -31,7 +31,7 @@ if (fs.existsSync(keyPath)) {
 
 const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
 
-function encrypt(text) {
+export function encrypt(text) {
     if (!text) return text;
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, encryptionKey, iv);
@@ -40,7 +40,7 @@ function encrypt(text) {
     return iv.toString('hex') + ':' + encrypted;
 }
 
-function decrypt(text) {
+export function decrypt(text) {
     if (!text) return text;
     const textParts = text.split(':');
     const iv = Buffer.from(textParts.shift(), 'hex');

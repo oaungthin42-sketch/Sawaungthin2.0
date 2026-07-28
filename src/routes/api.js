@@ -9,6 +9,8 @@ import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../
 import { VOICES, getVoiceConfig } from '../ai/voices.js';
 import { EdgeTTS } from '@seepine/edge-tts';
 import db from '../services/db.js';
+import { authMiddleware } from './auth.js';
+import { decrypt } from '../services/settings.js';
 
 
 const router = express.Router();
@@ -179,19 +181,21 @@ router.post('/settings', (req, res) => {
 });
 
 
-router.post('/process-recap', handleUpload, (req, res) => {
+router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     const videoFile = req.file;
 
     if (!videoFile) {
         return res.status(400).json({ error: 'Video file is required' });
     }
 
-    const geminiApiKey = req.body.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY;
+    const user = req.user;
+    if (!user.geminiApiKeyEncrypted) {
+         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
+    }
+    const geminiApiKey = decrypt(user.geminiApiKeyEncrypted);
     
     if (!geminiApiKey) {
-        const missing = [];
-                if (!geminiApiKey) missing.push('GEMINI_API_KEY');
-        return res.status(400).json({ error: 'Please configure your API Keys before starting processing. Missing: ' + missing.join(', ') });
+        return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
     }
 
     const jobId = uuidv4();
@@ -232,18 +236,20 @@ router.get('/status/:jobId', (req, res) => {
 });
 
 // Adding compatibility routes based on instructions
-router.post('/process', handleUpload, (req, res) => {
+router.post('/process', authMiddleware, handleUpload, (req, res) => {
      // Forward to process-recap logic
      const videoFile = req.file;
      const audioFile = null;
      if (!videoFile) return res.status(400).json({ error: 'Video file required' });
      
-     const geminiApiKey = req.body.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY;
+     const user = req.user;
+     if (!user.geminiApiKeyEncrypted) {
+         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
+     }
+     const geminiApiKey = decrypt(user.geminiApiKeyEncrypted);
      
      if (!geminiApiKey) {
-         const missing = [];
-                  if (!geminiApiKey) missing.push('GEMINI_API_KEY');
-         return res.status(400).json({ error: 'Please configure your API Keys before starting processing. Missing: ' + missing.join(', ') });
+         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
      }
      
      const jobId = uuidv4();

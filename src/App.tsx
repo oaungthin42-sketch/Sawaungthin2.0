@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
+import { BYOKModal } from './components/BYOKModal';
 declare global {
   interface Window {
     google: any;
@@ -85,6 +86,7 @@ function App() {
   useEffect(() => {
     axios.get('/api/auth/me').then(res => {
       setUser(res.data.user);
+      axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
     }).catch(err => {
       setUser(null);
     }).finally(() => {
@@ -110,6 +112,7 @@ function App() {
   const handleCredentialResponse = (response: any) => {
     axios.post('/api/auth/google', { credential: response.credential }).then(res => {
       setUser(res.data.user);
+      axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
       setAuthError('');
     }).catch(err => {
         setAuthError(err.response?.data?.error || 'Login failed');
@@ -130,6 +133,8 @@ function App() {
   
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
+  const [showBYOKModal, setShowBYOKModal] = useState(false);
+  const [isKeysConfigured, setIsKeysConfigured] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
 
 
@@ -674,8 +679,7 @@ useEffect(() => {
   const selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
 
   // Check if API keys are configured in local storage
-  const hasGeminiKey = !!localStorage.getItem('GEMINI_API_KEY');
-  const isKeysConfigured = hasGeminiKey;
+  
 
   if (authLoading) {
     return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -727,6 +731,7 @@ useEffect(() => {
               <span className="text-xs text-gray-400">{user.name}</span>
               {user.role === 'admin' && <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded">ADMIN</span>}
             </div>
+            <button onClick={() => setShowBYOKModal(true)} className="text-xs text-gray-400 hover:text-white transition-colors">API Key</button>
             <button onClick={logout} className="text-xs text-gray-400 hover:text-white transition-colors">Logout</button>
 
             {/* Status dot warning if keys are missing */}
