@@ -69,7 +69,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
         setErrorMsg(null);
         try {
             if (activeTab === 'users') {
-                const res = await axios.get('/api/user/admin/users');
+                const res = await axios.get('/api/user/admin/users', { params: { _t: Date.now() } });
                 setUsers(res.data);
             } else if (activeTab === 'jobs') {
                 const res = await axios.get('/api/user/admin/jobs');

@@ -8,7 +8,7 @@ import { CreditGauge } from './components/CreditGauge';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Settings, Play, Menu, 
-  Volume2, ArrowRight, Check, X, CreditCard
+  Volume2, ArrowRight, Check, X, CreditCard, Star
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -187,15 +187,37 @@ function App() {
       });
   };
 
+  const [userFeedback, setUserFeedback] = useState<any[]>([]);
+
   useEffect(() => {
     if (user) {
       fetchVoices();
+      fetchUserFeedback();
     }
     if (user?.role === 'admin') {
       fetchSettings();
     }
   }, [user]);
   
+  const fetchUserFeedback = async () => {
+    try {
+      const res = await axios.get('/api/user/feedback');
+      const data = res.data;
+      setUserFeedback(data);
+      if (activeView === 'feedback') {
+        const unread = data.filter((f: any) => f.isRead === 0);
+        if (unread.length > 0) {
+          Promise.all(unread.map((f: any) => axios.post(`/api/user/feedback/${f.id}/read`)))
+            .then(() => {
+               setUserFeedback(prev => prev.map(f => ({...f, isRead: 1})));
+            }).catch(console.error);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load feedback", e);
+    }
+  };
+
   const fetchVoices = async () => {
     try {
       const res = await axios.get('/api/voices');
@@ -295,6 +317,9 @@ function App() {
   useEffect(() => {
     if (activeView === 'tool' && user) {
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
+    }
+    if (activeView === 'feedback' && user) {
+      fetchUserFeedback();
     }
   }, [activeView, user]);
 
@@ -647,6 +672,38 @@ function App() {
                       <h2 className="text-2xl font-bold text-white mb-6">Send Feedback</h2>
                       <FeedbackForm jobId={null} />
                   </div>
+                  {userFeedback.length > 0 && (
+                      <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-6">
+                          <h2 className="text-xl font-bold text-white mb-6">Your Feedback History</h2>
+                          <div className="space-y-4">
+                              {userFeedback.map((fb, i) => (
+                                  <div key={i} className="p-4 bg-gray-950 border border-gray-800 rounded-2xl">
+                                      <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-xs text-gray-500">{new Date(fb.created_at).toLocaleString()}</span>
+                                          <span className="flex">
+                                              {[1,2,3,4,5].map(s => (
+                                                  <Star key={s} className={`w-3 h-3 ${s <= fb.rating ? 'text-amber-400 fill-amber-400' : 'text-gray-700'}`} />
+                                              ))}
+                                          </span>
+                                      </div>
+                                      <p className="text-sm text-gray-300 mb-4">{fb.comment || <span className="italic text-gray-600">No comment</span>}</p>
+                                      {fb.adminReply && (
+                                          <div className="p-3 bg-indigo-900/20 border border-indigo-500/20 rounded-xl relative">
+                                              {fb.isRead === 0 && (
+                                                  <span className="absolute -top-2 -right-2 flex h-4 w-4">
+                                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                                      <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500"></span>
+                                                  </span>
+                                              )}
+                                              <p className="text-xs font-bold text-indigo-400 mb-1">Admin Reply</p>
+                                              <p className="text-sm text-indigo-100">{fb.adminReply}</p>
+                                          </div>
+                                      )}
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  )}
               </div>
           );
       }
@@ -1036,6 +1093,7 @@ function App() {
         onNavigate={setActiveView}
         user={user}
         onLogout={logout}
+        unreadFeedbackCount={userFeedback.filter(f => f.isRead === 0).length}
       />
 
       <div className="lg:pl-[280px] min-h-screen flex flex-col">

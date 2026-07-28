@@ -90,6 +90,9 @@ try {
     db.exec(`ALTER TABLE feedback ADD COLUMN adminReply TEXT`);
 } catch (e) {}
 try {
+    db.exec(`ALTER TABLE feedback ADD COLUMN isRead INTEGER DEFAULT 1`);
+} catch (e) {}
+try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS payment_requests (
             id TEXT PRIMARY KEY,

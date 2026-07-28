@@ -12,11 +12,6 @@ db.exec(`
 `);
 
 // Clean up any leaked or pre-configured global keys from database
-try {
-    db.exec(`DELETE FROM settings WHERE key IN ('GEMINI_API_KEY')`);
-} catch (e) {
-    console.error('Failed to clear database keys', e);
-}
 
 const dataDir = path.join(process.cwd(), 'data');
 const keyPath = path.join(dataDir, 'encryption.key');
@@ -94,10 +89,6 @@ export const getSetting = (key) => {
 };
 
 export const setSetting = (key, value) => {
-    if (key === 'GEMINI_API_KEY') {
-        console.warn(`[Settings] Rejected persistent save of security key: ${key}`);
-        return;
-    }
     const encrypted = encrypt(value);
     const stmt = db.prepare(`
         INSERT INTO settings (key, value)

@@ -45,6 +45,7 @@ interface NavigationProps {
         email: string;
     };
     onLogout: () => void;
+    unreadFeedbackCount?: number;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({ 
@@ -53,7 +54,8 @@ export const Navigation: React.FC<NavigationProps> = ({
     activeView, 
     onNavigate, 
     user, 
-    onLogout 
+    onLogout,
+    unreadFeedbackCount = 0
 }) => {
     const isAdmin = user?.role === 'admin';
 
@@ -91,10 +93,17 @@ export const Navigation: React.FC<NavigationProps> = ({
                                 <button
                                     key={item.id}
                                     onClick={() => { onNavigate(item.id); onClose(); }}
-                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'}`}
+                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'}`}
                                 >
-                                    <item.icon className="w-5 h-5" />
-                                    {item.label}
+                                    <div className="flex items-center gap-3">
+                                        <item.icon className="w-5 h-5" />
+                                        {item.label}
+                                    </div>
+                                    {item.id === 'feedback' && unreadFeedbackCount > 0 && (
+                                        <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
+                                            {unreadFeedbackCount}
+                                        </span>
+                                    )}
                                 </button>
                             ))}
                         </div>

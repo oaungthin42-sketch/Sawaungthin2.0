@@ -33,6 +33,7 @@ router.get('/credits', authMiddleware, (req, res) => {
 });
 
 router.get('/admin/users', authMiddleware, adminOnly, (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         const users = db.prepare('SELECT id, email, name, role, status, credits, created_at, last_login FROM users ORDER BY last_login DESC').all();
         res.json(users);
@@ -101,10 +102,28 @@ router.get('/admin/feedback', authMiddleware, adminOnly, (req, res) => {
 router.post('/admin/feedback/:id/reply', authMiddleware, adminOnly, (req, res) => {
     try {
         const { reply } = req.body;
-        db.prepare('UPDATE feedback SET adminReply = ? WHERE id = ?').run(reply, req.params.id);
+        db.prepare('UPDATE feedback SET adminReply = ?, isRead = 0 WHERE id = ?').run(reply, req.params.id);
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: 'Failed to reply to feedback' });
+    }
+});
+
+router.get('/feedback', authMiddleware, (req, res) => {
+    try {
+        const rows = db.prepare('SELECT id, rating, comment, adminReply, isRead, created_at FROM feedback WHERE userId = ? ORDER BY created_at DESC').all(req.user.id);
+        res.json(rows);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch feedback' });
+    }
+});
+
+router.post('/feedback/:id/read', authMiddleware, (req, res) => {
+    try {
+        db.prepare('UPDATE feedback SET isRead = 1 WHERE id = ? AND userId = ?').run(req.params.id, req.user.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to mark feedback as read' });
     }
 });
 
