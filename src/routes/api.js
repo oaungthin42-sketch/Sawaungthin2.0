@@ -122,7 +122,7 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
     const { voiceId } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });
     
-    if (req.user.credits <= 0) {
+    if (req.user.role !== 'admin' && req.user.credits <= 0) {
         return res.status(400).json({ error: 'Insufficient Credits' });
     }
 
@@ -200,7 +200,7 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     }
 
     // Credits check
-    if (user.credits <= 0) {
+    if (user.role !== 'admin' && user.credits <= 0) {
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
@@ -214,7 +214,9 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     const subtitleColor = req.body.subtitleColor || "white";
 
     // Transactional-ish update (SQLite is simple)
-    db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+    if (user.role !== 'admin') {
+        db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+    }
 
     createJob(jobId, {
         videoPath: videoFile.path,
@@ -264,7 +266,7 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      }
 
      // Credits check
-     if (user.credits <= 0) {
+     if (user.role !== 'admin' && user.credits <= 0) {
          if (req.file && fs.existsSync(req.file.path)) {
              fs.unlinkSync(req.file.path);
          }
@@ -278,7 +280,9 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
 
      // Transactional-ish update (SQLite is simple)
-     db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+     if (user.role !== 'admin') {
+         db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+     }
 
      createJob(jobId, { 
          videoPath: videoFile.path, 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Shield, Plus, Minus, UserMinus, UserCheck, Search, Loader2, ArrowLeft, MessageSquare, List, Star, CreditCard, Check, X } from 'lucide-react';
+import { Users, Shield, UserMinus, UserCheck, Search, Loader2, ArrowLeft, MessageSquare, List, Star, CreditCard, Check, X, Settings } from 'lucide-react';
 import axios from 'axios';
 
 interface User {
@@ -46,10 +46,11 @@ interface PaymentRequest {
 
 interface AdminPageProps {
     onBack: () => void;
+    initialTab?: 'users' | 'jobs' | 'feedback' | 'payments' | 'settings';
 }
 
-export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
-    const [activeTab, setActiveTab] = useState<'users' | 'jobs' | 'feedback' | 'payments'>('users');
+export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
+    const [activeTab, setActiveTab] = useState<'users' | 'jobs' | 'feedback' | 'payments' | 'settings'>(initialTab || 'users');
     const [users, setUsers] = useState<User[]>([]);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [feedback, setFeedback] = useState<Feedback[]>([]);
@@ -57,7 +58,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [creditAmounts, setCreditAmounts] = useState<Record<string, number>>({});
+    const [creditInputs, setCreditInputs] = useState<Record<string, string>>({});
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
 
     const fetchData = async () => {
         setLoading(true);
@@ -75,6 +78,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
             } else if (activeTab === 'payments') {
                 const res = await axios.get('/api/user/admin/payment-requests');
                 setPayments(res.data);
+            } else if (activeTab === 'settings') {
+                const res = await axios.get('/api/settings');
+                const mapped: Record<string, string> = {};
+                res.data.forEach((s: any) => mapped[s.key] = s.value);
+                setSettingsValues(mapped);
             }
         } catch (err: any) {
             console.error('Failed to fetch data', err);
@@ -194,6 +202,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                         >
                             <CreditCard className="w-4 h-4" /> Payments
                         </button>
+                        <button 
+                            onClick={() => setActiveTab('settings')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                        >
+                            <Settings className="w-4 h-4" /> Settings
+                        </button>
                     </div>
                 </div>
 
@@ -246,9 +260,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center gap-3">
                                                         <span className="text-xl font-bold font-mono text-white w-8">{user.credits}</span>
-                                                        <div className="flex gap-1">
-                                                            <button onClick={() => handleCredits(user.id, 5)} className="p-1.5 bg-gray-800 hover:bg-green-600 text-gray-400 hover:text-white rounded-lg transition-all active:scale-90"><Plus className="w-4 h-4" /></button>
-                                                            <button onClick={() => handleCredits(user.id, -5)} className="p-1.5 bg-gray-800 hover:bg-red-600 text-gray-400 hover:text-white rounded-lg transition-all active:scale-90"><Minus className="w-4 h-4" /></button>
+                                                        <div className="flex items-center gap-2">
+                                                            <input 
+                                                                type="number" 
+                                                                placeholder="Amount" 
+                                                                value={creditInputs[user.id] || ''}
+                                                                onChange={e => setCreditInputs({...creditInputs, [user.id]: e.target.value})}
+                                                                className="w-16 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500" 
+                                                            />
+                                                            <button onClick={() => handleCredits(user.id, Number(creditInputs[user.id] || 0))} className="px-2 py-1 bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white rounded-lg transition-all text-xs font-bold">Add</button>
+                                                            <button onClick={() => handleCredits(user.id, -Number(creditInputs[user.id] || 0))} className="px-2 py-1 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all text-xs font-bold">Subtract</button>
                                                         </div>
                                                     </div>
                                                 </td>
@@ -395,6 +416,38 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                                         ))}
                                     </tbody>
                                 </table>
+                            )}
+                            {activeTab === 'settings' && (
+                                <div className="p-8 space-y-6 max-w-2xl">
+                                    <h2 className="text-xl font-bold text-white">System Settings</h2>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-400 mb-2">Gemini API Key</label>
+                                            <input 
+                                                type="password" 
+                                                value={settingsValues.GEMINI_API_KEY || ''} 
+                                                onChange={e => setSettingsValues({...settingsValues, GEMINI_API_KEY: e.target.value})} 
+                                                placeholder="Enter Gemini API Key to enable AI features"
+                                                className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500" 
+                                            />
+                                        </div>
+                                        <button 
+                                            onClick={async () => {
+                                                try {
+                                                    for (const key of Object.keys(settingsValues)) {
+                                                        await axios.post('/api/settings', { key, value: settingsValues[key] });
+                                                    }
+                                                    alert('Settings saved successfully');
+                                                } catch (err: any) {
+                                                    alert(err.response?.data?.error || 'Failed to save settings');
+                                                }
+                                            }}
+                                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
+                                        >
+                                            Save Settings
+                                        </button>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </div>

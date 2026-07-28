@@ -12,7 +12,14 @@ import fs from 'fs';
 const slipDir = path.join(process.cwd(), 'public', 'output', 'slips');
 if (!fs.existsSync(slipDir)) fs.mkdirSync(slipDir, { recursive: true });
 
-const upload = multer({ dest: slipDir });
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, slipDir),
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname) || '.jpg';
+        cb(null, `${uuidv4()}${ext}`);
+    }
+});
+const upload = multer({ storage });
 
 const router = express.Router();
 
