@@ -84,3 +84,17 @@ try {
 } catch (e) {
     console.error("Error creating feedback table", e);
 }
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_requests (
+            id TEXT PRIMARY KEY,
+            userId TEXT NOT NULL,
+            slipImagePath TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at DATETIME
+        )
+    `);
+} catch (e) {
+    console.error("Error creating payment_requests table", e);
+}

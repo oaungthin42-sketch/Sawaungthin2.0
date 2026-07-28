@@ -2,7 +2,6 @@ import React from 'react';
 import { 
     LayoutDashboard, 
     Video, 
-    Key, 
     CreditCard, 
     MessageSquare, 
     User, 
@@ -23,7 +22,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'tool', label: 'Video Tool', icon: Video },
-    { id: 'byok', label: 'BYOK', icon: Key },
     { id: 'credits', label: 'Credits', icon: CreditCard },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare },
     { id: 'profile', label: 'Profile', icon: User },
@@ -32,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
     { id: 'admin-users', label: 'Users', icon: Shield, adminOnly: true },
     { id: 'admin-jobs', label: 'Jobs', icon: List, adminOnly: true },
     { id: 'admin-feedback', label: 'Admin Inbox', icon: MessageSquare, adminOnly: true },
+    { id: 'admin-payments', label: 'Payment Requests', icon: CreditCard, adminOnly: true },
     { id: 'admin-settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 

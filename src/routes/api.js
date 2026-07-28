@@ -189,13 +189,10 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     }
 
     const user = req.user;
-    if (!user.geminiApiKeyEncrypted) {
-         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
-    }
-    const geminiApiKey = decrypt(user.geminiApiKeyEncrypted);
+    const geminiApiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
     
     if (!geminiApiKey) {
-        return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
+        return res.status(400).json({ error: 'System configuration error: Gemini API Key is missing. Please contact admin.' });
     }
 
     // Credits check
@@ -256,13 +253,10 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      if (!videoFile) return res.status(400).json({ error: 'Video file required' });
      
      const user = req.user;
-     if (!user.geminiApiKeyEncrypted) {
-         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
-     }
-     const geminiApiKey = decrypt(user.geminiApiKeyEncrypted);
+     const geminiApiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
      
      if (!geminiApiKey) {
-         return res.status(400).json({ error: 'Please add your Gemini API Key first.' });
+         return res.status(400).json({ error: 'System configuration error: Gemini API Key is missing. Please contact admin.' });
      }
 
      // Credits check

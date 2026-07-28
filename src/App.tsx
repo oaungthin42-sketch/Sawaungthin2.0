@@ -1,14 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
-import { BYOKModal } from './components/BYOKModal';
 import { AdminPage } from './components/AdminPage';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
 import { FeedbackForm } from './components/FeedbackForm';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
-  Settings, Play, ShieldAlert, Menu, 
-  Volume2, ArrowRight, Check, X, Key, CreditCard
+  Settings, Play, Menu, 
+  Volume2, ArrowRight, Check, X, CreditCard
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -93,8 +92,6 @@ function App() {
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
-  const [showBYOKModal, setShowBYOKModal] = useState(false);
-  const [isKeysConfigured, setIsKeysConfigured] = useState(false);
   const [credits, setCredits] = useState<number | null>(null);
   const [activeView, setActiveView] = useState('dashboard');
   const [isNavOpen, setIsNavOpen] = useState(false);
@@ -124,10 +121,13 @@ function App() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
 
+  const [uploadingSlip, setUploadingSlip] = useState(false);
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipUploadSuccess, setSlipUploadSuccess] = useState(false);
+
   useEffect(() => {
     axios.get('/api/auth/me').then(res => {
       setUser(res.data.user);
-      axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
     }).catch(() => {
       setUser(null);
@@ -135,6 +135,26 @@ function App() {
       setAuthLoading(false);
     });
   }, []);
+
+  const handleSlipUpload = async () => {
+    if (!slipFile) return;
+    setUploadingSlip(true);
+    const formData = new FormData();
+    formData.append('slip', slipFile);
+    try {
+        await axios.post('/api/user/payment-request', formData);
+        setSlipUploadSuccess(true);
+        setSlipFile(null);
+    } catch (e) {
+        alert('Failed to upload slip.');
+    } finally {
+        setUploadingSlip(false);
+    }
+  };
+
+  const getBankInfo = () => {
+    return settings['BANK_PAYMENT_INFO']?.value || 'Bank Name: XYZ Bank\nAccount: 1234567890\nName: Admin Name';
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -154,7 +174,6 @@ function App() {
   const handleCredentialResponse = (response: any) => {
     axios.post('/api/auth/google', { credential: response.credential }).then(res => {
       setUser(res.data.user);
-      axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
     }).catch(err => {
         console.error('Login failed', err.response?.data?.error || err.message);
@@ -576,6 +595,21 @@ function App() {
   }
 
   const renderContent = () => {
+      if (credits === 0 && user?.role !== 'admin' && activeView !== 'credits') {
+          return (
+              <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center space-y-12">
+                  <div className="w-24 h-24 bg-red-950 text-red-500 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-red-900/50 mb-4">
+                      <CreditCard className="w-12 h-12" />
+                  </div>
+                  <h1 className="text-4xl font-black text-white">Insufficient Credits</h1>
+                  <p className="text-gray-400 max-w-sm">
+                      You need credits to use this tool. Please purchase credits to continue processing videos.
+                  </p>
+                  <button onClick={() => setActiveView('credits')} className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-bold transition-all">Buy Credits</button>
+              </div>
+          );
+      }
+
       if (activeView.startsWith('admin-') && user?.role === 'admin') {
           return <AdminPage onBack={() => setActiveView('dashboard')} />;
       }
@@ -596,36 +630,41 @@ function App() {
                   </div>
                   <h2 className="text-2xl font-bold text-white">Your Credit Balance</h2>
                   <div className="text-6xl font-bold font-mono text-white tracking-tighter">{credits ?? '...'}</div>
-                  <p className="text-gray-400">Credits are used for processing high-quality Burmese AI reconstructions.</p>
-                  <button className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-2xl font-bold transition-all active:scale-95">Buy More Credits</button>
-              </div>
-          );
-      }
-
-      if (activeView === 'byok') {
-          return (
-              <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl max-w-2xl mx-auto space-y-6">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl">
-                        <Key className="w-6 h-6" />
-                    </div>
-                    <div>
-                        <h2 className="text-2xl font-bold text-white">Bring Your Own Key</h2>
-                        <p className="text-gray-500 text-sm">Configure your Gemini AI API keys</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setShowBYOKModal(true)}
-                    className="w-full bg-gray-950 border border-gray-800 hover:border-indigo-500/50 p-6 rounded-2xl text-left group transition-all"
-                  >
-                      <div className="flex items-center justify-between">
-                          <div className="space-y-1">
-                              <span className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors">Manage API Credentials</span>
-                              <p className="text-xs text-gray-500">View, update or remove your generative AI keys</p>
-                          </div>
-                          <ArrowRight className="w-5 h-5 text-gray-600 group-hover:text-indigo-400 transition-all group-hover:translate-x-1" />
+                  <p className="text-gray-400 mb-8">Credits are used for processing high-quality Burmese AI reconstructions.</p>
+                  
+                  <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
+                      <h3 className="text-lg font-bold text-white">Buy Credits via Bank Transfer</h3>
+                      <div className="p-4 bg-gray-900 rounded-xl whitespace-pre-wrap font-mono text-sm text-gray-300">
+                          {getBankInfo()}
                       </div>
-                  </button>
+                      
+                      {slipUploadSuccess ? (
+                          <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl font-medium flex items-center gap-2">
+                              <CheckCircle className="w-5 h-5" />
+                              Submitted — waiting for admin approval.
+                          </div>
+                      ) : (
+                          <div className="space-y-4 mt-6">
+                              <p className="text-sm text-gray-400">Please transfer the amount and upload your payment slip receipt below:</p>
+                              <div className="flex items-center gap-4">
+                                  <input 
+                                      type="file" 
+                                      accept="image/*"
+                                      onChange={(e) => setSlipFile(e.target.files?.[0] || null)}
+                                      className="flex-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-indigo-500/10 file:text-indigo-400 hover:file:bg-indigo-500/20"
+                                  />
+                              </div>
+                              <button 
+                                  onClick={handleSlipUpload}
+                                  disabled={!slipFile || uploadingSlip}
+                                  className="w-full bg-indigo-600 disabled:bg-gray-800 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold transition-all disabled:text-gray-500 flex items-center justify-center gap-2"
+                              >
+                                  {uploadingSlip && <Loader2 className="w-4 h-4 animate-spin" />}
+                                  Submit Payment Slip
+                              </button>
+                          </div>
+                      )}
+                  </div>
               </div>
           );
       }
@@ -673,19 +712,6 @@ function App() {
               {/* 1. IDEAL WORKSPACE (IDLE STATE) */}
               {status === 'idle' && (
                   <div className="space-y-6">
-                      {!isKeysConfigured && (
-                        <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 max-w-3xl mx-auto">
-                          <div className="flex gap-3">
-                            <ShieldAlert className="w-5.5 h-5.5 text-amber-500 shrink-0 mt-0.5" />
-                            <div>
-                              <span className="font-bold text-sm text-amber-200 block">စနစ်အသုံးပြုရန် API Key ထည့်သွင်းပေးပါ</span>
-                              <span className="text-xs text-amber-400/80">ဗီဒီယို ပြန်ဆိုခြင်း စတင်ရန်အတွက် Gemini AI API key ထည့်သွင်းပေးရန် လိုအပ်ပါသည်။</span>
-                            </div>
-                          </div>
-                          <button onClick={() => setShowSettings(true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold text-xs rounded-lg transition-all self-start sm:self-auto shrink-0">Configure API Keys</button>
-                        </div>
-                      )}
-                      
                       {currentStep === 1 && (
                         <div className="space-y-6">
                             <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -848,16 +874,12 @@ function App() {
                               <h2 className="text-2xl font-bold text-white mb-2">Ready to Render</h2>
                               <p className="text-gray-400 text-sm">Your Burmese video reconstruction is configured. AI processing will begin now.</p>
                            </div>
-                           {isKeysConfigured ? (
-                              credits !== null && credits <= 0 ? (
-                                <div className="w-full p-4 bg-amber-950/20 border border-amber-900/30 rounded-2xl text-center">
-                                  <p className="text-amber-400 text-sm font-bold">Insufficient Credits</p>
-                                </div>
-                              ) : (
-                                <button onClick={startAnalysis} disabled={!videoFile} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">Start AI Processing</button>
-                              )
+                           {credits !== null && credits <= 0 ? (
+                             <div className="w-full p-4 bg-amber-950/20 border border-amber-900/30 rounded-2xl text-center">
+                               <p className="text-amber-400 text-sm font-bold">Insufficient Credits</p>
+                             </div>
                            ) : (
-                              <button onClick={() => setShowSettings(true)} className="w-full py-5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold rounded-2xl">Configure API Keys First</button>
+                             <button onClick={startAnalysis} disabled={!videoFile} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">Start AI Processing</button>
                            )}
                         </div>
                       )}
@@ -939,7 +961,6 @@ function App() {
   const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: Menu },
     { id: 'tool', label: 'Video Tool', icon: Play },
-    { id: 'byok', label: 'BYOK', icon: Key },
     { id: 'credits', label: 'Credits', icon: CreditCard },
   ];
 
@@ -987,11 +1008,6 @@ function App() {
         settingsSaving={settingsSaving}
         showKeys={showKeys}
         setShowKeys={setShowKeys}
-      />
-
-      <BYOKModal 
-        isOpen={showBYOKModal} 
-        onClose={() => setShowBYOKModal(false)} 
       />
 
       {showVoiceDrawer && (

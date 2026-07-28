@@ -5,6 +5,14 @@ import { authMiddleware, adminOnly } from './auth.js';
 import axios from 'axios';
 
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+
+const slipDir = path.join(process.cwd(), 'public', 'output', 'slips');
+if (!fs.existsSync(slipDir)) fs.mkdirSync(slipDir, { recursive: true });
+
+const upload = multer({ dest: slipDir });
 
 const router = express.Router();
 
@@ -132,25 +140,69 @@ router.post('/api-key', authMiddleware, (req, res) => {
     }
 });
 
-router.post('/api-key/test', authMiddleware, async (req, res) => {
+router.post('/payment-request', authMiddleware, upload.single('slip'), (req, res) => {
     try {
-        const user = req.user;
-        if (!user.geminiApiKeyEncrypted) {
-            return res.status(400).json({ error: 'No API key configured.' });
+        if (!req.file) {
+            return res.status(400).json({ error: 'Slip image is required' });
         }
-        const apiKey = decrypt(user.geminiApiKeyEncrypted);
-        if (!apiKey) {
-             return res.status(400).json({ error: 'Failed to decrypt API key.' });
-        }
-        
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        const response = await axios.post(url, {
-            contents: [{ parts: [{ text: "Hello" }] }]
-        }, { timeout: 10000 });
-        
-        res.json({ valid: true });
+        const slipPath = `/output/slips/${req.file.filename}`;
+        const id = uuidv4();
+        db.prepare(`
+            INSERT INTO payment_requests (id, userId, slipImagePath, status)
+            VALUES (?, ?, ?, 'pending')
+        `).run(id, req.user.id, slipPath);
+        res.json({ success: true });
     } catch (e) {
-        res.json({ valid: false, error: e.response?.data?.error?.message || e.message });
+        res.status(500).json({ error: 'Failed to submit payment request' });
+    }
+});
+
+router.get('/admin/payment-requests', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const requests = db.prepare(`
+            SELECT p.*, u.email as userEmail, u.name as userName 
+            FROM payment_requests p 
+            JOIN users u ON p.userId = u.id 
+            ORDER BY p.created_at DESC
+        `).all();
+        res.json(requests);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch payment requests' });
+    }
+});
+
+router.post('/admin/payment-requests/:id/approve', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const { credits } = req.body;
+        const reqId = req.params.id;
+        
+        const request = db.prepare('SELECT * FROM payment_requests WHERE id = ?').get(reqId);
+        if (!request || request.status !== 'pending') {
+            return res.status(400).json({ error: 'Invalid or already processed request' });
+        }
+
+        const updateCredits = db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?');
+        const updateStatus = db.prepare("UPDATE payment_requests SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?");
+        
+        db.transaction(() => {
+            updateCredits.run(credits, request.userId);
+            updateStatus.run(reqId);
+        })();
+        
+        res.json({ success: true });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to approve request' });
+    }
+});
+
+router.post('/admin/payment-requests/:id/reject', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const reqId = req.params.id;
+        db.prepare("UPDATE payment_requests SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?").run(reqId);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to reject request' });
     }
 });
 

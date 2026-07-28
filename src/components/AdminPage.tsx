@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Shield, Plus, Minus, UserMinus, UserCheck, Search, Loader2, ArrowLeft, MessageSquare, List, Star } from 'lucide-react';
+import { Users, Shield, Plus, Minus, UserMinus, UserCheck, Search, Loader2, ArrowLeft, MessageSquare, List, Star, CreditCard, Check, X } from 'lucide-react';
 import axios from 'axios';
 
 interface User {
@@ -32,17 +32,30 @@ interface Feedback {
     jobId: string;
 }
 
+interface PaymentRequest {
+    id: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    slipImagePath: string;
+    status: 'pending' | 'approved' | 'rejected';
+    created_at: string;
+    reviewed_at: string | null;
+}
+
 interface AdminPageProps {
     onBack: () => void;
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
-    const [activeTab, setActiveTab] = useState<'users' | 'jobs' | 'feedback'>('users');
+    const [activeTab, setActiveTab] = useState<'users' | 'jobs' | 'feedback' | 'payments'>('users');
     const [users, setUsers] = useState<User[]>([]);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [feedback, setFeedback] = useState<Feedback[]>([]);
+    const [payments, setPayments] = useState<PaymentRequest[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [creditAmounts, setCreditAmounts] = useState<Record<string, number>>({});
 
     const fetchData = async () => {
         setLoading(true);
@@ -56,6 +69,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
             } else if (activeTab === 'feedback') {
                 const res = await axios.get('/api/user/admin/feedback');
                 setFeedback(res.data);
+            } else if (activeTab === 'payments') {
+                const res = await axios.get('/api/user/admin/payment-requests');
+                setPayments(res.data);
             }
         } catch (err) {
             console.error('Failed to fetch data', err);
@@ -84,6 +100,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
             fetchData();
         } catch (err) {
             alert('Failed to update status');
+        }
+    };
+
+    const handleApprovePayment = async (id: string, credits: number) => {
+        try {
+            await axios.post(`/api/user/admin/payment-requests/${id}/approve`, { credits });
+            fetchData();
+        } catch (e) {
+            alert('Failed to approve payment');
+        }
+    };
+
+    const handleRejectPayment = async (id: string) => {
+        try {
+            await axios.post(`/api/user/admin/payment-requests/${id}/reject`);
+            fetchData();
+        } catch (e) {
+            alert('Failed to reject payment');
         }
     };
 
@@ -143,6 +177,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'feedback' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
                             <MessageSquare className="w-4 h-4" /> Feedback
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('payments')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'payments' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                        >
+                            <CreditCard className="w-4 h-4" /> Payments
                         </button>
                     </div>
                 </div>
@@ -278,6 +318,67 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack }) => {
                                         <div className="p-12 text-center text-gray-500 italic">No feedback received yet.</div>
                                     )}
                                 </div>
+                            )}
+                            {activeTab === 'payments' && (
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="bg-gray-950/50 border-b border-gray-800">
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Slip</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-800">
+                                        {payments.filter(p => p.userEmail?.toLowerCase().includes(search.toLowerCase())).map(req => (
+                                            <tr key={req.id} className="hover:bg-gray-800/30 transition-colors">
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col">
+                                                        <span className="font-semibold text-white">{req.userName}</span>
+                                                        <span className="text-xs text-gray-500 font-mono">{req.userEmail}</span>
+                                                        <span className="text-[10px] text-gray-600 mt-1 uppercase font-bold tracking-tighter">{new Date(req.created_at).toLocaleDateString()}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <a href={req.slipImagePath} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300 text-xs font-bold underline">View Slip</a>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tracking-tight ${req.status === 'approved' ? 'bg-green-500/10 text-green-400' : req.status === 'rejected' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                                                        {req.status.toUpperCase()}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {req.status === 'pending' && (
+                                                        <div className="flex items-center gap-2">
+                                                            <input 
+                                                                type="number" 
+                                                                className="w-16 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                                                placeholder="Cr"
+                                                                value={creditAmounts[req.id] || ''}
+                                                                onChange={e => setCreditAmounts({ ...creditAmounts, [req.id]: parseInt(e.target.value) || 0 })}
+                                                            />
+                                                            <button 
+                                                                onClick={() => handleApprovePayment(req.id, creditAmounts[req.id] || 0)}
+                                                                disabled={!creditAmounts[req.id]}
+                                                                className="p-1.5 bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
+                                                                title="Approve"
+                                                            >
+                                                                <Check className="w-4 h-4" />
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => handleRejectPayment(req.id)}
+                                                                className="p-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all"
+                                                                title="Reject"
+                                                            >
+                                                                <X className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             )}
                         </div>
                     </div>
