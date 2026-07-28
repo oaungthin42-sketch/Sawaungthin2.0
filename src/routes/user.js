@@ -4,6 +4,8 @@ import { encrypt, decrypt } from '../services/settings.js';
 import { authMiddleware, adminOnly } from './auth.js';
 import axios from 'axios';
 
+import { v4 as uuidv4 } from 'uuid';
+
 const router = express.Router();
 
 router.get('/credits', authMiddleware, (req, res) => {
@@ -50,6 +52,48 @@ router.post('/admin/users/:id/activate', authMiddleware, adminOnly, (req, res) =
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: 'Failed to activate user' });
+    }
+});
+
+router.post('/feedback', authMiddleware, (req, res) => {
+    try {
+        const { jobId, rating, comment } = req.body;
+        const id = uuidv4();
+        db.prepare(`
+            INSERT INTO feedback (id, userId, jobId, rating, comment)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(id, req.user.id, jobId || null, rating, comment || null);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to submit feedback' });
+    }
+});
+
+router.get('/admin/feedback', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const feedback = db.prepare(`
+            SELECT f.*, u.email as userEmail, u.name as userName 
+            FROM feedback f 
+            JOIN users u ON f.userId = u.id 
+            ORDER BY f.created_at DESC
+        `).all();
+        res.json(feedback);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch feedback' });
+    }
+});
+
+router.get('/admin/jobs', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const jobs = db.prepare(`
+            SELECT j.*, u.email as userEmail, u.name as userName 
+            FROM jobs j 
+            LEFT JOIN users u ON j.userId = u.id 
+            ORDER BY j.created_at DESC
+        `).all();
+        res.json(jobs);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch jobs' });
     }
 });
 

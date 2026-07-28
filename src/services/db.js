@@ -69,3 +69,18 @@ try {
 try { db.exec(`ALTER TABLE users ADD COLUMN geminiApiKeyEncrypted TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN userId TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 3`); } catch (e) {}
+
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS feedback (
+            id TEXT PRIMARY KEY,
+            userId TEXT NOT NULL,
+            jobId TEXT,
+            rating INTEGER NOT NULL,
+            comment TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+} catch (e) {
+    console.error("Error creating feedback table", e);
+}

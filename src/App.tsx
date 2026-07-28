@@ -2,20 +2,23 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { BYOKModal } from './components/BYOKModal';
 import { AdminPage } from './components/AdminPage';
+import { Navigation } from './components/Navigation';
+import { Dashboard } from './components/Dashboard';
+import { FeedbackForm } from './components/FeedbackForm';
+import { 
+  UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
+  Settings, Play, ShieldAlert, Menu, 
+  Volume2, ArrowRight, Check, X, Key, CreditCard
+} from 'lucide-react';
+import axios from 'axios';
+
 declare global {
   interface Window {
     google: any;
   }
 }
-import { 
-  UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
-  Settings, Play, ShieldAlert, RefreshCw, Menu, 
-  Volume2, ArrowRight, Check 
-} from 'lucide-react';
-import axios from 'axios';
 
-
-const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement> }) => {
+const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement | null> }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
 
@@ -82,14 +85,51 @@ const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement
 function App() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState('');
+
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
+  const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
+  const [selectedElement, setSelectedElement] = useState<string | null>(null);
+  const [subtitleColor, setSubtitleColor] = useState<string>('white');
+  const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
+  const [showBYOKModal, setShowBYOKModal] = useState(false);
+  const [isKeysConfigured, setIsKeysConfigured] = useState(false);
+  const [credits, setCredits] = useState<number | null>(null);
+  const [activeView, setActiveView] = useState('dashboard');
+  const [isNavOpen, setIsNavOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
+  
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const [videoRect, setVideoRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const videoRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
+
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'>('idle');
+  const [progressPct, setProgressPct] = useState<number>(0);
+  const [currentBackendStep, setCurrentBackendStep] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [analysisData, setAnalysisData] = useState<any>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [pollTimer, setPollTimer] = useState<any>(null);
+
+  const [showSettings, setShowSettings] = useState(false);
+  const [voices, setVoices] = useState<any[]>([]);
+  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [settings, setSettings] = useState<any>({});
+  const [editSettings, setEditSettings] = useState<any>({});
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
 
   useEffect(() => {
     axios.get('/api/auth/me').then(res => {
       setUser(res.data.user);
       axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
-    }).catch(err => {
+    }).catch(() => {
       setUser(null);
     }).finally(() => {
       setAuthLoading(false);
@@ -116,9 +156,8 @@ function App() {
       setUser(res.data.user);
       axios.get('/api/user/api-key').then(r => setIsKeysConfigured(r.data.configured)).catch(() => {});
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
-      setAuthError('');
     }).catch(err => {
-        setAuthError(err.response?.data?.error || 'Login failed');
+        console.error('Login failed', err.response?.data?.error || err.message);
     });
   };
 
@@ -128,27 +167,72 @@ function App() {
       });
   };
 
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
-  const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
-  const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
-  const [selectedElement, setSelectedElement] = useState<string | null>(null);
+  useEffect(() => {
+    fetchSettings();
+    fetchVoices();
+  }, []);
   
-  const [subtitleColor, setSubtitleColor] = useState<string>('white');
-  const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
-  const [showBYOKModal, setShowBYOKModal] = useState(false);
-  const [isKeysConfigured, setIsKeysConfigured] = useState(false);
-  const [credits, setCredits] = useState<number | null>(null);
-  const [showAdminPage, setShowAdminPage] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
-
-
-
+  const fetchVoices = async () => {
+    try {
+      const res = await axios.get('/api/voices');
+      setVoices(res.data);
+    } catch (e) {
+      console.error("Failed to load voices", e);
+    }
+  };
   
-  const previewContainerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoRect, setVideoRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
-  const videoRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
+  const handlePreviewVoice = async (voiceId: string) => {
+    setPreviewingVoice(voiceId);
+    try {
+        const response = await axios.post('/api/preview-voice', { voiceId }, { responseType: 'blob' });
+        const url = URL.createObjectURL(response.data);
+        if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+        setAudioPreviewUrl(url);
+        
+        const audio = new Audio(url);
+        audio.play();
+        audio.onended = () => setPreviewingVoice(null);
+        audio.onerror = () => setPreviewingVoice(null);
+    } catch(err) {
+        console.error("Voice preview failed", err);
+        setPreviewingVoice(null);
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await axios.get('/api/settings');
+      setSettings(res.data);
+    } catch (e) {
+      console.error("Failed to load settings", e);
+    }
+  };
+
+  const saveSetting = async (key: string, value: string) => {
+    setSettingsSaving(true);
+    try {
+      const res = await axios.post('/api/settings', { key, value });
+      setSettings(res.data);
+      setEditSettings({ ...editSettings, [key]: undefined });
+    } catch (e) {
+      console.error("Failed to save setting", e);
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const deleteSetting = async (key: string) => {
+    setSettingsSaving(true);
+    try {
+      const res = await axios.post('/api/settings', { key, value: null });
+      setSettings(res.data);
+      setEditSettings({ ...editSettings, [key]: undefined });
+    } catch (e) {
+      console.error("Failed to delete setting", e);
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   const updateVideoRect = () => {
     if (!previewContainerRef.current || !videoRef.current) return;
@@ -184,8 +268,19 @@ function App() {
     return () => window.removeEventListener('resize', updateVideoRect);
   }, []);
 
-  const addBlurBox = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  useEffect(() => {
+    if (videoFile) {
+      const url = URL.createObjectURL(videoFile);
+      setVideoPreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      setVideoPreviewUrl(null);
+    }
+  }, [videoFile]);
+
+  const addBlurBox = () => {
     if (blurBoxes.length >= 3) return;
     const newId = 'box_' + Date.now();
     setBlurBoxes([...blurBoxes, { id: newId, xPct: 35, yPct: 45, widthPct: 30, heightPct: 10, strength: 15 }]);
@@ -337,254 +432,16 @@ function App() {
         window.addEventListener('pointerup', onPointerUp);
         return prev;
     });
-};
-
-useEffect(() => {
-    if (videoFile) {
-      const url = URL.createObjectURL(videoFile);
-      setVideoPreviewUrl(url);
-      return () => {
-        URL.revokeObjectURL(url);
-      };
-    } else {
-      setVideoPreviewUrl(null);
-    }
-  }, [videoFile]);
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'>('idle');
-  const [progressMsg, setProgressMsg] = useState<string>('');
-  const [progressPct, setProgressPct] = useState<number>(0);
-  const [currentBackendStep, setCurrentBackendStep] = useState<string>('');
-  const [errorMsg, setErrorMsg] = useState<string>('');
-  const [analysisData, setAnalysisData] = useState<any>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [pollTimer, setPollTimer] = useState<any>(null);
-
-  const [showSettings, setShowSettings] = useState(false);
-  const [showCompletedJobs, setShowCompletedJobs] = useState(false);
-  const [completedJobsList, setCompletedJobsList] = useState<any[]>([]);
-  const [voices, setVoices] = useState<any[]>([]);
-  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
-  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
-  const [settings, setSettings] = useState<any>({});
-  const [editSettings, setEditSettings] = useState<any>({});
-  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
-  const [settingsSaving, setSettingsSaving] = useState(false);
-
-  // Main page voice gender tab
-  const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
-
-  useEffect(() => {
-    fetchSettings();
-    fetchVoices();
-  }, []);
-  
-  const fetchVoices = async () => {
-    try {
-      const res = await axios.get('/api/voices');
-      setVoices(res.data);
-    } catch (e) {
-      console.error("Failed to load voices", e);
-    }
   };
-  
-  const handlePreviewVoice = async (voiceId: string) => {
-    setPreviewingVoice(voiceId);
-    try {
-        const response = await axios.post('/api/preview-voice', { voiceId }, { responseType: 'blob' });
-        const url = URL.createObjectURL(response.data);
-        if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
-        setAudioPreviewUrl(url);
-        
-        const audio = new Audio(url);
-        audio.play();
-        audio.onended = () => setPreviewingVoice(null);
-        audio.onerror = () => setPreviewingVoice(null);
-    } catch(err) {
-        console.error("Voice preview failed", err);
-        setPreviewingVoice(null);
-    }
-  };
-
-  const fetchSettings = async () => {
-    try {
-      const res = await axios.get('/api/settings');
-      const backendSettings = { ...res.data };
-      
-      const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-      
-      if (geminiKey) {
-        backendSettings['GEMINI_API_KEY'] = {
-          configured: true,
-          masked: '•'.repeat(16) + geminiKey.slice(-4),
-          value: geminiKey
-        };
-      } else {
-        backendSettings['GEMINI_API_KEY'] = { configured: false };
-      }
-      
-      setSettings(backendSettings);
-    } catch (e) {
-      console.error("Failed to load settings", e);
-    }
-  };
-
-  const saveSetting = async (key: string, value: string) => {
-    if (key === 'GEMINI_API_KEY' ) {
-      localStorage.setItem(key, value);
-      setSettings((prev: any) => ({
-        ...prev,
-        [key]: {
-          configured: true,
-          masked: '•'.repeat(16) + value.slice(-4),
-          value: value
-        }
-      }));
-      setEditSettings({ ...editSettings, [key]: undefined });
-      return;
-    }
-
-    // Optimistic UI update
-    const previousSettings = { ...settings };
-    setSettings({ ...settings, [key]: { configured: true, value } });
-    
-    setSettingsSaving(true);
-    try {
-      const res = await axios.post('/api/settings', { key, value });
-      const backendSettings = { ...res.data };
-      
-      const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-      
-      backendSettings['GEMINI_API_KEY'] = geminiKey ? {
-        configured: true,
-        masked: '•'.repeat(16) + geminiKey.slice(-4),
-        value: geminiKey
-      } : { configured: false };
-
-      setSettings(backendSettings);
-      setEditSettings({ ...editSettings, [key]: undefined });
-    } catch (e) {
-      console.error("Failed to save setting", e);
-      setSettings(previousSettings); // Revert on failure
-    } finally {
-      setSettingsSaving(false);
-    }
-  };
-
-  const deleteSetting = async (key: string) => {
-    if (key === 'GEMINI_API_KEY' ) {
-      localStorage.removeItem(key);
-      setSettings((prev: any) => ({
-        ...prev,
-        [key]: { configured: false }
-      }));
-      setEditSettings({ ...editSettings, [key]: undefined });
-      return;
-    }
-
-    setSettingsSaving(true);
-    try {
-      const res = await axios.post('/api/settings', { key, value: null });
-      const backendSettings = { ...res.data };
-      
-      const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-      
-      backendSettings['GEMINI_API_KEY'] = geminiKey ? {
-        configured: true,
-        masked: '•'.repeat(16) + geminiKey.slice(-4),
-        value: geminiKey
-      } : { configured: false };
-
-      setSettings(backendSettings);
-      setEditSettings({ ...editSettings, [key]: undefined });
-    } catch (e) {
-      console.error("Failed to delete setting", e);
-    } finally {
-      setSettingsSaving(false);
-    }
-  };
-
-  const videoInputRef = useRef<HTMLInputElement>(null);
-
-  const STAGES = [
-    { id: 'upload', label: 'Uploading Video & Audio', steps: ['Upload', 'Extract Video Audio', 'Extract Narration Audio', 'Detect Scenes'] },
-    { id: 'transcribe_orig', label: 'Transcribing Original Video', steps: ['Transcript Original'] },
-    { id: 'translate', label: 'Translating to Burmese Speech', steps: ['Translate Burmese'] },
-    { id: 'tts', label: 'Generating Burmese Narration', steps: ['Generate TTS Audio'] },
-    { id: 'analyze_tts', label: 'Analyzing Timing & Beats', steps: ['Transcript Narration'] },
-    { id: 'match', label: 'Matching Scenes Semantically', steps: ['Semantic Matching'] },
-    { id: 'timeline', label: 'Synthesizing Subtitles & Timeline', steps: ['Timeline Builder', 'Subtitle Builder'] },
-    { id: 'render', label: 'Rendering Final Movie Recap', steps: ['Segment Builder', 'Concat Segments', 'Export Final', 'Cleanup'] }
-  ];
-
-  const getStageIndex = (step: string) => {
-    if (!step) return 0;
-    for (let i = 0; i < STAGES.length; i++) {
-        if (STAGES[i].steps.includes(step)) return i;
-    }
-    return 0;
-  };
-
-  const currentStageIndex = getStageIndex(currentBackendStep);
-
-  useEffect(() => {
-    return () => {
-      if (pollTimer) clearInterval(pollTimer);
-    };
-  }, [pollTimer]);
-
-  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setVideoFile(e.target.files[0]);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleVideoDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('video/')) {
-        setVideoFile(file);
-      }
-    }
-  };
-
-  
-  const fetchCompletedJobs = async () => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('completedJobsIds') || '[]');
-      if (stored.length === 0) {
-        setCompletedJobsList([]);
-        return;
-      }
-      const res = await axios.get('/api/completed-jobs?ids=' + stored.join(','));
-      setCompletedJobsList(res.data);
-    } catch (e) {
-      console.error('Failed to fetch completed jobs', e);
-    }
-  };
-
-  useEffect(() => {
-    if (showCompletedJobs) {
-      fetchCompletedJobs();
-    }
-  }, [showCompletedJobs]);
 
   const startAnalysis = async () => {
     if (!videoFile) return;
 
     setStatus('uploading');
-    setProgressMsg('Uploading video to server...');
     setProgressPct(5);
 
     const formData = new FormData();
     formData.append('video', videoFile);
-
-    const geminiKey = localStorage.getItem('GEMINI_API_KEY') || '';
-    formData.append('geminiApiKey', geminiKey);
     formData.append('blurBoxes', JSON.stringify(blurBoxes));
     formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
     formData.append('subtitleColor', subtitleColor);
@@ -594,20 +451,9 @@ useEffect(() => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      // Update credits
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
 
       const newJobId = response.data.jobId;
-      
-      // Track in localstorage
-      try {
-        const stored = JSON.parse(localStorage.getItem('completedJobsIds') || '[]');
-        stored.push(newJobId);
-        // keep last 200
-        while (stored.length > 200) stored.shift();
-        localStorage.setItem('completedJobsIds', JSON.stringify(stored));
-      } catch (e) {}
-
       setJobId(newJobId);
       setStatus('analyzing');
       startPolling(newJobId);
@@ -627,7 +473,7 @@ useEffect(() => {
         const statusRes = await axios.get(`/api/status/${id}`);
         const job = statusRes.data;
         
-        setCurrentBackendStep(job.currentStep || 'Upload');
+        setCurrentBackendStep(job.currentStep || '');
         
         if (job.status === 'complete') {
           clearInterval(interval);
@@ -638,11 +484,9 @@ useEffect(() => {
           setStatus('error');
           setErrorMsg(job.error || 'Processing failed');
         } else {
-          setProgressMsg(job.status === 'queued' ? 'Queued for processing...' : (job.currentStep ? `Processing: ${job.currentStep}` : 'Processing...'));
           setProgressPct(job.progress || 0);
         }
       } catch (e) {
-         console.warn('Polling error (transient)', e);
          pollErrors++;
          if (pollErrors > 20) {
             clearInterval(interval);
@@ -659,7 +503,6 @@ useEffect(() => {
     if (!jobId) return;
     setStatus('analyzing');
     setErrorMsg('');
-    setCurrentBackendStep('Upload');
     setProgressPct(0);
     
     try {
@@ -678,958 +521,504 @@ useEffect(() => {
     setAnalysisData(null);
     setJobId(null);
     setCurrentBackendStep('');
+    setCurrentStep(1);
   };
 
-  // Helper values for current selections on the workspace
-  const currentDialogueMode = settings['DIALOGUE_MODE']?.value === 'true';
-  const currentColloquialMode = settings['COLLOQUIAL_MODE']?.value === 'true';
   const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
   const selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
 
-  // Check if API keys are configured in local storage
-  
-
   if (authLoading) {
-    return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white"><Loader2 className="w-8 h-8 animate-spin" /></div>;
-  }
-
-  if (!user) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-white px-4">
-        <div className="w-16 h-16 rounded-xl flex items-center justify-center logo-glow mb-6">
-          <img src="/logo-superclick.png" alt="SuperClick" className="w-12 h-12 object-contain" />
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+          <p className="text-gray-500 font-medium animate-pulse">စနစ်သို့ဝင်ရောက်နေသည်...</p>
         </div>
-        <h1 className="text-3xl font-display font-bold mb-2">SuperClick</h1>
-        <p className="text-gray-400 mb-8 text-center max-w-sm">Sign in to start reconstructing professional Burmese videos.</p>
-        <div id="google-signin-button" className="bg-white rounded p-1"></div>
-        {authError && <p className="text-red-400 mt-4 bg-red-400/10 px-4 py-2 rounded-lg border border-red-400/20">{authError}</p>}
       </div>
     );
   }
 
-  if (user.status === 'suspended') {
-      return (
-        <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-white px-4">
-          <ShieldAlert className="w-16 h-16 text-red-500 mb-4" />
-          <h1 className="text-2xl font-bold mb-2 text-red-400">Account Suspended</h1>
-          <p className="text-gray-400 mb-6">Your account has been suspended.</p>
-          <button onClick={logout} className="px-4 py-2 bg-gray-800 rounded-lg text-sm font-medium hover:bg-gray-700">Logout</button>
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center space-y-12">
+        <div className="relative">
+          <div className="absolute inset-0 bg-indigo-500 blur-3xl opacity-20 rounded-full animate-pulse"></div>
+          <div className="relative w-24 h-24 rounded-[2rem] bg-indigo-600 flex items-center justify-center shadow-2xl shadow-indigo-900/50">
+            <img src="/logo-superclick.png" alt="SuperClick" className="w-14 h-14 object-contain" />
+          </div>
         </div>
-      );
+
+        <div className="space-y-4 max-w-md">
+          <h1 className="text-5xl font-black tracking-tighter text-white">SuperClick AI</h1>
+          <p className="text-gray-400 font-medium leading-relaxed">
+            Professional Burmese AI Reconstruction for your videos. 
+            High-quality recap processing with advanced lip-sync and tone matching.
+          </p>
+        </div>
+
+        <div className="w-full max-w-xs space-y-6">
+          <div className="p-1 bg-gradient-to-r from-indigo-500/20 via-white/5 to-indigo-500/20 rounded-2xl">
+            <div id="google-signin-button" className="w-full h-12 bg-gray-900 rounded-xl overflow-hidden shadow-lg border border-white/5 hover:border-white/10 transition-all"></div>
+          </div>
+          
+          <div className="flex items-center gap-4 text-gray-700">
+            <div className="flex-1 h-px bg-gray-900"></div>
+            <span className="text-[10px] font-bold uppercase tracking-widest">Authorized Access Only</span>
+            <div className="flex-1 h-px bg-gray-900"></div>
+          </div>
+
+          <p className="text-[10px] text-gray-600 leading-normal">
+            By signing in, you agree to our Terms of Service and Privacy Policy regarding AI-generated content.
+          </p>
+        </div>
+      </div>
+    );
   }
 
-  if (showAdminPage && user.role === 'admin') {
-      return <AdminPage onBack={() => setShowAdminPage(false)} />;
-  }
+  const renderContent = () => {
+      if (activeView.startsWith('admin-') && user?.role === 'admin') {
+          return <AdminPage onBack={() => setActiveView('dashboard')} />;
+      }
+      
+      if (activeView === 'dashboard') {
+          return <Dashboard 
+                    credits={credits} 
+                    userName={user?.name} 
+                    onStartNew={() => setActiveView('tool')} 
+                 />;
+      }
+
+      if (activeView === 'credits') {
+          return (
+              <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl max-w-2xl mx-auto space-y-6 text-center">
+                  <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto">
+                      <CreditCard className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white">Your Credit Balance</h2>
+                  <div className="text-6xl font-bold font-mono text-white tracking-tighter">{credits ?? '...'}</div>
+                  <p className="text-gray-400">Credits are used for processing high-quality Burmese AI reconstructions.</p>
+                  <button className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-2xl font-bold transition-all active:scale-95">Buy More Credits</button>
+              </div>
+          );
+      }
+
+      if (activeView === 'byok') {
+          return (
+              <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl max-w-2xl mx-auto space-y-6">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl">
+                        <Key className="w-6 h-6" />
+                    </div>
+                    <div>
+                        <h2 className="text-2xl font-bold text-white">Bring Your Own Key</h2>
+                        <p className="text-gray-500 text-sm">Configure your Gemini AI API keys</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowBYOKModal(true)}
+                    className="w-full bg-gray-950 border border-gray-800 hover:border-indigo-500/50 p-6 rounded-2xl text-left group transition-all"
+                  >
+                      <div className="flex items-center justify-between">
+                          <div className="space-y-1">
+                              <span className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors">Manage API Credentials</span>
+                              <p className="text-xs text-gray-500">View, update or remove your generative AI keys</p>
+                          </div>
+                          <ArrowRight className="w-5 h-5 text-gray-600 group-hover:text-indigo-400 transition-all group-hover:translate-x-1" />
+                      </div>
+                  </button>
+              </div>
+          );
+      }
+
+      // Default: Video Tool
+      return (
+          <div className="space-y-6">
+              {/* WIZARD PROGRESS BAR */}
+              <div className="mb-8">
+                <div className="flex items-center justify-between overflow-x-auto pb-4 custom-scrollbar max-w-5xl mx-auto px-4">
+                  {[
+                    "Upload & Voice",
+                    "Blur Mask",
+                    "Subtitles & Fonts",
+                    "Render"
+                  ].map((stepLabel, i) => {
+                    const stepNum = i + 1;
+                    const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 4);
+                    const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 4);
+                    const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 4 && videoFile));
+
+                    return (
+                      <div key={stepNum} className="flex items-center flex-1 last:flex-none">
+                        <button
+                          onClick={() => {
+                              if (status === 'idle' && isClickable) setCurrentStep(stepNum);
+                          }}
+                          disabled={!isClickable}
+                          className={`flex flex-col items-center gap-2 ${isActive ? 'text-indigo-400' : isCompleted ? 'text-emerald-400 cursor-pointer hover:text-emerald-300' : 'text-gray-600'}`}
+                        >
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${isActive ? 'bg-indigo-950/50 border-indigo-500 shadow-lg shadow-indigo-500/20' : isCompleted ? 'bg-emerald-950/30 border-emerald-500' : 'bg-gray-900 border-gray-800'}`}>
+                            {isCompleted ? <Check className="w-4 h-4" /> : stepNum}
+                          </div>
+                          <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
+                        </button>
+                        {i < 3 && (
+                          <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 1. IDEAL WORKSPACE (IDLE STATE) */}
+              {status === 'idle' && (
+                  <div className="space-y-6">
+                      {!isKeysConfigured && (
+                        <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 max-w-3xl mx-auto">
+                          <div className="flex gap-3">
+                            <ShieldAlert className="w-5.5 h-5.5 text-amber-500 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold text-sm text-amber-200 block">စနစ်အသုံးပြုရန် API Key ထည့်သွင်းပေးပါ</span>
+                              <span className="text-xs text-amber-400/80">ဗီဒီယို ပြန်ဆိုခြင်း စတင်ရန်အတွက် Gemini AI API key ထည့်သွင်းပေးရန် လိုအပ်ပါသည်။</span>
+                            </div>
+                          </div>
+                          <button onClick={() => setShowSettings(true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold text-xs rounded-lg transition-all self-start sm:self-auto shrink-0">Configure API Keys</button>
+                        </div>
+                      )}
+                      
+                      {currentStep === 1 && (
+                        <div className="space-y-6">
+                            <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-lg sm:text-xl">🎬</span>
+                                    <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Upload Video</h3>
+                                </div>
+                                <p className="text-xs text-gray-500 mb-5">Upload the original video you want to process.</p>
+                                
+                                <div className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setVideoFile(e.dataTransfer.files[0]); }} onClick={() => videoInputRef.current?.click()}>
+                                    <input type="file" ref={videoInputRef} className="hidden" accept="video/*" onChange={(e) => e.target.files && setVideoFile(e.target.files[0])} />
+                                    {videoFile && videoPreviewUrl ? (
+                                        <div className="flex flex-col w-full">
+                                            <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
+                                                <video ref={videoRef} src={videoPreviewUrl} muted playsInline preload="metadata" onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} className="w-full h-full object-cover" />
+                                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                                    <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
+                                                        <div><span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span><span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span></div>
+                                                        <button onClick={(e) => { e.stopPropagation(); setVideoFile(null); }} className="p-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition-all"><X size={16} /></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <VideoSeekBar videoRef={videoRef} />
+                                        </div>
+                                    ) : (
+                                        <div className="text-center space-y-3">
+                                            <div className="w-16 h-16 bg-gray-900 rounded-2xl flex items-center justify-center mx-auto text-indigo-400"><UploadCloud className="w-8 h-8" /></div>
+                                            <div><p className="text-sm font-bold text-white">Click or drag video here</p><p className="text-[10px] text-gray-600 font-medium">MP4, MOV up to 100MB</p></div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <Volume2 className="w-5 h-5 text-indigo-400" />
+                                        <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Recap Voice</h3>
+                                    </div>
+                                    <button onClick={() => setShowVoiceDrawer(true)} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-400/5 px-2 py-1 rounded-md border border-indigo-500/20">CHANGE VOICE</button>
+                                </div>
+                                <div className="flex items-center gap-4 bg-gray-950/60 p-4 rounded-xl border border-gray-800">
+                                    <div className="w-12 h-12 bg-indigo-600/10 rounded-xl flex items-center justify-center text-xl">{selectedGender === 'male' ? '👨' : '👩'}</div>
+                                    <div className="flex-1">
+                                        <span className="text-sm font-bold text-white">{selectedVoiceName}</span>
+                                        <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Active Burmese Recapitulator</p>
+                                    </div>
+                                    <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
+                                </div>
+                            </div>
+                        </div>
+                      )}
+
+                      {currentStep === 2 && (
+                        <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg sm:text-xl">🌫️</span>
+                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur Mask Editor</h3>
+                          </div>
+                          <p className="text-xs text-gray-500 mb-6">Hide sensitive areas in the video like faces or watermarks.</p>
+                          
+                          <div className="flex flex-col md:flex-row gap-6">
+                            <div className="w-full md:w-2/3">
+                              {videoFile && videoPreviewUrl ? (
+                                <div className="flex flex-col w-full">
+                                <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
+                                  <video ref={videoRef} src={videoPreviewUrl} muted playsInline className="w-full h-full object-cover" />
+                                  <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
+                                    {blurBoxes.map((box) => (
+                                      <div
+                                        key={box.id}
+                                        onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
+                                        className={`absolute border-2 ${selectedElement === box.id ? 'border-indigo-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors touch-none`}
+                                        style={{
+                                          left: `${box.xPct}%`,
+                                          top: `${box.yPct}%`,
+                                          width: `${box.widthPct}%`,
+                                          height: `${box.heightPct}%`,
+                                          backdropFilter: `blur(${box.strength * 1.2}px)`,
+                                          WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
+                                        }}
+                                      >
+                                        {selectedElement === box.id && (
+                                          <>
+                                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize touch-none" />
+                                            <div onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize touch-none" />
+                                          </>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <VideoSeekBar videoRef={videoRef} />
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="w-full md:w-1/3 flex flex-col gap-4">
+                              <button onClick={addBlurBox} disabled={blurBoxes.length >= 3 || !videoFile} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all">+ Add Blur Box</button>
+                              {selectedElement && blurBoxes.find(b => b.id === selectedElement) ? (
+                                <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
+                                  <label className="text-xs text-gray-400 block mb-2">Blur Strength: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
+                                  <input type="range" min="1" max="30" value={blurBoxes.find(b => b.id === selectedElement)?.strength} onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))} className="w-full accent-indigo-500" />
+                                  <button onClick={() => { setBlurBoxes(prev => prev.filter(b => b.id !== selectedElement)); setSelectedElement(null); }} className="w-full mt-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold">Remove Box</button>
+                                </div>
+                              ) : <p className="text-xs text-gray-500 text-center italic">Select a box to edit</p>}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {currentStep === 3 && (
+                        <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg sm:text-xl">🔤</span>
+                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Subtitles & Appearance</h3>
+                          </div>
+                          <div className="flex flex-col md:flex-row gap-6">
+                            <div className="w-full md:w-2/3">
+                              {videoFile && videoPreviewUrl ? (
+                                <div className="flex flex-col w-full">
+                                  <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
+                                    <video ref={videoRef} src={videoPreviewUrl} muted playsInline className="w-full h-full object-cover" />
+                                    <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
+                                      <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')} className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors flex items-center justify-center touch-none`} style={{ left: `${subtitlePosition.xPct}%`, top: `${subtitlePosition.yPct}%`, width: `${subtitlePosition.widthPct}%`, height: `${subtitlePosition.heightPct}%` }}>
+                                        <span className="text-white font-bold text-center w-full drop-shadow-md" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)`, color: subtitleColor }}>နမူနာ စာတန်း</span>
+                                        {selectedElement === 'subtitle' && (
+                                          <>
+                                            <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full" />
+                                            <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full" />
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <VideoSeekBar videoRef={videoRef} />
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="w-full md:w-1/3 space-y-6">
+                                <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
+                                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Color Palette</h4>
+                                  <div className="flex flex-wrap gap-3">
+                                    {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(c => (
+                                      <button key={c} onClick={() => setSubtitleColor(c)} className={`w-8 h-8 rounded-lg border-2 ${subtitleColor === c ? 'border-indigo-500 scale-110 shadow-lg' : 'border-gray-800'}`} style={{ backgroundColor: c }} />
+                                    ))}
+                                  </div>
+                                </div>
+                                <button onClick={() => setSelectedElement('subtitle')} className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl border border-gray-800">Adjust Position</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {currentStep === 4 && (
+                        <div className="flex flex-col items-center justify-center py-10 max-w-md mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                           <div className="text-center">
+                              <div className="w-20 h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mx-auto mb-4 text-indigo-400">
+                                  <Play className="w-10 h-10 fill-current" />
+                              </div>
+                              <h2 className="text-2xl font-bold text-white mb-2">Ready to Render</h2>
+                              <p className="text-gray-400 text-sm">Your Burmese video reconstruction is configured. AI processing will begin now.</p>
+                           </div>
+                           {isKeysConfigured ? (
+                              credits !== null && credits <= 0 ? (
+                                <div className="w-full p-4 bg-amber-950/20 border border-amber-900/30 rounded-2xl text-center">
+                                  <p className="text-amber-400 text-sm font-bold">Insufficient Credits</p>
+                                </div>
+                              ) : (
+                                <button onClick={startAnalysis} disabled={!videoFile} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">Start AI Processing</button>
+                              )
+                           ) : (
+                              <button onClick={() => setShowSettings(true)} className="w-full py-5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold rounded-2xl">Configure API Keys First</button>
+                           )}
+                        </div>
+                      )}
+                  </div>
+              )}
+
+              {/* Navigation Controls */}
+              {status === 'idle' && (
+                <div className="flex items-center justify-between max-w-3xl mx-auto mt-8 pt-4 border-t border-gray-900">
+                  <button onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))} disabled={currentStep === 1} className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm disabled:opacity-30">Back</button>
+                  {currentStep < 4 && (
+                    <button onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))} disabled={currentStep === 1 && !videoFile} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">Next Step <ArrowRight size={16} /></button>
+                  )}
+                </div>
+              )}
+
+              {/* Status screens */}
+              {(status === 'uploading' || status === 'analyzing') && (
+                  <div className="max-w-3xl mx-auto bg-gray-900/40 border border-gray-900 rounded-3xl p-12 text-center space-y-8 shadow-2xl">
+                      <div className="relative w-24 h-24 mx-auto">
+                        <Loader2 className="w-full h-full text-indigo-500 animate-spin" />
+                        <div className="absolute inset-4 bg-indigo-500/10 rounded-full border border-indigo-500/20" />
+                      </div>
+                      <div className="space-y-3">
+                        <h2 className="text-3xl font-bold text-white font-display tracking-tight">{status === 'uploading' ? 'Uploading...' : 'Processing...'}</h2>
+                        <p className="text-gray-500 text-sm max-w-xs mx-auto">
+                            {currentBackendStep ? `Current Task: ${currentBackendStep}` : 'Gemini AI is analyzing and reconstructing your video. This may take up to 3 minutes.'}
+                        </p>
+                      </div>
+                      <div className="w-full max-w-md mx-auto space-y-4">
+                        <div className="flex justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest px-1"><span>Global Progress</span><span>{Math.round(progressPct)}%</span></div>
+                        <div className="w-full bg-gray-950 h-3 rounded-full overflow-hidden p-0.5 border border-gray-900"><div className="h-full bg-indigo-500 rounded-full transition-all duration-700" style={{ width: `${progressPct}%` }} /></div>
+                      </div>
+                  </div>
+              )}
+
+              {status === 'error' && (
+                <div className="max-w-2xl mx-auto bg-gray-900/40 border border-red-900/30 rounded-3xl p-10 text-center space-y-6 shadow-2xl">
+                    <div className="w-16 h-16 bg-red-950/30 text-red-500 rounded-2xl flex items-center justify-center mx-auto border border-red-500/20"><AlertCircle className="w-8 h-8" /></div>
+                    <h2 className="text-2xl font-bold text-red-400 font-display">Processing Failed</h2>
+                    <div className="p-4 bg-red-950/20 border border-red-900/30 rounded-xl text-xs font-mono text-red-300/80 break-words">{errorMsg}</div>
+                    <div className="flex justify-center gap-4 pt-4">
+                      <button onClick={retryAnalysis} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center gap-2">Retry</button>
+                      <button onClick={reset} className="px-6 py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl">Back to Start</button>
+                    </div>
+                </div>
+              )}
+
+              {status === 'complete' && analysisData && (
+                <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-700">
+                    <div className="bg-gray-900/40 border border-gray-900 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl">
+                        <div className="flex items-center gap-5">
+                          <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center border border-emerald-500/20"><CheckCircle className="w-8 h-8" /></div>
+                          <div>
+                            <h2 className="text-2xl font-bold text-white font-display">Recap Complete!</h2>
+                            <p className="text-emerald-400/70 text-sm">Your professional Burmese reconstruction is ready.</p>
+                          </div>
+                        </div>
+                        <button onClick={reset} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all active:scale-95">Start New Video</button>
+                    </div>
+
+                    {analysisData.videoUrl && (
+                      <div className="bg-gray-900/40 border border-gray-900 rounded-3xl p-8 shadow-2xl">
+                          <div className="aspect-video bg-black rounded-2xl overflow-hidden border border-gray-800 shadow-inner group relative">
+                              <video src={analysisData.videoUrl} controls className="w-full h-full object-contain" />
+                          </div>
+                          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+                              <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> Download Burmese Video</a>
+                          </div>
+                          <div className="mt-12 pt-8 border-t border-gray-800"><FeedbackForm jobId={jobId} /></div>
+                      </div>
+                    )}
+                </div>
+              )}
+          </div>
+      );
+  };
+
+  const NAV_ITEMS = [
+    { id: 'dashboard', label: 'Dashboard', icon: Menu },
+    { id: 'tool', label: 'Video Tool', icon: Play },
+    { id: 'byok', label: 'BYOK', icon: Key },
+    { id: 'credits', label: 'Credits', icon: CreditCard },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-indigo-500/30 selection:text-white">
       
-      {/* Dynamic Header */}
-      <header className="border-b border-gray-900 bg-gray-950/80 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center logo-glow">
-              <img src="/logo-superclick.png" alt="SuperClick" className="w-8 h-8 object-contain" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold font-display tracking-tight text-white truncate">SuperClick</h1>
-              <p className="text-[11px] text-gray-500 font-medium hidden sm:block truncate">Professional Burmese Video Reconstructor</p>
-            </div>
-          </div>
+      <Navigation 
+        isOpen={isNavOpen}
+        onClose={() => setIsNavOpen(false)}
+        activeView={activeView}
+        onNavigate={setActiveView}
+        user={user}
+        onLogout={logout}
+      />
 
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-gray-900 border border-gray-800 rounded-full">
-              <span className="text-xs text-indigo-400 font-bold">{credits ?? '...'} Credits</span>
-              <div className="w-px h-3 bg-gray-800 mx-1" />
-              <span className="text-xs text-gray-400">{user.name}</span>
-              {user.role === 'admin' && (
-                  <button 
-                    onClick={() => setShowAdminPage(true)}
-                    className="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded hover:bg-indigo-500/40 transition-colors ml-1"
-                  >
-                    ADMIN
-                  </button>
-              )}
-            </div>
-            <button onClick={() => setShowBYOKModal(true)} className="text-xs text-gray-400 hover:text-white transition-colors">API Key</button>
-            <button onClick={logout} className="text-xs text-gray-400 hover:text-white transition-colors">Logout</button>
-
-            {/* Status dot warning if keys are missing */}
-            {!isKeysConfigured && (
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-amber-400 text-xs font-semibold animate-pulse">
-                <ShieldAlert className="w-3.5 h-3.5" />
-                API Keys Required
+      <div className="lg:pl-[280px] min-h-screen flex flex-col">
+          <header className="border-b border-gray-900 bg-gray-950/80 backdrop-blur-md sticky top-0 z-40 h-16 flex items-center px-4 sm:px-8 justify-between">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setIsNavOpen(true)} className="lg:hidden p-2 text-gray-500 hover:text-white"><Menu className="w-6 h-6" /></button>
+                <h1 className="text-lg font-bold font-display tracking-tight text-white">{NAV_ITEMS.find(i => i.id === activeView)?.label || 'SuperClick'}</h1>
               </div>
-            )}
-            
-            <button
-              onClick={() => { setShowCompletedJobs(true); fetchCompletedJobs(); }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 text-gray-300 hover:text-white font-semibold text-xs transition-all active:scale-95"
-            >
-              <Menu className="w-4 h-4 text-indigo-400" />
-            </button>
-            <button 
-              onClick={() => setShowSettings(true)}
-              className="flex items-center gap-2 px-2 sm:px-4 py-2 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 text-gray-300 hover:text-white font-semibold text-xs transition-all active:scale-95"
-            >
-              <Settings className="w-4 h-4 text-indigo-400" />
-              <span className="hidden sm:inline">ဆက်တင်များ (Settings)</span>
-            </button>
-          </div>
-        </div>
-      </header>
+              <div className="flex items-center gap-4">
+                <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 bg-gray-900 border border-gray-800 rounded-full">
+                  <span className="text-xs text-indigo-400 font-bold">{credits ?? '...'} Credits</span>
+                  <div className="w-px h-3 bg-gray-800" />
+                  <span className="text-xs text-gray-400">{user?.name}</span>
+                </div>
+                <button onClick={() => setShowSettings(true)} className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 hover:border-indigo-500/50 text-gray-400 hover:text-indigo-400 transition-all"><Settings size={20} /></button>
+              </div>
+          </header>
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Settings Modal */}
-        
-      {/* Completed Jobs Modal */}
-      {showCompletedJobs && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-all duration-300">
-            <div className="bg-gray-950 border border-gray-800/80 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-                <div className="flex justify-between items-center px-6 py-5 border-b border-gray-800/50">
-                    <h2 className="text-lg sm:text-xl font-bold text-gray-100 flex items-center gap-2">
-                        <Menu className="w-5 h-5 text-indigo-400" />
-                        Completed Videos (Last 24h)
-                    </h2>
-                    <button onClick={() => setShowCompletedJobs(false)} className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
-                    </button>
-                </div>
-                <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1">
-                    {completedJobsList.length === 0 ? (
-                        <div className="text-center py-10 text-gray-500">
-                            No completed videos in the last 24 hours.
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            {completedJobsList.map(job => (
-                                <div key={job.jobId} className="flex items-center justify-between p-4 bg-gray-900/50 border border-gray-800 rounded-xl">
-                                    <div className="flex-1 min-w-0 pr-4">
-                                        <h4 className="text-sm font-medium text-gray-200 truncate">{job.originalFilename}</h4>
-                                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-3">
-                                            <span>{new Date(job.completedAt).toLocaleString()}</span>
-                                            <span>{(job.sizeBytes / (1024 * 1024)).toFixed(2)} MB</span>
-                                        </div>
-                                    </div>
-                                    <a 
-                                        href={job.videoUrl} 
-                                        download 
-                                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shrink-0"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                        Download
-                                    </a>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
-      )}
+          <main className="max-w-7xl mx-auto w-full p-4 sm:p-8 flex-1">
+              {renderContent()}
+          </main>
+      </div>
 
       <SettingsModal 
-          showSettings={showSettings} 
-          setShowSettings={setShowSettings}
-          settings={settings}
-          editSettings={editSettings}
-          setEditSettings={setEditSettings}
-          saveSetting={saveSetting}
-          deleteSetting={deleteSetting}
-          settingsSaving={settingsSaving}
-          showKeys={showKeys}
-          setShowKeys={setShowKeys}
-        />
+        showSettings={showSettings} 
+        setShowSettings={setShowSettings} 
+        settings={settings} 
+        editSettings={editSettings}
+        setEditSettings={setEditSettings}
+        saveSetting={saveSetting}
+        deleteSetting={deleteSetting}
+        settingsSaving={settingsSaving}
+        showKeys={showKeys}
+        setShowKeys={setShowKeys}
+      />
 
-      {/* Voice Drawer */}
+      <BYOKModal 
+        isOpen={showBYOKModal} 
+        onClose={() => setShowBYOKModal(false)} 
+      />
+
       {showVoiceDrawer && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowVoiceDrawer(false)} />
-          <div className="relative w-full max-w-sm bg-gray-950 border-l border-gray-800 shadow-2xl h-full flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="p-4 sm:p-6 border-b border-gray-900 flex items-center justify-between">
-              <h2 className="text-lg sm:text-xl font-bold font-display text-white">Choose Voice</h2>
-              <button onClick={() => setShowVoiceDrawer(false)} className="p-2 text-gray-500 hover:text-white rounded-lg hover:bg-gray-800 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-gray-950 border border-gray-800 rounded-t-3xl sm:rounded-3xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
+                <div className="flex justify-between items-center px-6 py-5 border-b border-gray-900">
+                    <h2 className="text-xl font-bold text-white">Choose Narration Voice</h2>
+                    <button onClick={() => setShowVoiceDrawer(false)} className="p-2 text-gray-500 hover:text-white bg-gray-900 rounded-xl transition-colors"><X size={20} /></button>
+                </div>
+                <div className="p-4 bg-gray-950 border-b border-gray-900 flex gap-2">
+                    <button onClick={() => setSelectedGender('male')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${selectedGender === 'male' ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-500'}`}>MALE</button>
+                    <button onClick={() => setSelectedGender('female')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${selectedGender === 'female' ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-500'}`}>FEMALE</button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                    {voices.filter(v => v.gender === selectedGender).map(voice => (
+                        <button key={voice.id} onClick={() => { saveSetting('EDGE_TTS_VOICE', voice.id); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${currentVoiceId === voice.id ? 'bg-indigo-500/10 border-indigo-500 text-indigo-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                            <div className="flex items-center gap-4">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${currentVoiceId === voice.id ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>{selectedGender === 'male' ? '👨' : '👩'}</div>
+                                <div><span className="text-sm font-bold group-hover:text-white">{voice.name}</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.id}</p></div>
+                            </div>
+                            {currentVoiceId === voice.id && <CheckCircle size={20} className="text-indigo-500" />}
+                        </button>
+                    ))}
+                </div>
             </div>
-            
-            <div className="p-4 sm:p-6 flex-1 overflow-y-auto">
-              {/* Voice Gender Tabs */}
-              <div className="flex bg-gray-900 p-1 rounded-xl mb-6">
-                <button 
-                  onClick={() => setSelectedGender('male')}
-                  className={`flex-1 text-center py-2.5 text-sm font-bold rounded-lg transition-all ${selectedGender === 'male' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                >
-                  👨 Male Voices
-                </button>
-                <button 
-                  onClick={() => setSelectedGender('female')}
-                  className={`flex-1 text-center py-2.5 text-sm font-bold rounded-lg transition-all ${selectedGender === 'female' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                >
-                  👩 Female Voices
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {voices.filter(v => v.gender === selectedGender).map(v => {
-                  const isSelected = currentVoiceId === v.id;
-                  return (
-                    <div 
-                      key={v.id}
-                      onClick={() => { saveSetting('EDGE_TTS_VOICE', v.id); }}
-                      className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${isSelected ? 'bg-indigo-950/40 border-indigo-500 shadow-sm' : 'bg-gray-900/40 border-gray-800 hover:bg-gray-800/80 hover:border-gray-700'}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-indigo-400' : 'bg-gray-700'}`} />
-                        <span className={`font-bold ${isSelected ? 'text-indigo-200' : 'text-gray-300'}`}>{v.name}</span>
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
-                        disabled={previewingVoice !== null}
-                        className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${previewingVoice === v.id ? 'bg-indigo-500 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}
-                      >
-                        {previewingVoice === v.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
         </div>
       )}
-
-
-                {/* WIZARD PROGRESS BAR */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between overflow-x-auto pb-4 custom-scrollbar max-w-5xl mx-auto px-4">
-            {[
-              "Upload & Voice",
-              "Blur Mask",
-              "Subtitles & Fonts",
-              "Render"
-            ].map((stepLabel, i) => {
-              const stepNum = i + 1;
-              const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 4);
-              const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 4);
-              const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 4 && videoFile));
-
-              return (
-                <div key={stepNum} className="flex items-center flex-1 last:flex-none">
-                  <button
-                    onClick={() => {
-                        if (status === 'idle' && isClickable) setCurrentStep(stepNum);
-                    }}
-                    disabled={!isClickable}
-                    className={`flex flex-col items-center gap-2 ${isActive ? 'text-indigo-400' : isCompleted ? 'text-emerald-400 cursor-pointer hover:text-emerald-300' : 'text-gray-600'}`}
-                  >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${isActive ? 'bg-indigo-950/50 border-indigo-500 shadow-lg shadow-indigo-500/20' : isCompleted ? 'bg-emerald-950/30 border-emerald-500' : 'bg-gray-900 border-gray-800'}`}>
-                      {isCompleted ? <Check className="w-4 h-4" /> : stepNum}
-                    </div>
-                    <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
-                  </button>
-                  {i < 3 && (
-                    <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 1. IDEAL WORKSPACE (IDLE STATE) */}
-        {status === 'idle' && (
-          <div className="space-y-6">
-            
-            {/* Security Quick Alert if keys are missing */}
-            {!isKeysConfigured && (
-              <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 max-w-3xl mx-auto">
-                <div className="flex gap-3">
-                  <ShieldAlert className="w-5.5 h-5.5 text-amber-500 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold text-sm text-amber-200 block">စနစ်အသုံးပြုရန် API Key ထည့်သွင်းပေးပါ</span>
-                    <span className="text-xs text-amber-400/80">ဗီဒီယို ပြန်ဆိုခြင်း စတင်ရန်အတွက် Gemini AI API key ထည့်သွင်းပေးရန် လိုအပ်ပါသည်။</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold text-xs rounded-lg transition-all self-start sm:self-auto shrink-0"
-                >
-                  Configure API Keys
-                </button>
-              </div>
-            )}
-            
-            {/* Step 1: Upload Video */}
-            {currentStep === 1 && (
-              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg sm:text-xl">🎬</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Upload Video</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-5">Upload the original video you want to process.</p>
-                
-                <div 
-                  className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`}
-                  onDragOver={handleDragOver}
-                  onDrop={handleVideoDrop}
-                  onClick={() => videoInputRef.current?.click()}
-                >
-                  <input 
-                    type="file" 
-                    ref={videoInputRef} 
-                    className="hidden" 
-                    accept="video/*"
-                    onChange={handleVideoSelect}
-                  />
-                  {videoFile && videoPreviewUrl ? (
-                      <div className="flex flex-col w-full">
-                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
-                      <video
-                        ref={videoRef}
-                        src={videoPreviewUrl}
-                        muted
-                        playsInline
-                        preload="metadata"
-                        onLoadedMetadata={(e) => {
-                          e.currentTarget.currentTime = 0.1;
-                          updateVideoRect();
-                        }}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                        <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
-                          <div>
-                            <span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span>
-                            <span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span>
-                          </div>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setVideoFile(null); setBlurBoxes([]); setSelectedElement(null); }}
-                            className="px-3 py-1.5 bg-red-500/80 hover:bg-red-500 text-white font-semibold text-xs rounded-lg transition-all"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-3 text-center text-gray-500">
-                      <UploadCloud className="w-12 h-12 text-gray-600 mb-1" />
-                      <span className="text-sm font-semibold text-gray-300">Drag & Drop or Click to Upload</span>
-                      <span className="text-[10px] text-gray-600">MP4, MOV supported</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            {/* Step 2: Narration Mode */}
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg sm:text-xl">📝</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Narration Mode</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-6">Choose how the AI should explain the video.</p>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <button
-                    onClick={() => saveSetting('DIALOGUE_MODE', currentDialogueMode ? 'false' : 'true')}
-                    className={`flex flex-col p-4 rounded-xl border text-left transition-all ${currentDialogueMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                  >
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-bold">Dialogue (A-B)</span>
-                      {currentDialogueMode && <Check className="w-4 h-4 text-indigo-400" />}
-                    </div>
-                    <span className="text-xs text-gray-500">Conversational style, switching between speakers.</span>
-                  </button>
-                     
-                  <button
-                    onClick={() => saveSetting('COLLOQUIAL_MODE', currentColloquialMode ? 'false' : 'true')}
-                    className={`flex flex-col p-4 rounded-xl border text-left transition-all ${currentColloquialMode ? 'bg-indigo-950/25 border-indigo-500 text-indigo-300 shadow-sm' : 'bg-gray-950/40 border-gray-900 text-gray-400 hover:border-gray-800 hover:text-gray-350'}`}
-                  >
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-bold">Colloquial</span>
-                      {currentColloquialMode && <Check className="w-4 h-4 text-indigo-400" />}
-                    </div>
-                    <span className="text-xs text-gray-500">Natural, everyday spoken language instead of formal text.</span>
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-6 text-center opacity-70">
-                  {!currentDialogueMode && !currentColloquialMode ? 'Current: Normal (Direct Translation)' : 'Multiple modes can be combined.'}
-                </p>
-              </div>
-
-            {/* Step 3: Voice Selection */}
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg sm:text-xl">🎙️</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Voice Selection</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-6">Choose the Voice for your generated audio track.</p>
-                
-                <div className="bg-indigo-950/15 border border-indigo-900/30 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-indigo-900/50 flex items-center justify-center text-indigo-400">
-                      <Volume2 className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-indigo-400/80 uppercase tracking-wider font-bold block mb-1">Current Voice</span>
-                      <span className="text-lg font-bold text-indigo-200">{selectedVoiceName}</span>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setShowVoiceDrawer(true)}
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-95"
-                  >
-                    Choose Voice
-                  </button>
-                </div>
-                <div className="mt-4 flex items-center gap-3">
-                    <button
-                      onClick={() => handlePreviewVoice(currentVoiceId)}
-                      disabled={previewingVoice !== null}
-                      className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      {previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                      Preview Current Voice
-                    </button>
-                </div>
-              </div>
-</div>)}
-            {/* Step 4: Blur Mask Editor */}
-            {currentStep === 2 && (
-              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg sm:text-xl">🌫️</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur Mask Editor</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-6">Hide sensitive areas in the video like faces or watermarks.</p>
-                
-                <div className="flex flex-col md:flex-row gap-6">
-                  <div className="w-full md:w-2/3">
-                    {videoFile && videoPreviewUrl ? (
-                      <div className="flex flex-col w-full">
-                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
-                        <video
-                          ref={videoRef}
-                          src={videoPreviewUrl}
-                          muted
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
-                          
-                          {/* Subtitles faintly visible */}
-                          <div
-                            className="absolute border-2 border-dashed border-yellow-400/70 transition-colors pointer-events-none"
-                            style={{
-                              left: `${subtitlePosition.xPct}%`,
-                              top: `${subtitlePosition.yPct}%`,
-                              width: `${subtitlePosition.widthPct}%`,
-                              height: `${subtitlePosition.heightPct}%`
-                            }}
-                          />
-
-                          {/* Blur Boxes */}
-                          {blurBoxes.map((box) => (
-                            <div
-                              key={box.id}
-                              onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
-                              className={`absolute border-2 ${selectedElement === box.id ? 'border-indigo-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors touch-none`}
-                              style={{
-                                left: `${box.xPct}%`,
-                                top: `${box.yPct}%`,
-                                width: `${box.widthPct}%`,
-                                height: `${box.heightPct}%`,
-                                backdropFilter: `blur(${box.strength * 1.2}px)`,
-                                WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
-                              }}
-                            >
-                              {selectedElement === box.id && (
-                                <>
-                                  <div className="absolute -top-8 left-0 bg-gray-900 border border-gray-700 rounded-md p-1 flex items-center gap-2 cursor-default" onPointerDown={e => e.stopPropagation()}>
-                                    <button 
-                                      onClick={(e) => { e.stopPropagation(); setBlurBoxes(prev => prev.filter(b => b.id !== box.id)); setSelectedElement(null); }}
-                                      className="text-red-400 hover:text-red-300 p-1"
-                                      title="Delete Blur Box"
-                                    >
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                    </button>
-                                  </div>
-                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize touch-none" />
-                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize touch-none" />
-                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nesw-resize touch-none" />
-                                  <div onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full cursor-nwse-resize touch-none" />
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <VideoSeekBar videoRef={videoRef} />
-                      </div>
-                    ) : (
-                      <div className="w-full aspect-[9/16] bg-gray-900 rounded-xl flex items-center justify-center text-gray-500 text-sm">Please upload a video first</div>
-                    )}
-                  </div>
-                  
-                  <div className="w-full md:w-1/3 flex flex-col gap-4">
-                    <button 
-                      onClick={addBlurBox}
-                      disabled={blurBoxes.length >= 3 || !videoFile}
-                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all"
-                    >
-                      + Add Blur Box
-                    </button>
-                    {blurBoxes.length >= 3 && <p className="text-xs text-amber-500 text-center">Maximum 3 blur boxes allowed</p>}
-
-                    {selectedElement && blurBoxes.find(b => b.id === selectedElement) ? (
-                      <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                        <h4 className="text-sm font-bold text-gray-300 mb-4">Edit Blur Settings</h4>
-                        <label className="text-xs text-gray-400 block mb-2">Blur Strength: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
-                        <input 
-                          type="range" 
-                          min="1" 
-                          max="30" 
-                          value={blurBoxes.find(b => b.id === selectedElement)?.strength}
-                          onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
-                          className="w-full accent-indigo-500 cursor-pointer mb-4"
-                        />
-                        <details className="mt-2 text-xs">
-                          <summary className="text-gray-400 cursor-pointer hover:text-white mb-2">Advanced (manual values)</summary>
-                          <div className="grid grid-cols-2 gap-3 mt-2">
-                            <div><label className="text-gray-500 block mb-1">X Pos (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.xPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, xPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                            <div><label className="text-gray-500 block mb-1">Y Pos (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.yPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, yPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                            <div><label className="text-gray-500 block mb-1">Width (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.widthPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, widthPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                            <div><label className="text-gray-500 block mb-1">Height (%)</label><input type="number" value={Math.round(blurBoxes.find(b => b.id === selectedElement)?.heightPct || 0)} onChange={e => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? {...b, heightPct: parseInt(e.target.value)} : b))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                          </div>
-                        </details>
-                      </div>
-                    ) : (
-                      <div className="bg-gray-950/50 border border-gray-800/50 rounded-xl p-4 text-center text-xs text-gray-500 flex items-center justify-center h-32">
-                        Select a blur box on the video to edit its settings
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-</div>)}
-            {/* Step 5: Subtitle Editor */}
-            {currentStep === 3 && (
-              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg sm:text-xl">🔤</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Subtitle Position</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-6">Drag and resize the box to set where subtitles will appear.</p>
-                
-                <div className="flex flex-col md:flex-row gap-6">
-                  <div className="w-full md:w-2/3">
-                    {videoFile && videoPreviewUrl ? (
-                      <div className="flex flex-col w-full">
-                      <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => { e.stopPropagation(); setSelectedElement(null); }}>
-                        <video
-                          ref={videoRef}
-                          src={videoPreviewUrl}
-                          muted
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
-                          
-                          {/* Blur Boxes faintly visible */}
-                          {blurBoxes.map((box) => (
-                            <div
-                              key={box.id}
-                              className="absolute border-2 border-indigo-500/30 bg-indigo-500/10 pointer-events-none"
-                              style={{
-                                left: `${box.xPct}%`,
-                                top: `${box.yPct}%`,
-                                width: `${box.widthPct}%`,
-                                height: `${box.heightPct}%`,
-                              }}
-                            />
-                          ))}
-
-                          <div
-                            onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
-                            className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400 bg-transparent' : 'border-gray-400 border-dashed bg-gray-500/10'} cursor-move transition-colors flex items-center justify-center overflow-hidden touch-none`}
-                            style={{
-                              left: `${subtitlePosition.xPct}%`,
-                              top: `${subtitlePosition.yPct}%`,
-                              width: `${subtitlePosition.widthPct}%`,
-                              height: `${subtitlePosition.heightPct}%`,
-                            }}
-                          >
-                            <span className="text-white font-bold drop-shadow-md text-center flex items-center justify-center w-full h-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
-                            {selectedElement === 'subtitle' && (
-                              <>
-                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize touch-none" />
-                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize touch-none" />
-                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nesw-resize touch-none" />
-                                <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full cursor-nwse-resize touch-none" />
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <VideoSeekBar videoRef={videoRef} />
-                      </div>
-                    ) : (
-                      <div className="w-full aspect-[9/16] bg-gray-900 rounded-xl flex items-center justify-center text-gray-500 text-sm">Please upload a video first</div>
-                    )}
-                  </div>
-                  
-                  <div className="w-full md:w-1/3">
-                    <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                      <h4 className="text-sm font-bold text-gray-300 mb-4 flex items-center justify-between">
-                        Subtitle Settings
-                        <button onClick={() => setSelectedElement(selectedElement === 'subtitle' ? null : 'subtitle')} className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 bg-indigo-500/10 rounded-md">Edit Size</button>
-                      </h4>
-                      {selectedElement === 'subtitle' ? (
-                        <details className="mt-2 text-xs">
-                          <summary className="text-gray-400 cursor-pointer hover:text-white mb-2">Advanced (manual values)</summary>
-                          <div className="grid grid-cols-2 gap-3 mt-2">
-                            <div><label className="text-gray-500 block mb-1">X Pos (%)</label><input type="number" value={Math.round(subtitlePosition.xPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, xPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                            <div><label className="text-gray-500 block mb-1">Y Pos (%)</label><input type="number" value={Math.round(subtitlePosition.yPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, yPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                            <div><label className="text-gray-500 block mb-1">Width (%)</label><input type="number" value={Math.round(subtitlePosition.widthPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, widthPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                            <div><label className="text-gray-500 block mb-1">Height (%)</label><input type="number" value={Math.round(subtitlePosition.heightPct)} onChange={e => setSubtitlePosition((p: any) => ({...p, heightPct: parseInt(e.target.value)}))} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500" /></div>
-                          </div>
-                        </details>
-                      ) : (
-                        <div className="text-xs text-gray-500 py-6 text-center">Click "Edit Size" or select the subtitle box on the video to manually adjust dimensions.</div>
-                      )}
-
-                      <div className="mt-4 pt-4 border-t border-gray-800">
-                        <label className="text-gray-400 text-xs font-bold mb-3 block">Subtitle Color</label>
-                        <div className="flex gap-3">
-                          <button onClick={() => setSubtitleColor('white')} className={`w-8 h-8 rounded-full bg-white border-2 ${subtitleColor === 'white' ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-gray-600'}`} title="White" />
-                          <button onClick={() => setSubtitleColor('yellow')} className={`w-8 h-8 rounded-full bg-yellow-400 border-2 ${subtitleColor === 'yellow' ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-gray-600'}`} title="Yellow" />
-                          <button onClick={() => setSubtitleColor('blue')} className={`w-8 h-8 rounded-full bg-blue-500 border-2 ${subtitleColor === 'blue' ? 'border-indigo-500 ring-2 ring-indigo-500/50' : 'border-gray-600'}`} title="Blue" />
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                </div>
-              </div></div>)}
-
-            {/* Step 7: Final Preview */}
-            {currentStep === 4 && (
-              <div className="space-y-6"><div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg sm:text-xl">✨</span>
-                  <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Final Preview</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-6">Review your settings before starting the AI generation.</p>
-                
-                <div className="flex flex-col items-center">
-                  <div className="w-full max-w-sm">
-                    {videoFile && videoPreviewUrl ? (
-                      <div className="relative w-full aspect-[9/16] mx-auto rounded-xl overflow-hidden shadow-2xl shadow-indigo-900/20 bg-black border border-gray-800">
-                        <video
-                          src={videoPreviewUrl}
-                          muted
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute inset-0 pointer-events-none" style={{ left: `0px`, top: `0px`, width: `100%`, height: `100%` }}>
-                          {blurBoxes.map((box) => (
-                            <div
-                              key={box.id}
-                              className="absolute"
-                              style={{
-                                left: `${box.xPct}%`,
-                                top: `${box.yPct}%`,
-                                width: `${box.widthPct}%`,
-                                height: `${box.heightPct}%`,
-                                backdropFilter: `blur(${box.strength * 1.2}px)`,
-                                WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
-                              }}
-                            />
-                          ))}
-                          <div
-                            className="absolute flex items-center justify-center"
-                            style={{
-                              left: `${subtitlePosition.xPct}%`,
-                              top: `${subtitlePosition.yPct}%`,
-                              width: `${subtitlePosition.widthPct}%`,
-                              height: `${subtitlePosition.heightPct}%`,
-                            }}
-                          >
-                            <span className="text-white font-bold drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] text-center w-full" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)` }}>နမူနာ စာတန်း</span>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-            {/* Step 8: Render / Actions */}
-              <div className="flex flex-col items-center justify-center pt-8 max-w-md mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="text-center mb-4">
-                  <h2 className="text-xl sm:text-2xl font-bold font-display text-white mb-2">Ready to Render</h2>
-                  <p className="text-gray-400 text-sm">Your video is configured and ready for AI processing.</p>
-                </div>
-                {isKeysConfigured ? (
-                  credits !== null && credits <= 0 ? (
-                    <button
-                        disabled
-                        className="w-full flex items-center justify-center gap-3 bg-gray-800 text-gray-500 py-4 px-8 rounded-2xl font-bold text-lg cursor-not-allowed"
-                    >
-                        <ShieldAlert className="w-5 h-5" />
-                        Insufficient Credits
-                    </button>
-                  ) : (
-                    <button
-                        onClick={startAnalysis}
-                        disabled={!videoFile}
-                        className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:from-gray-800 disabled:to-gray-800 disabled:opacity-40 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all shadow-xl shadow-indigo-900/40 active:scale-95 hover:scale-[1.02] disabled:scale-100 disabled:cursor-not-allowed group"
-                    >
-                        <Play className="w-6 h-6 fill-white group-hover:scale-110 transition-transform" />
-                        <span>Start AI Processing</span>
-                        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                    </button>
-                  )
-                ) : (
-                  <button
-                    onClick={() => setShowSettings(true)}
-                    className="w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 py-4 px-8 rounded-2xl font-bold text-lg transition-all active:scale-95 flex items-center justify-center gap-3"
-                  >
-                    <ShieldAlert className="w-6 h-6" />
-                    <span>Please add API Keys</span>
-                  </button>
-                )}
-              </div>
-            </div>)}
-            {/* Navigation Controls */}
-            <div className="flex items-center justify-between max-w-5xl mx-auto mt-8 pt-4 border-t border-gray-900">
-              <button
-                onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
-                disabled={currentStep === 1}
-                className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                Back
-              </button>
-              
-              {currentStep < 4 && (
-                <button
-                  onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))}
-                  disabled={currentStep === 1 && !videoFile}
-                  className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  Next Step
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
-          </div>
-        )}
-
-
-        {/* 2. PROCESSING PIPELINE WORKSPACE */}
-        {(status === 'uploading' || status === 'analyzing') && (
-          <div className="max-w-3xl mx-auto bg-gray-900/40 border border-gray-900 rounded-2xl p-6 sm:p-8 shadow-xl">
-            <div className="flex items-center justify-between mb-8 pb-5 border-b border-gray-900">
-                <div>
-                    <h2 className="text-lg font-bold font-display text-white mb-1">ဗီဒီယို ပြန်ဆိုနေဆဲဖြစ်ပါသည် (Processing Recap)</h2>
-                    <p className="text-gray-500 text-xs">AI စနစ်များဖြင့် ဗီဒီယိုကို ခွဲခြမ်းစိတ်ဖြာပြီး အသံဖိုင်ပြန်ဆိုနေပါသည် ခဏစောင့်ပေးပါ။</p>
-                </div>
-                <Loader2 className="w-7 h-7 text-indigo-500 animate-spin shrink-0" />
-            </div>
-            
-            <div className="space-y-3">
-                {STAGES.map((stage, idx) => {
-                    let stageStatus = 'pending';
-                    if (idx < currentStageIndex) stageStatus = 'completed';
-                    else if (idx === currentStageIndex) stageStatus = 'active';
-
-                    return (
-                        <div key={stage.id} className={`flex items-center gap-4.5 p-3.5 rounded-xl transition-all ${stageStatus === 'active' ? 'bg-indigo-950/20 border border-indigo-500/30 shadow-md' : 'bg-gray-950/20 border border-gray-900/60'}`}>
-                            <div className="w-5.5 h-5.5 flex items-center justify-center shrink-0">
-                                {stageStatus === 'completed' && <CheckCircle className="w-5 h-5 text-emerald-500" />}
-                                {stageStatus === 'active' && <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />}
-                                {stageStatus === 'pending' && <div className="w-1.5 h-1.5 rounded-full bg-gray-800" />}
-                            </div>
-                            <span className={`text-xs font-bold transition-colors ${stageStatus === 'completed' ? 'text-gray-400' : stageStatus === 'active' ? 'text-indigo-300' : 'text-gray-650'}`}>
-                                {stage.label}
-                            </span>
-                        </div>
-                    );
-                })}
-            </div>
-
-            {/* Premium Interactive Progress Bar */}
-            <div className="mt-8 pt-6 border-t border-gray-900">
-                <div className="flex justify-between items-center mb-2.5">
-                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">{progressMsg || 'ဘာသာပြန်စနစ် စတင်နေဆဲ...'}</span>
-                    <span className="text-xs font-mono font-bold text-gray-300 bg-gray-900 px-2 py-0.5 rounded border border-gray-800">{Math.round(progressPct)}%</span>
-                </div>
-                <div className="w-full bg-gray-950 rounded-full h-2.5 overflow-hidden border border-gray-900 p-0.5">
-                    <div 
-                        className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full transition-all duration-300 ease-out shadow-sm shadow-indigo-500/30"
-                        style={{ width: `${Math.max(2, progressPct)}%` }}
-                    />
-                </div>
-            </div>
-          </div>
-        )}
-
-        {/* 3. ERROR WORKSPACE */}
-        {status === 'error' && (
-          <div className="max-w-2xl mx-auto bg-gray-900/40 border border-red-950/30 rounded-2xl p-8 flex flex-col shadow-xl">
-             <div className="flex flex-col items-center justify-center text-center mb-8">
-                <div className="w-16 h-16 rounded-2xl bg-red-950/20 border border-red-900/30 flex items-center justify-center text-red-500 mb-4 animate-bounce">
-                  <AlertCircle className="w-8 h-8" />
-                </div>
-                <h2 className="text-lg sm:text-xl font-bold font-display text-red-400 mb-2">ပြန်ဆိုစနစ် ချို့ယွင်းချက်ရှိပါသည် (Failed)</h2>
-                <div className="px-4 py-2 bg-red-950/20 border border-red-900/30 rounded-lg max-w-lg">
-                  <p className="text-red-300/80 text-xs font-mono break-words">{errorMsg}</p>
-                </div>
-            </div>
-
-            <div className="flex justify-center gap-4">
-                <button
-                  onClick={retryAnalysis}
-                  className="bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-500/20 text-white font-bold text-xs py-2.5 px-5 rounded-xl transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span>ထပ်မံကြိုးစားမည် (Retry)</span>
-                </button>
-                <button
-                  onClick={reset}
-                  className="bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 font-bold text-xs py-2.5 px-5 rounded-xl transition-all hover:scale-105 active:scale-95"
-                >
-                  မူလနေရာသို့ ပြန်သွားမည်
-                </button>
-            </div>
-          </div>
-        )}
-
-        {/* 4. SUCCESS & EXPORT WORKSPACE */}
-        {status === 'complete' && analysisData && (
-          <div className="space-y-8 max-w-4xl mx-auto">
-            
-            {/* Banner Complete */}
-            <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
-                <div className="flex items-center gap-4 text-center md:text-left flex-col md:flex-row">
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                      <CheckCircle className="w-8 h-8" />
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-bold font-display text-white">ဗီဒီယိုအသစ် ပြန်ဆိုပြီးပါပြီ (Recap Complete)</h2>
-                      <p className="text-emerald-300/80 text-xs mt-0.5">မြန်မာနောက်ခံစကားပြော ဗီဒီယိုအဆင်သင့်ဖြစ်ပါပြီ ဒေါင်းလုဒ်လုပ်နိုင်ပါသည်။</p>
-                    </div>
-                </div>
-
-                <div className="flex gap-3">
-                    <button
-                        onClick={reset}
-                        className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 font-bold rounded-xl text-xs transition-all active:scale-95"
-                    >
-                      ဗီဒီယိုအသစ် ပြုလုပ်မည်
-                    </button>
-                </div>
-            </div>
-
-            {/* Final Video Render Screen */}
-            {analysisData.videoUrl && (
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-xl">
-                {analysisData.warnings && analysisData.warnings.length > 0 && (
-                  <div className="mb-4 bg-orange-950/40 border border-orange-900/50 p-4 rounded-xl flex flex-col gap-2">
-                    <h4 className="text-orange-400 font-bold text-xs uppercase flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4" />
-                      Warnings during processing:
-                    </h4>
-                    <ul className="list-disc pl-5 text-orange-300/80 text-sm space-y-1">
-                      {analysisData.warnings.map((w: string, i: number) => (
-                        <li key={i}>{w}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 mb-4 flex items-center gap-2">
-                  <Volume2 className="w-4 h-4 text-indigo-400" />
-                  ရလဒ်ဗီဒီယိုကြည့်ရှုရန် (Play Final Output)
-                </h3>
-                <div className="flex justify-center bg-black rounded-xl overflow-hidden border border-gray-900 relative group aspect-video max-w-2xl mx-auto shadow-2xl">
-                  <video 
-                    src={analysisData.videoUrl} 
-                    controls 
-                    className="max-h-[500px] w-auto aspect-[9/16]"
-                    autoPlay
-                    loop
-                  />
-                </div>
-                <div className="mt-5 flex justify-center">
-                  <a 
-                    href={analysisData.videoUrl} 
-                    download
-                    className="bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-500/20 text-white px-6 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 hover:scale-102 active:scale-98"
-                  >
-                    <Download className="w-4 h-4" />
-                    ဗီဒီယိုဒေါင်းလုဒ်ဆွဲရန် (Download Video)
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {/* Detailed Scene Timeline Report */}
-            {!import.meta.env.PROD && analysisData && (
-              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-xl">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-gray-300 mb-4 pb-3 border-b border-gray-900">
-                  စကားပြောနှင့် မြင်ကွင်း ချိတ်ဆက်မှု အစီရင်ခံစာ (Narration to Scene Mapping)
-                </h3>
-                
-                {analysisData.mapping && analysisData.mapping.length > 0 ? (
-                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1.5 custom-scrollbar">
-                    {analysisData.mapping.map((mapItem: any, idx: number) => (
-                      <div key={idx} className="bg-gray-950/60 border border-gray-900 rounded-xl p-4 flex flex-col md:flex-row gap-4 md:items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[10px] text-teal-400 font-bold font-mono mb-1 uppercase tracking-wide">
-                            Burmese Narration ({mapItem.narration_start.toFixed(1)}s - {mapItem.narration_end.toFixed(1)}s)
-                          </div>
-                          <p className="text-xs text-gray-200 font-medium leading-relaxed">&ldquo;{mapItem.narration_text}&rdquo;</p>
-                        </div>
-                        
-                        <div className="hidden md:flex items-center justify-center px-2">
-                          <div className="w-6 h-[1px] bg-gray-800 relative">
-                            <div className="absolute -right-1 -top-1 w-2 h-2 border-t border-r border-gray-600 rotate-45"></div>
-                          </div>
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                           <div className="text-[10px] text-indigo-400 font-bold font-mono mb-1 uppercase tracking-wide">
-                            Matched Scene {mapItem.matched_scene_index + 1} (Start: {mapItem.matched_scene_start.toFixed(1)}s)
-                          </div>
-                          <p className="text-xs text-gray-400 leading-relaxed truncate">
-                            {mapItem.matched_scene_text ? `Original: "${mapItem.matched_scene_text}"` : 'No original dialogue'}
-                          </p>
-                        </div>
-                        
-                        <div className="text-right border-t md:border-t-0 border-gray-900 pt-2.5 md:pt-0 shrink-0">
-                          <div className="text-[9px] text-gray-500 uppercase tracking-wider font-bold mb-0.5">Similarity</div>
-                          <div className={`text-sm font-bold font-mono ${(mapItem.similarity_score * 100) > 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                            {(mapItem.similarity_score * 100).toFixed(1)}%
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-550 text-xs font-medium">No mappings generated.</p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-      </main>
     </div>
   );
 }
