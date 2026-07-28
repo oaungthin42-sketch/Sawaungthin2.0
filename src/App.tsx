@@ -4,6 +4,7 @@ import { AdminPage } from './components/AdminPage';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
 import { FeedbackForm } from './components/FeedbackForm';
+import { CreditGauge } from './components/CreditGauge';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Settings, Play, Menu, 
@@ -632,9 +633,9 @@ function App() {
                   <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto">
                       <CreditCard className="w-8 h-8" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white">Your Credit Balance</h2>
-                  <div className="text-6xl font-bold font-mono text-white tracking-tighter">{credits ?? '...'}</div>
-                  <p className="text-gray-400 mb-8">Credits are used for processing high-quality Burmese AI reconstructions.</p>
+                  <h2 className="text-2xl font-bold text-white mb-6">Your Credit Balance</h2>
+                  {credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>}
+                  <p className="text-gray-400 my-8">Credits are used for processing high-quality Burmese AI reconstructions.</p>
                   
                   <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
                       <h3 className="text-lg font-bold text-white">Buy Credits via Bank Transfer</h3>
@@ -988,7 +989,7 @@ function App() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 bg-gray-900 border border-gray-800 rounded-full">
-                  <span className="text-xs text-indigo-400 font-bold">{credits ?? '...'} Credits</span>
+                  {credits !== null ? <CreditGauge credits={credits} size="small" /> : <span className="text-xs text-indigo-400 font-bold">... Credits</span>}
                   <div className="w-px h-3 bg-gray-800" />
                   <span className="text-xs text-gray-400">{user?.name}</span>
                 </div>

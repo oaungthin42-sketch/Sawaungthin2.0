@@ -56,6 +56,7 @@ router.post('/google', async (req, res) => {
 
         db.prepare("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?").run(user.id);
         req.session.userId = user.id;
+        console.log(`[AUTH] Session set for user ${user.id} (${user.email}). Session ID: ${req.sessionID}`);
         res.json({ success: true, user });
 
     } catch (error) {
@@ -90,6 +91,7 @@ router.post('/logout', (req, res) => {
 });
 
 export const authMiddleware = (req, res, next) => {
+    console.log(`[AUTH] Incoming request to ${req.method} ${req.originalUrl} — session present: ${!!req.session}, userId: ${req.session?.userId || 'none'}, cookie header: ${req.headers.cookie ? 'present' : 'MISSING'}`);
     if (!req.session || !req.session.userId) {
         return res.status(401).json({ error: 'Not authenticated' });
     }

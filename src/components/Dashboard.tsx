@@ -1,4 +1,5 @@
 import React from 'react';
+import { CreditGauge } from './CreditGauge';
 import { Video, CreditCard, History, Zap, ArrowRight, Play } from 'lucide-react';
 
 interface DashboardProps {
@@ -42,11 +43,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, onStart
                         </div>
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Active Balance</span>
                     </div>
-                    <div className="space-y-1">
-                        <div className="text-5xl font-bold font-mono text-white tracking-tighter">
-                            {credits ?? '...'}
-                        </div>
-                        <p className="text-gray-400 font-medium text-sm">Credits remaining in your account</p>
+                    <div className="flex flex-col items-center">
+                        {credits !== null ? <CreditGauge credits={credits} /> : <div className="text-5xl font-bold font-mono text-white tracking-tighter">...</div>}
                     </div>
                 </div>
 
