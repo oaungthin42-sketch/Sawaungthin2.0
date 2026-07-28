@@ -9,7 +9,7 @@ import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../
 import { VOICES, getVoiceConfig } from '../ai/voices.js';
 import { EdgeTTS } from '@seepine/edge-tts';
 import db from '../services/db.js';
-import { authMiddleware } from './auth.js';
+import { authMiddleware, adminOnly } from './auth.js';
 import { decrypt } from '../services/settings.js';
 
 
@@ -165,11 +165,11 @@ router.post('/preview-voice', async (req, res) => {
 
 
 // Settings Routes
-router.get('/settings', (req, res) => {
+router.get('/settings', authMiddleware, adminOnly, (req, res) => {
     res.json(getAllSettingsMasked());
 });
 
-router.post('/settings', (req, res) => {
+router.post('/settings', authMiddleware, adminOnly, (req, res) => {
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: 'Key is required' });
     if (value === null || value === undefined || value === '') {

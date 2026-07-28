@@ -187,9 +187,14 @@ function App() {
   };
 
   useEffect(() => {
-    fetchSettings();
     fetchVoices();
   }, []);
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      fetchSettings();
+    }
+  }, [user]);
   
   const fetchVoices = async () => {
     try {
@@ -988,7 +993,9 @@ function App() {
                   <div className="w-px h-3 bg-gray-800" />
                   <span className="text-xs text-gray-400">{user?.name}</span>
                 </div>
-                <button onClick={() => setShowSettings(true)} className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 hover:border-indigo-500/50 text-gray-400 hover:text-indigo-400 transition-all"><Settings size={20} /></button>
+                {user?.role === 'admin' && (
+                  <button onClick={() => setShowSettings(true)} className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 hover:border-indigo-500/50 text-gray-400 hover:text-indigo-400 transition-all"><Settings size={20} /></button>
+                )}
               </div>
           </header>
 
