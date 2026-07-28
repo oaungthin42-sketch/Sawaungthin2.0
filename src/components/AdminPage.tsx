@@ -99,12 +99,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     }, [activeTab]);
 
     const handleCredits = async (userId: string, amount: number) => {
+        console.log(`[CREDITS] Sending request: userId=${userId}, amount=${amount}`);
         try {
-            await axios.post(`/api/user/admin/users/${userId}/credits`, { amount });
-            fetchData();
+            const res = await axios.post(`/api/user/admin/users/${userId}/credits`, { amount });
+            console.log(`[CREDITS] Success:`, res.data);
+            await fetchData();
             setCreditInputs(prev => ({ ...prev, [userId]: '' }));
+            alert(amount > 0 ? `Added ${amount} credits.` : `Subtracted ${Math.abs(amount)} credits.`);
         } catch (err: any) {
-            alert(err.response?.data?.error || 'Failed to update credits');
+            console.error(`[CREDITS] Failed:`, err.response?.status, err.response?.data, err.message);
+            alert(`Credit update failed: ${err.response?.data?.error || err.message}`);
         }
     };
 

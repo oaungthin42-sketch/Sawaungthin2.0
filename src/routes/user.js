@@ -46,9 +46,14 @@ router.post('/admin/users/:id/credits', authMiddleware, adminOnly, (req, res) =>
     try {
         const { amount } = req.body;
         const userId = req.params.id;
-        db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(amount, userId);
-        res.json({ success: true });
+        console.log(`[CREDITS] Admin ${req.user.email} adjusting user ${userId} by ${amount} (type: ${typeof amount})`);
+        const before = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
+        const result = db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(amount, userId);
+        const after = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
+        console.log(`[CREDITS] Before: ${before?.credits}, After: ${after?.credits}, rows changed: ${result.changes}`);
+        res.json({ success: true, credits: after?.credits });
     } catch (e) {
+        console.error(`[CREDITS] Error:`, e);
         res.status(500).json({ error: 'Failed to update credits' });
     }
 });
