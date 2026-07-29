@@ -167,17 +167,24 @@ router.get('/api-key', authMiddleware, (req, res) => {
 
 router.post('/api-key', authMiddleware, (req, res) => {
     try {
+        console.log(`[USER-API-KEY] POST /api-key received. req.user exists: ${!!req.user}, userId: ${req.user?.id}, apiKey in body: ${!!req.body.apiKey}`);
         const { apiKey } = req.body;
         if (apiKey) {
+            console.log(`[USER-API-KEY] Encrypting API key...`);
             const encrypted = encrypt(apiKey);
+            console.log(`[USER-API-KEY] Key encrypted. Updating database...`);
             const stmt = db.prepare('UPDATE users SET geminiApiKeyEncrypted = ? WHERE id = ?');
-            stmt.run(encrypted, req.user.id);
+            const result = stmt.run(encrypted, req.user.id);
+            console.log(`[USER-API-KEY] DB update complete. Changes: ${result.changes}`);
         } else {
+            console.log(`[USER-API-KEY] Removing API key...`);
             const stmt = db.prepare('UPDATE users SET geminiApiKeyEncrypted = NULL WHERE id = ?');
-            stmt.run(req.user.id);
+            const result = stmt.run(req.user.id);
+            console.log(`[USER-API-KEY] DB update complete (remove). Changes: ${result.changes}`);
         }
         res.json({ success: true });
     } catch (e) {
+        console.error(`[USER-API-KEY] Error caught during save:`, e);
         res.status(500).json({ error: 'Failed to save API key' });
     }
 });

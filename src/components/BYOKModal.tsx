@@ -13,12 +13,14 @@ export const BYOKModal: React.FC<BYOKModalProps> = ({ isOpen, onClose }) => {
     const [masked, setMasked] = useState('');
     const [newKey, setNewKey] = useState('');
     const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState<{valid: boolean, error?: string} | null>(null);
 
     useEffect(() => {
         if (isOpen) {
             fetchStatus();
+            setSaveError(null);
         }
     }, [isOpen]);
 
@@ -35,9 +37,12 @@ export const BYOKModal: React.FC<BYOKModalProps> = ({ isOpen, onClose }) => {
     const handleSave = () => {
         if (!newKey.trim()) return;
         setSaving(true);
+        setSaveError(null);
         axios.post('/api/user/api-key', { apiKey: newKey.trim() }).then(() => {
             setNewKey('');
             fetchStatus();
+        }).catch(err => {
+            setSaveError(`Failed to save: ${err.response?.status} - ${JSON.stringify(err.response?.data) || err.message}`);
         }).finally(() => {
             setSaving(false);
         });
@@ -140,6 +145,12 @@ export const BYOKModal: React.FC<BYOKModalProps> = ({ isOpen, onClose }) => {
                                             className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                                         />
                                     </div>
+
+                                    {saveError && (
+                                        <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-xl text-sm text-red-400">
+                                            {saveError}
+                                        </div>
+                                    )}
 
                                     <button 
                                         onClick={handleSave} 
