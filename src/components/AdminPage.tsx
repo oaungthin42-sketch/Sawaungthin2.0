@@ -63,6 +63,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
+    const [settingsMeta, setSettingsMeta] = useState<Record<string, any>>({});
 
     const fetchData = async () => {
         setLoading(true);
@@ -83,7 +84,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
             } else if (activeTab === 'settings') {
                 const res = await axios.get('/api/settings');
                 const mapped: Record<string, string> = {};
-                res.data.forEach((s: any) => mapped[s.key] = s.value);
+                setSettingsMeta(res.data);
+                Object.entries(res.data).forEach(([key, data]: [string, any]) => {
+                    if (data.value !== undefined) {
+                        mapped[key] = data.value;
+                    }
+                });
                 setSettingsValues(mapped);
             }
         } catch (err: any) {
@@ -475,7 +481,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                 type="password" 
                                                 value={settingsValues.GEMINI_API_KEY || ''} 
                                                 onChange={e => setSettingsValues({...settingsValues, GEMINI_API_KEY: e.target.value})} 
-                                                placeholder="Enter Gemini API Key to enable AI features"
+                                                placeholder={settingsMeta.GEMINI_API_KEY?.configured && settingsMeta.GEMINI_API_KEY.masked 
+                                                    ? `Currently set: ${settingsMeta.GEMINI_API_KEY.masked} (leave blank to keep, or type a new key to replace)` 
+                                                    : "Enter Gemini API Key to enable AI features"}
                                                 className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500" 
                                             />
                                         </div>
@@ -483,9 +491,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                             onClick={async () => {
                                                 try {
                                                     for (const key of Object.keys(settingsValues)) {
-                                                        await axios.post('/api/settings', { key, value: settingsValues[key] });
+                                                        const val = settingsValues[key];
+                                                        if (val) {
+                                                            await axios.post('/api/settings', { key, value: val });
+                                                        }
                                                     }
                                                     alert('Settings saved successfully');
+                                                    fetchData();
                                                 } catch (err: any) {
                                                     alert(err.response?.data?.error || 'Failed to save settings');
                                                 }

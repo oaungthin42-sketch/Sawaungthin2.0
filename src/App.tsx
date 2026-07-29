@@ -1149,20 +1149,24 @@ function App() {
                     {user?.role === 'admin' && (
                         <div className="space-y-3">
                             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Pro Voice (Admin Only)</h3>
-                            <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Puck'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
-                                <div className="flex items-center gap-4">
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👨</div>
-                                    <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Boy)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Puck)</p></div>
-                                </div>
-                                {voiceProvider === 'gemini' && geminiVoiceName === 'Puck' && <CheckCircle size={20} className="text-amber-500" />}
-                            </button>
-                            <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Leda'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
-                                <div className="flex items-center gap-4">
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👩</div>
-                                    <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Girl)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Leda)</p></div>
-                                </div>
-                                {voiceProvider === 'gemini' && geminiVoiceName === 'Leda' && <CheckCircle size={20} className="text-amber-500" />}
-                            </button>
+                            {selectedGender === 'male' && (
+                                <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Puck'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                                    <div className="flex items-center gap-4">
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👨</div>
+                                        <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Boy)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Puck)</p></div>
+                                    </div>
+                                    {voiceProvider === 'gemini' && geminiVoiceName === 'Puck' && <CheckCircle size={20} className="text-amber-500" />}
+                                </button>
+                            )}
+                            {selectedGender === 'female' && (
+                                <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Leda'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                                    <div className="flex items-center gap-4">
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👩</div>
+                                        <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Girl)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Leda)</p></div>
+                                    </div>
+                                    {voiceProvider === 'gemini' && geminiVoiceName === 'Leda' && <CheckCircle size={20} className="text-amber-500" />}
+                                </button>
+                            )}
                         </div>
                     )}
                     <div className="space-y-3">
