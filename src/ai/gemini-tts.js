@@ -32,8 +32,8 @@ export const generateNarrationTTS_Gemini = async (sceneNarration, cachePath, gem
 
         const dialogueVal = getSetting('DIALOGUE_MODE');
         const isDialogue = dialogueVal === 'true' || dialogueVal === '1' || dialogueVal === true;
-        const maxGap = isDialogue ? 3.0 : 0.75;
-        const maxDur = isDialogue ? 60 : 12;
+        const maxGap = isDialogue ? 30.0 : 15.0; // Increased gap to merge more sentences across silences
+        const maxDur = isDialogue ? 300 : 180; // Allow 3 to 5 minutes of narration per block
 
         for (let i = 0; i < sceneNarration.length; i++) {
             const scene = sceneNarration[i];
@@ -105,7 +105,7 @@ export const generateNarrationTTS_Gemini = async (sceneNarration, cachePath, gem
                         let timeoutId;
                         try {
                             const timeoutPromise = new Promise((_, reject) => {
-                                timeoutId = setTimeout(() => reject(new Error("Gemini TTS timeout")), 30000);
+                                timeoutId = setTimeout(() => reject(new Error("Gemini TTS timeout")), 120000); // Increased timeout to 120s for larger chunks
                             });
                             
                             const genAiCall = ai.models.generateContent({
