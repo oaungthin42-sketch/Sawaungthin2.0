@@ -126,7 +126,24 @@ export const generateNarrationTTS_Gemini = async (sceneNarration, cachePath, gem
                             const response = await Promise.race([genAiCall, timeoutPromise]);
                             const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
                             if (audioData) {
-                                fs.writeFileSync(chunkPath, Buffer.from(audioData, 'base64'));
+                                const pcmBuffer = Buffer.from(audioData, 'base64');
+                                const header = Buffer.alloc(44);
+                                header.write('RIFF', 0);
+                                header.writeUInt32LE(36 + pcmBuffer.length, 4);
+                                header.write('WAVE', 8);
+                                header.write('fmt ', 12);
+                                header.writeUInt32LE(16, 16);
+                                header.writeUInt16LE(1, 20);
+                                header.writeUInt16LE(1, 22);
+                                header.writeUInt32LE(24000, 24);
+                                header.writeUInt32LE(24000 * 2, 28);
+                                header.writeUInt16LE(2, 32);
+                                header.writeUInt16LE(16, 34);
+                                header.write('data', 36);
+                                header.writeUInt32LE(pcmBuffer.length, 40);
+                                
+                                const wavBuffer = Buffer.concat([header, pcmBuffer]);
+                                fs.writeFileSync(chunkPath, wavBuffer);
                             } else {
                                 throw new Error("No audio data returned from Gemini API");
                             }
