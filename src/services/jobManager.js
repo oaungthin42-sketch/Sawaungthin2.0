@@ -16,8 +16,8 @@ export const clearJobKeys = (id) => {
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, subtitlePosition, selectedFontId, subtitleColor, userId)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
         id, 
@@ -32,6 +32,8 @@ export const createJob = (id, data) => {
         data.subtitlePosition ? (typeof data.subtitlePosition === 'string' ? data.subtitlePosition : JSON.stringify(data.subtitlePosition)) : null, 
         data.selectedFontId || null, 
         data.subtitleColor || 'white',
+        data.speed !== undefined ? data.speed : 1.0,
+        data.flipped !== undefined ? data.flipped : 0,
         data.userId || null
     );
     return getJob(id);

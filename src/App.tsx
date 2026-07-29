@@ -91,6 +91,8 @@ function App() {
   const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
+  const [outputSpeed, setOutputSpeed] = useState<number>(1.0);
+  const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
   const [credits, setCredits] = useState<number | null>(null);
   const [activeView, setActiveView] = useState('dashboard');
@@ -485,6 +487,8 @@ function App() {
     formData.append('blurBoxes', JSON.stringify(blurBoxes));
     formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
     formData.append('subtitleColor', subtitleColor);
+    formData.append('speed', outputSpeed.toString());
+    formData.append('flipped', isFlipped.toString());
 
     try {
       const response = await axios.post('/api/process-recap', formData, {
@@ -825,7 +829,7 @@ function App() {
                                     {videoFile && videoPreviewUrl ? (
                                         <div className="flex flex-col w-full">
                                             <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
-                                                <video ref={videoRef} src={videoPreviewUrl} muted playsInline preload="metadata" onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} className="w-full h-full object-cover" />
+                                                <video ref={videoRef} src={videoPreviewUrl} muted playsInline preload="metadata" style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} className="w-full h-full object-cover" />
                                                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                                     <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
                                                         <div><span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span><span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span></div>
@@ -843,6 +847,27 @@ function App() {
                                     )}
                                 </div>
                             </div>
+                            
+                            {videoFile && (
+                              <div className="flex flex-row justify-center gap-6 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Speed</span>
+                                      <select value={outputSpeed} onChange={(e) => setOutputSpeed(parseFloat(e.target.value))} className="bg-gray-950 border border-gray-700 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500">
+                                          <option value="0.9">0.9x</option>
+                                          <option value="1.0">1.0x</option>
+                                          <option value="1.1">1.1x</option>
+                                          <option value="1.25">1.25x</option>
+                                          <option value="1.5">1.5x</option>
+                                      </select>
+                                  </div>
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Flip Video</span>
+                                      <button onClick={() => setIsFlipped(!isFlipped)} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isFlipped ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
+                                          <ArrowRight size={14} className={`transition-transform duration-300 ${isFlipped ? 'rotate-180' : ''}`} />
+                                      </button>
+                                  </div>
+                              </div>
+                            )}
 
                             <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto">
                                 <div className="flex items-center justify-between mb-4">
@@ -862,32 +887,7 @@ function App() {
                                 </div>
                             </div>
                             
-                            {user?.role === 'admin' && (
-                                <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto">
-                                    <div className="flex flex-col gap-1.5 mb-4">
-                                        <span className="text-sm font-semibold text-gray-300">ရလဒ်ဗီဒီယို အသံနှုန်း (Output Speed)</span>
-                                        <span className="text-xs text-gray-500 font-medium">ထုတ်လုပ်ပြီးသား ဗီဒီယိုတစ်ခုလုံးရဲ့ ပြေးနှုန်းကို ချိန်ညှိပါ — video နဲ့ အသံ နှစ်ခုစလုံး တညီတည်း မြန်/နှေး သွားမှာဖြစ်ပါတယ်။</span>
-                                    </div>
-                                    <div className="relative">
-                                        <select 
-                                            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 appearance-none"
-                                            value={editSettings['OUTPUT_SPEED_MULTIPLIER'] !== undefined ? editSettings['OUTPUT_SPEED_MULTIPLIER'] : (settings['OUTPUT_SPEED_MULTIPLIER']?.value || "1.0")}
-                                            onChange={(e) => {
-                                                setEditSettings({ ...editSettings, 'OUTPUT_SPEED_MULTIPLIER': e.target.value });
-                                                saveSetting('OUTPUT_SPEED_MULTIPLIER', e.target.value);
-                                            }}
-                                        >
-                                            <option value="1.0">1x (Default)</option>
-                                            <option value="1.25">1.25x</option>
-                                            <option value="1.5">1.5x</option>
-                                            <option value="1.75">1.75x</option>
-                                            <option value="2.0">2x</option>
-                                            <option value="2.5">2.5x</option>
-                                            <option value="3.0">3x</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            )}
+
                         </div>
                       )}
 
@@ -904,7 +904,7 @@ function App() {
                               {videoFile && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                 <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
-                                  <video ref={videoRef} src={videoPreviewUrl} muted playsInline className="w-full h-full object-cover" />
+                                  <video ref={videoRef} src={videoPreviewUrl} muted playsInline style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-cover" />
                                   <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                                     {blurBoxes.map((box) => (
                                       <div
@@ -959,7 +959,7 @@ function App() {
                               {videoFile && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                   <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
-                                    <video ref={videoRef} src={videoPreviewUrl} muted playsInline className="w-full h-full object-cover" />
+                                    <video ref={videoRef} src={videoPreviewUrl} muted playsInline style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-cover" />
                                     <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                                       <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')} className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors flex items-center justify-center touch-none`} style={{ left: `${subtitlePosition.xPct}%`, top: `${subtitlePosition.yPct}%`, width: `${subtitlePosition.widthPct}%`, height: `${subtitlePosition.heightPct}%` }}>
                                         <span className="text-white font-bold text-center w-full drop-shadow-md" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)`, color: subtitleColor }}>နမူနာ စာတန်း</span>

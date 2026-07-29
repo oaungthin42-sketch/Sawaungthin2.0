@@ -212,6 +212,8 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
      const subtitlePosition = req.body.subtitlePosition || null;
     const selectedFontId = req.body.selectedFontId || null;
     const subtitleColor = req.body.subtitleColor || "white";
+    const speed = parseFloat(req.body.speed) || 1.0;
+    const flipped = req.body.flipped === 'true' ? 1 : 0;
 
     // Transactional-ish update (SQLite is simple)
     if (user.role !== 'admin') {
@@ -226,6 +228,8 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
         subtitlePosition: subtitlePosition,
         selectedFontId: selectedFontId,
         subtitleColor: subtitleColor,
+        speed: speed,
+        flipped: flipped,
         userId: user.id
     });
     setJobKeys(jobId, { geminiApiKey });
@@ -278,6 +282,8 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      const subtitlePosition = req.body.subtitlePosition || null;
      const selectedFontId = req.body.selectedFontId || null;
      const subtitleColor = req.body.subtitleColor || "white";
+     const speed = parseFloat(req.body.speed) || 1.0;
+     const flipped = req.body.flipped === 'true' ? 1 : 0;
 
      // Transactional-ish update (SQLite is simple)
      if (user.role !== 'admin') {
@@ -292,6 +298,8 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
          subtitlePosition: subtitlePosition, 
          selectedFontId: selectedFontId,
          subtitleColor: subtitleColor,
+         speed: speed,
+         flipped: flipped,
          userId: user.id
      });
      setJobKeys(jobId, { geminiApiKey });

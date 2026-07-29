@@ -409,7 +409,8 @@ export const processRecapPipeline = async (jobId) => {
                     
                     const freezeAmount = t.target_dur - ((t.scene_end - t.scene_start) / speed);
                     console.log(`[FREEZE-PADDING] segment ${globalIdx}: speed=${speed.toFixed(2)}, freeze_padding=${freezeAmount.toFixed(2)}s`);
-                    const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
+                    const hflipFilter = job.flipped ? 'hflip,' : '';
+                    const filter = `[0:v]${hflipFilter}setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
                     
                     const segFile = path.join(cacheDir, `seg_${globalIdx}.ts`);
                     const segFileTmp = path.join(cacheDir, `seg_${globalIdx}.ts.tmp`);
@@ -981,7 +982,7 @@ export const processRecapPipeline = async (jobId) => {
         if (!hasCompletedStep(job.currentStep, STEPS.SPEED_ADJUST)) {
             advanceStep(STEPS.SPEED_ADJUST, 99, 'Adjusting Final Speed');
             
-            let multiplier = parseFloat(getSetting('OUTPUT_SPEED_MULTIPLIER')) || 1.0;
+            let multiplier = parseFloat(job.speed) || 1.0;
             if (multiplier < 0.5) multiplier = 0.5;
             if (multiplier > 3.0) multiplier = 3.0;
 
