@@ -227,10 +227,10 @@ function App() {
     }
   };
   
-  const handlePreviewVoice = async (voiceId: string) => {
+  const handlePreviewVoice = async (voiceId: string, provider: 'edge' | 'gemini' = 'edge') => {
     setPreviewingVoice(voiceId);
     try {
-        const response = await axios.post('/api/preview-voice', { voiceId }, { responseType: 'blob' });
+        const response = await axios.post('/api/preview-voice', { voiceId, provider }, { responseType: 'blob' });
         const url = URL.createObjectURL(response.data);
         if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
         setAudioPreviewUrl(url);
@@ -862,7 +862,7 @@ function App() {
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Speed</span>
                                       <select value={outputSpeed} onChange={(e) => setOutputSpeed(parseFloat(e.target.value))} className="bg-gray-950 border border-gray-700 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500">
                                           <option value="0.9">0.9x</option>
-                                          <option value="1.0">1.0x</option>
+                                          <option value="1">1.0x</option>
                                           <option value="1.1">1.1x</option>
                                           <option value="1.25">1.25x</option>
                                           <option value="1.5">1.5x</option>
@@ -891,9 +891,7 @@ function App() {
                                         <span className="text-sm font-bold text-white">{selectedVoiceName}</span>
                                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Active Burmese Recapitulator</p>
                                     </div>
-                                    {voiceProvider === 'edge' && (
-                                        <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
-                                    )}
+                                    <button onClick={() => handlePreviewVoice(voiceProvider === 'gemini' ? geminiVoiceName : currentVoiceId, voiceProvider)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === (voiceProvider === 'gemini' ? geminiVoiceName : currentVoiceId) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
                                 </div>
                             </div>
                             
@@ -1164,7 +1162,12 @@ function App() {
                                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === voice.name ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👨</div>
                                                 <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Boy - {voice.name})</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.desc}</p></div>
                                             </div>
-                                            {voiceProvider === 'gemini' && geminiVoiceName === voice.name && <CheckCircle size={20} className="text-amber-500" />}
+                                            <div className="flex items-center gap-3">
+                                                <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice(voice.name, 'gemini'); }} disabled={previewingVoice !== null} className="p-2 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-amber-500 rounded-lg transition-all border border-gray-800">
+                                                    {previewingVoice === voice.name ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                                </button>
+                                                {voiceProvider === 'gemini' && geminiVoiceName === voice.name && <CheckCircle size={20} className="text-amber-500" />}
+                                            </div>
                                         </button>
                                     ))}
                                 </div>
@@ -1175,7 +1178,12 @@ function App() {
                                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👩</div>
                                         <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Girl)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Leda)</p></div>
                                     </div>
-                                    {voiceProvider === 'gemini' && geminiVoiceName === 'Leda' && <CheckCircle size={20} className="text-amber-500" />}
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice('Leda', 'gemini'); }} disabled={previewingVoice !== null} className="p-2 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-amber-500 rounded-lg transition-all border border-gray-800">
+                                            {previewingVoice === 'Leda' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                        </button>
+                                        {voiceProvider === 'gemini' && geminiVoiceName === 'Leda' && <CheckCircle size={20} className="text-amber-500" />}
+                                    </div>
                                 </button>
                             )}
                         </div>
@@ -1188,7 +1196,12 @@ function App() {
                                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'edge' && currentVoiceId === voice.id ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>{selectedGender === 'male' ? '👨' : '👩'}</div>
                                     <div><span className="text-sm font-bold group-hover:text-white">{voice.name}</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.id}</p></div>
                                 </div>
-                                {voiceProvider === 'edge' && currentVoiceId === voice.id && <CheckCircle size={20} className="text-indigo-500" />}
+                                <div className="flex items-center gap-3">
+                                    <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice(voice.id, 'edge'); }} disabled={previewingVoice !== null} className="p-2 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-indigo-500 rounded-lg transition-all border border-gray-800">
+                                        {previewingVoice === voice.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                    </button>
+                                    {voiceProvider === 'edge' && currentVoiceId === voice.id && <CheckCircle size={20} className="text-indigo-500" />}
+                                </div>
                             </button>
                         ))}
                     </div>

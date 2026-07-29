@@ -119,45 +119,100 @@ router.get('/voices', authMiddleware, (req, res) => {
 });
 
 router.post('/preview-voice', authMiddleware, async (req, res) => {
-    const { voiceId } = req.body;
+    const { voiceId, provider = 'edge' } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });
     
     if (req.user.role !== 'admin' && req.user.credits <= 0) {
         return res.status(400).json({ error: 'Insufficient Credits' });
     }
 
-    const config = getVoiceConfig(voiceId);
-    if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
-    
     try {
         const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
-        const ttsClient = new EdgeTTS({ 
-            voice: config.edgeVoice,
-            pitch: config.pitch,
-            rate: config.rate
-        });
-        
-        const callPromise = ttsClient.call(previewText);
-        let timeoutId;
-        let resAudio;
-        try {
-            const timeoutPromise = new Promise((_, reject) => {
-                timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 15000);
+
+        if (provider === 'gemini') {
+            const geminiApiKey = decrypt(getSetting('GEMINI_API_KEY')) || process.env.GEMINI_API_KEY;
+            if (!geminiApiKey) {
+                return res.status(400).json({ error: 'Gemini API Key is not configured' });
+            }
+            
+            const { GoogleGenAI } = await import('@google/genai');
+            const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+            
+            const genAiCall = ai.models.generateContent({
+                model: 'gemini-2.5-flash-tts',
+                contents: previewText,
+                config: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: {
+                                voiceName: voiceId
+                            }
+                        }
+                    }
+                }
             });
-            resAudio = await Promise.race([callPromise, timeoutPromise]);
-        } finally {
-            clearTimeout(timeoutId);
+            
+            const response = await genAiCall;
+            const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (audioData) {
+                const pcmBuffer = Buffer.from(audioData, 'base64');
+                const header = Buffer.alloc(44);
+                header.write('RIFF', 0);
+                header.writeUInt32LE(36 + pcmBuffer.length, 4);
+                header.write('WAVE', 8);
+                header.write('fmt ', 12);
+                header.writeUInt32LE(16, 16);
+                header.writeUInt16LE(1, 20);
+                header.writeUInt16LE(1, 22);
+                header.writeUInt32LE(24000, 24);
+                header.writeUInt32LE(24000 * 2, 28);
+                header.writeUInt16LE(2, 32);
+                header.writeUInt16LE(16, 34);
+                header.write('data', 36);
+                header.writeUInt32LE(pcmBuffer.length, 40);
+                
+                const wavBuffer = Buffer.concat([header, pcmBuffer]);
+                res.set({
+                    'Content-Type': 'audio/wav',
+                    'Content-Length': wavBuffer.length
+                });
+                return res.send(wavBuffer);
+            } else {
+                throw new Error("No audio data returned from Gemini API");
+            }
+        } else {
+            const config = getVoiceConfig(voiceId);
+            if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
+            
+            const ttsClient = new EdgeTTS({ 
+                voice: config.edgeVoice,
+                pitch: config.pitch,
+                rate: config.rate
+            });
+            
+            const callPromise = ttsClient.call(previewText);
+            let timeoutId;
+            let resAudio;
+            try {
+                const timeoutPromise = new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 15000);
+                });
+                resAudio = await Promise.race([callPromise, timeoutPromise]);
+            } finally {
+                clearTimeout(timeoutId);
+            }
+            
+            if (!resAudio.data || resAudio.data.length === 0) {
+                throw new Error("Received empty audio data");
+            }
+            
+            res.set({
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': resAudio.data.length
+            });
+            res.send(resAudio.data);
         }
-        
-        if (!resAudio.data || resAudio.data.length === 0) {
-            throw new Error("Received empty audio data");
-        }
-        
-        res.set({
-            'Content-Type': 'audio/mpeg',
-            'Content-Length': resAudio.data.length
-        });
-        res.send(resAudio.data);
     } catch(err) {
         console.error("[API] Preview Voice Error:", err);
         res.status(500).json({ error: 'Failed to generate preview audio' });
