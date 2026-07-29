@@ -214,6 +214,8 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     const subtitleColor = req.body.subtitleColor || "white";
     const speed = parseFloat(req.body.speed) || 1.0;
     const flipped = req.body.flipped === 'true' ? 1 : 0;
+    const voiceProvider = req.body.voiceProvider || 'edge';
+    const geminiVoiceName = req.body.geminiVoiceName || 'Puck';
 
     // Transactional-ish update (SQLite is simple)
     if (user.role !== 'admin') {
@@ -230,7 +232,9 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
         subtitleColor: subtitleColor,
         speed: speed,
         flipped: flipped,
-        userId: user.id
+        userId: user.id,
+        voiceProvider: voiceProvider,
+        geminiVoiceName: geminiVoiceName
     });
     setJobKeys(jobId, { geminiApiKey });
     
@@ -284,6 +288,8 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
+     const voiceProvider = req.body.voiceProvider || 'edge';
+     const geminiVoiceName = req.body.geminiVoiceName || 'Puck';
 
      // Transactional-ish update (SQLite is simple)
      if (user.role !== 'admin') {
@@ -300,7 +306,9 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
          subtitleColor: subtitleColor,
          speed: speed,
          flipped: flipped,
-         userId: user.id
+         userId: user.id,
+         voiceProvider: voiceProvider,
+         geminiVoiceName: geminiVoiceName
      });
      setJobKeys(jobId, { geminiApiKey });
      res.json({ jobId });

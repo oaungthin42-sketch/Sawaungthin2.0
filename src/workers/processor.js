@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer-core';
 import { updateJob, getJob, getJobKeys, clearJobKeys } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS } from '../ai/index.js';
+import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS, generateNarrationTTS_Gemini } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
 import db from '../services/db.js';
 
@@ -126,13 +126,19 @@ export const processRecapPipeline = async (jobId) => {
         const ttsAudioCache = path.join(cacheDir, 'narration_tts.wav');
         if (!hasCompletedStep(job.currentStep, STEPS.GENERATE_TTS)) {
             advanceStep(STEPS.GENERATE_TTS, 35, 'Generating Burmese TTS Audio');
-            const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
             const mappedTranscript = state.translatedTranscript.map(t => ({
                 narration_text: t.text,
                 scene_start: t.timestamp[0],
                 scene_end: t.timestamp[1]
             }));
-            state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
+
+            if (job.voiceProvider === 'gemini') {
+                const geminiVoice = job.geminiVoiceName || 'Puck';
+                state.ttsAudioPath = await generateNarrationTTS_Gemini(mappedTranscript, ttsAudioCache, geminiVoice, geminiApiKey);
+            } else {
+                const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
+                state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
+            }
             saveState();
         }
 

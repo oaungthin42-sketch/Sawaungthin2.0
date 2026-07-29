@@ -93,6 +93,8 @@ function App() {
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
   const [outputSpeed, setOutputSpeed] = useState<number>(1.0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
+  const [voiceProvider, setVoiceProvider] = useState<string>('edge');
+  const [geminiVoiceName, setGeminiVoiceName] = useState<string>('Puck');
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
   const [credits, setCredits] = useState<number | null>(null);
   const [activeView, setActiveView] = useState('dashboard');
@@ -489,6 +491,8 @@ function App() {
     formData.append('subtitleColor', subtitleColor);
     formData.append('speed', outputSpeed.toString());
     formData.append('flipped', isFlipped.toString());
+    formData.append('voiceProvider', voiceProvider);
+    formData.append('geminiVoiceName', geminiVoiceName);
 
     try {
       const response = await axios.post('/api/process-recap', formData, {
@@ -569,7 +573,10 @@ function App() {
   };
 
   const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
-  const selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
+  let selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
+  if (voiceProvider === 'gemini') {
+    selectedVoiceName = geminiVoiceName === 'Puck' ? 'Pro Voice (Boy)' : 'Pro Voice (Girl)';
+  }
 
   if (authLoading) {
     return (
@@ -883,7 +890,9 @@ function App() {
                                         <span className="text-sm font-bold text-white">{selectedVoiceName}</span>
                                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Active Burmese Recapitulator</p>
                                     </div>
-                                    <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
+                                    {voiceProvider === 'edge' && (
+                                        <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === currentVoiceId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
+                                    )}
                                 </div>
                             </div>
                             
@@ -1136,16 +1145,38 @@ function App() {
                     <button onClick={() => setSelectedGender('male')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${selectedGender === 'male' ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-500'}`}>MALE</button>
                     <button onClick={() => setSelectedGender('female')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${selectedGender === 'female' ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-500'}`}>FEMALE</button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                    {voices.filter(v => v.gender === selectedGender).map(voice => (
-                        <button key={voice.id} onClick={() => { saveSetting('EDGE_TTS_VOICE', voice.id); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${currentVoiceId === voice.id ? 'bg-indigo-500/10 border-indigo-500 text-indigo-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
-                            <div className="flex items-center gap-4">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${currentVoiceId === voice.id ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>{selectedGender === 'male' ? '👨' : '👩'}</div>
-                                <div><span className="text-sm font-bold group-hover:text-white">{voice.name}</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.id}</p></div>
-                            </div>
-                            {currentVoiceId === voice.id && <CheckCircle size={20} className="text-indigo-500" />}
-                        </button>
-                    ))}
+                <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+                    {user?.role === 'admin' && (
+                        <div className="space-y-3">
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Pro Voice (Admin Only)</h3>
+                            <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Puck'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👨</div>
+                                    <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Boy)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Puck)</p></div>
+                                </div>
+                                {voiceProvider === 'gemini' && geminiVoiceName === 'Puck' && <CheckCircle size={20} className="text-amber-500" />}
+                            </button>
+                            <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Leda'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👩</div>
+                                    <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Girl)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Leda)</p></div>
+                                </div>
+                                {voiceProvider === 'gemini' && geminiVoiceName === 'Leda' && <CheckCircle size={20} className="text-amber-500" />}
+                            </button>
+                        </div>
+                    )}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Free Voice (Edge TTS)</h3>
+                        {voices.filter(v => v.gender === selectedGender).map(voice => (
+                            <button key={voice.id} onClick={() => { saveSetting('EDGE_TTS_VOICE', voice.id); setVoiceProvider('edge'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'edge' && currentVoiceId === voice.id ? 'bg-indigo-500/10 border-indigo-500 text-indigo-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'edge' && currentVoiceId === voice.id ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>{selectedGender === 'male' ? '👨' : '👩'}</div>
+                                    <div><span className="text-sm font-bold group-hover:text-white">{voice.name}</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.id}</p></div>
+                                </div>
+                                {voiceProvider === 'edge' && currentVoiceId === voice.id && <CheckCircle size={20} className="text-indigo-500" />}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>

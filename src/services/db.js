@@ -40,6 +40,8 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN selectedFontId TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleColor TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN speed REAL DEFAULT 1.0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN flipped INTEGER DEFAULT 0`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN voiceProvider TEXT DEFAULT 'edge'`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN geminiVoiceName TEXT DEFAULT 'Puck'`); } catch (e) {}
 
 try {
     db.exec(`

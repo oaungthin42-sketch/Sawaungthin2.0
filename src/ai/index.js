@@ -557,3 +557,4 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
         throw err;
     }
 };
+export { generateNarrationTTS_Gemini } from './gemini-tts.js';
