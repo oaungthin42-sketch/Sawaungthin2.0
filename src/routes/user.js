@@ -147,6 +147,7 @@ router.get('/admin/jobs', authMiddleware, adminOnly, (req, res) => {
 });
 
 router.get('/api-key', authMiddleware, (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
         const user = req.user;
         let masked = null;
@@ -178,6 +179,29 @@ router.post('/api-key', authMiddleware, (req, res) => {
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: 'Failed to save API key' });
+    }
+});
+
+router.post('/api-key/test', authMiddleware, async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user.geminiApiKeyEncrypted) {
+            return res.json({ valid: false, error: 'No API key configured.' });
+        }
+        const apiKey = decrypt(user.geminiApiKeyEncrypted);
+        if (!apiKey) {
+            return res.json({ valid: false, error: 'Failed to decrypt API key.' });
+        }
+        
+        // Test connection using the Gemini Models API
+        const response = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        if (response.data && response.data.models) {
+            res.json({ valid: true });
+        } else {
+            res.json({ valid: false, error: 'Invalid response from Gemini API.' });
+        }
+    } catch (e) {
+        res.json({ valid: false, error: e.response?.data?.error?.message || e.message || 'Connection failed' });
     }
 });
 

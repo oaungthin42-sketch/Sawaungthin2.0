@@ -575,7 +575,8 @@ function App() {
   const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
   let selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
   if (voiceProvider === 'gemini') {
-    selectedVoiceName = geminiVoiceName === 'Puck' ? 'Pro Voice (Boy)' : 'Pro Voice (Girl)';
+    const boyVoices = ['Puck', 'Charon', 'Fenrir', 'Orion', 'Apollo'];
+    selectedVoiceName = boyVoices.includes(geminiVoiceName) ? `Pro Voice (Boy - ${geminiVoiceName})` : `Pro Voice (Girl - ${geminiVoiceName})`;
   }
 
   if (authLoading) {
@@ -1150,13 +1151,23 @@ function App() {
                         <div className="space-y-3">
                             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Pro Voice (Admin Only)</h3>
                             {selectedGender === 'male' && (
-                                <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Puck'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
-                                    <div className="flex items-center gap-4">
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === 'Puck' ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👨</div>
-                                        <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Boy)</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">Gemini 2.5 Flash TTS (Puck)</p></div>
-                                    </div>
-                                    {voiceProvider === 'gemini' && geminiVoiceName === 'Puck' && <CheckCircle size={20} className="text-amber-500" />}
-                                </button>
+                                <div className="space-y-2">
+                                    {[
+                                        { name: 'Puck', desc: 'Gemini 2.5 Flash TTS (Puck)' },
+                                        { name: 'Charon', desc: 'Gemini 2.5 Flash TTS (Charon)' },
+                                        { name: 'Fenrir', desc: 'Gemini 2.5 Flash TTS (Fenrir)' },
+                                        { name: 'Orion', desc: 'Gemini 2.5 Flash TTS (Orion)' },
+                                        { name: 'Apollo', desc: 'Gemini 2.5 Flash TTS (Apollo)' }
+                                    ].map((voice) => (
+                                        <button key={voice.name} onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName(voice.name); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === voice.name ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                                            <div className="flex items-center gap-4">
+                                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${voiceProvider === 'gemini' && geminiVoiceName === voice.name ? 'bg-amber-500 text-white' : 'bg-gray-800'}`}>👨</div>
+                                                <div><span className="text-sm font-bold group-hover:text-white">Pro Voice (Boy - {voice.name})</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.desc}</p></div>
+                                            </div>
+                                            {voiceProvider === 'gemini' && geminiVoiceName === voice.name && <CheckCircle size={20} className="text-amber-500" />}
+                                        </button>
+                                    ))}
+                                </div>
                             )}
                             {selectedGender === 'female' && (
                                 <button onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName('Leda'); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === 'Leda' ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
