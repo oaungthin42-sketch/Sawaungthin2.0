@@ -9,7 +9,8 @@ import {
     Shield,
     List,
     Settings,
-    X
+    X,
+    Download
 } from 'lucide-react';
 
 interface NavItem {
@@ -22,6 +23,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'tool', label: 'Video Tool', icon: Video },
+    { id: 'recent', label: 'Recent Downloads', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare },
     { id: 'profile', label: 'Profile', icon: User },

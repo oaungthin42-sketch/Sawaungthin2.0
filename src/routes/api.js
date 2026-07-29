@@ -130,7 +130,7 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
         const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
 
         if (provider === 'gemini') {
-            const geminiApiKey = decrypt(getSetting('GEMINI_API_KEY')) || process.env.GEMINI_API_KEY;
+            const geminiApiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
             if (!geminiApiKey) {
                 return res.status(400).json({ error: 'Gemini API Key is not configured' });
             }

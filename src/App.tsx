@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AdminPage } from './components/AdminPage';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
+import { RecentDownloads } from './components/RecentDownloads';
 import { FeedbackForm } from './components/FeedbackForm';
 import { CreditGauge } from './components/CreditGauge';
 import { 
@@ -527,6 +528,14 @@ function App() {
           clearInterval(interval);
           setAnalysisData(job.result);
           setStatus('complete');
+          
+          try {
+             let recentJobs = JSON.parse(localStorage.getItem('superclick_recent_jobs') || '[]');
+             if (!recentJobs.includes(id)) {
+                 recentJobs = [id, ...recentJobs].slice(0, 20);
+                 localStorage.setItem('superclick_recent_jobs', JSON.stringify(recentJobs));
+             }
+          } catch(e) {}
         } else if (job.status === 'error') {
           clearInterval(interval);
           setStatus('error');
@@ -654,7 +663,12 @@ function App() {
                     userName={user?.name || ''} 
                     userRole={user?.role || 'user'}
                     onStartNew={() => setActiveView('tool')} 
+                    onViewRecent={() => setActiveView('recent')}
                  />;
+      }
+      
+      if (activeView === 'recent') {
+          return <RecentDownloads />;
       }
 
       if (activeView === 'feedback') {
@@ -1095,6 +1109,7 @@ function App() {
   const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: Menu },
     { id: 'tool', label: 'Video Tool', icon: Play },
+    { id: 'recent', label: 'Recent Downloads', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
   ];
 

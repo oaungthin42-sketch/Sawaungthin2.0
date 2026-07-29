@@ -7,9 +7,10 @@ interface DashboardProps {
     userName: string;
     userRole: string;
     onStartNew: () => void;
+    onViewRecent: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, userRole, onStartNew }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, userRole, onStartNew, onViewRecent }) => {
     return (
         <div className="space-y-8 animate-in fade-in duration-700">
             {/* Welcome Banner */}
@@ -77,18 +78,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, userRol
                         <History className="w-5 h-5 text-gray-400" />
                         <h3 className="font-bold text-white">Recent Projects</h3>
                     </div>
-                    <button className="text-sm text-gray-500 hover:text-white transition-colors">View All</button>
+                    <button onClick={onViewRecent} className="text-sm text-gray-500 hover:text-white transition-colors">View All</button>
                 </div>
                 <div className="p-12 text-center text-gray-500 space-y-4">
                     <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Video className="w-8 h-8 opacity-20" />
                     </div>
-                    <p className="font-medium">No recent projects to display yet.</p>
+                    <p className="font-medium">Recent projects are tracked in your downloads menu.</p>
                     <button 
-                        onClick={onStartNew}
+                        onClick={onViewRecent}
                         className="text-indigo-400 font-bold flex items-center gap-2 mx-auto hover:gap-3 transition-all"
                     >
-                        Create your first video <ArrowRight className="w-4 h-4" />
+                        Go to Recent Downloads <ArrowRight className="w-4 h-4" />
                     </button>
                 </div>
             </div>
