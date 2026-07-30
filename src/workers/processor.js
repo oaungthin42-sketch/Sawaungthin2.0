@@ -58,6 +58,7 @@ export const processRecapPipeline = async (jobId) => {
     let state = { warnings: [] };
     if (fs.existsSync(statePath)) {
         try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
+    }
 
     const saveState = () => fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
@@ -870,6 +871,7 @@ export const processRecapPipeline = async (jobId) => {
             }
         }
         advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
+    }
 
         // 11.7 SUBTITLE BURN
         if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
@@ -1072,4 +1074,5 @@ export const processRecapPipeline = async (jobId) => {
             console.error(`[Job ${jobId}] Cleanup Error:`, cleanupErr);
         } finally {
         }
+    }
 };

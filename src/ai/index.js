@@ -102,6 +102,7 @@ export const transcribeWav = async (wavPath, cachePath) => {
 };
 
 
+export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, originalTranscript) => {
     try {
         console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
         const cacheMetaPath = cachePath + '.meta.json';

@@ -3,7 +3,7 @@ import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import { createJob, getJob, updateJob, setJobKeys } from '../services/jobManager.js';
+import { createJob, getJob, updateJob } from '../services/jobManager.js';
 import { addJobToQueue } from '../services/queue.js';
 import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../services/settings.js';
 import { VOICES, getVoiceConfig } from '../ai/voices.js';
@@ -67,7 +67,7 @@ router.get('/voices', authMiddleware, (req, res) => {
 router.post('/preview-voice', authMiddleware, async (req, res) => {
     const { voiceId } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });
-    
+
     if (req.user.role !== 'admin' && req.user.credits <= 0) {
         return res.status(400).json({ error: 'Insufficient Credits' });
     }
@@ -75,35 +75,36 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
     try {
         const config = getVoiceConfig(voiceId);
         if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
-            
-            const ttsClient = new EdgeTTS({ 
-                voice: config.edgeVoice,
-                pitch: config.pitch,
-                rate: config.rate
+
+        const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
+
+        const ttsClient = new EdgeTTS({
+            voice: config.edgeVoice,
+            pitch: config.pitch,
+            rate: config.rate
+        });
+
+        const callPromise = ttsClient.call(previewText);
+        let timeoutId;
+        let resAudio;
+        try {
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 15000);
             });
-            
-            const callPromise = ttsClient.call(previewText);
-            let timeoutId;
-            let resAudio;
-            try {
-                const timeoutPromise = new Promise((_, reject) => {
-                    timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 15000);
-                });
-                resAudio = await Promise.race([callPromise, timeoutPromise]);
-            } finally {
-                clearTimeout(timeoutId);
-            }
-            
-            if (!resAudio.data || resAudio.data.length === 0) {
-                throw new Error("Received empty audio data");
-            }
-            
-            res.set({
-                'Content-Type': 'audio/mpeg',
-                'Content-Length': resAudio.data.length
-            });
-            res.send(resAudio.data);
+            resAudio = await Promise.race([callPromise, timeoutPromise]);
+        } finally {
+            clearTimeout(timeoutId);
         }
+
+        if (!resAudio.data || resAudio.data.length === 0) {
+            throw new Error("Received empty audio data");
+        }
+
+        res.set({
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': resAudio.data.length
+        });
+        res.send(resAudio.data);
     } catch(err) {
         console.error("[API] Preview Voice Error:", err);
         res.status(500).json({ error: 'Failed to generate preview audio' });

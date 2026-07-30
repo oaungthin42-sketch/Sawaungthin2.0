@@ -1,15 +1,5 @@
 import db from './db.js';
 
-
-
-};
-
-
-};
-
-
-};
-
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
         INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId)
