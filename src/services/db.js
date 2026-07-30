@@ -41,7 +41,6 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleColor TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN speed REAL DEFAULT 1.0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN flipped INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN voiceProvider TEXT DEFAULT 'edge'`); } catch (e) {}
-try { db.exec(`ALTER TABLE jobs ADD COLUMN geminiVoiceName TEXT DEFAULT 'Puck'`); } catch (e) {}
 
 try {
     db.exec(`
@@ -70,7 +69,6 @@ try {
     console.error("Error creating users table", e);
 }
 
-try { db.exec(`ALTER TABLE users ADD COLUMN geminiApiKeyEncrypted TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN userId TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN last_login DATETIME`); } catch (e) {}

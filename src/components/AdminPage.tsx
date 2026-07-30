@@ -63,7 +63,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
-    const [settingsMeta, setSettingsMeta] = useState<Record<string, any>>({});
 
     const fetchData = async () => {
         setLoading(true);
@@ -84,7 +83,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
             } else if (activeTab === 'settings') {
                 const res = await axios.get('/api/settings');
                 const mapped: Record<string, string> = {};
-                setSettingsMeta(res.data);
                 Object.entries(res.data).forEach(([key, data]: [string, any]) => {
                     if (data.value !== undefined) {
                         mapped[key] = data.value;
@@ -475,18 +473,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <div className="p-8 space-y-6 max-w-2xl">
                                     <h2 className="text-xl font-bold text-white">စနစ် ဆက်တင်များ</h2>
                                     <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-sm font-bold text-gray-400 mb-2">Gemini API Key</label>
-                                            <input 
-                                                type="password" 
-                                                value={settingsValues.GEMINI_API_KEY || ''} 
-                                                onChange={e => setSettingsValues({...settingsValues, GEMINI_API_KEY: e.target.value})} 
-                                                placeholder={settingsMeta.GEMINI_API_KEY?.configured && settingsMeta.GEMINI_API_KEY.masked 
-                                                    ? `လက်ရှိ: ${settingsMeta.GEMINI_API_KEY.masked} (ဆက်ထားရန် အလွတ်ထားပါ၊ သို့မဟုတ် အသစ်ထည့်ပါ)` 
-                                                    : "AI လုပ်ဆောင်ချက်များသုံးရန် Gemini API Key ထည့်ပါ"}
-                                                className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500" 
-                                            />
-                                        </div>
                                         <button 
                                             onClick={async () => {
                                                 try {

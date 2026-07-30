@@ -52,64 +52,10 @@ const handleUpload = (req, res, next) => {
 router.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 router.get('/diagnostic', async (req, res) => {
-    const key = (getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY) || '';
-    const maskedKey = key.length > 8 ? `${key.substring(0, 4)}...${key.substring(key.length - 4)}` : (key ? 'too-short' : 'missing');
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    
     const diagData = {
-        model,
-        hasKey: !!key,
-        maskedKey,
         serverTime: new Date().toISOString(),
-        testRequestSuccess: false
+        testRequestSuccess: true
     };
-
-    if (key) {
-        try {
-            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-            const payload = {
-                contents: [{ role: 'user', parts: [{ text: 'Hello, this is a test.' }] }]
-            };
-            
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            diagData.actualHttpStatus = response.status;
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                diagData.actualErrorMessage = errorText;
-                
-                try {
-                    const errObj = JSON.parse(errorText);
-                    if (errObj.error) {
-                        diagData.actualErrorCode = errObj.error.code;
-                        diagData.actualErrorStatus = errObj.error.status;
-                        
-                        if (errObj.error.details) {
-                            const quotaFail = errObj.error.details.find(d => d['@type'] === 'type.googleapis.com/google.rpc.QuotaFailure');
-                            if (quotaFail && quotaFail.violations && quotaFail.violations.length > 0) {
-                                diagData.quotaId = quotaFail.violations[0].quotaMetric || 'unknown';
-                            }
-                            
-                            const retryInfo = errObj.error.details.find(d => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
-                            if (retryInfo) {
-                                diagData.retryDelay = retryInfo.retryDelay;
-                            }
-                        }
-                    }
-                } catch(e) {}
-            } else {
-                diagData.testRequestSuccess = true;
-            }
-        } catch(e) {
-            diagData.actualErrorMessage = e.message;
-        }
-    }
-    
     res.json(diagData);
 });
 
@@ -119,7 +65,7 @@ router.get('/voices', authMiddleware, (req, res) => {
 });
 
 router.post('/preview-voice', authMiddleware, async (req, res) => {
-    const { voiceId, provider = 'edge' } = req.body;
+    const { voiceId } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });
     
     if (req.user.role !== 'admin' && req.user.credits <= 0) {
@@ -127,66 +73,8 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
     }
 
     try {
-        const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
-
-        if (provider === 'gemini') {
-            const geminiApiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
-            if (!geminiApiKey) {
-                return res.status(400).json({ error: 'Gemini API Key is not configured' });
-            }
-            
-            const { GoogleGenAI } = await import('@google/genai');
-            const ai = new GoogleGenAI({ apiKey: geminiApiKey });
-            
-            const genAiCall = ai.models.generateContent({
-                model: 'gemini-2.5-flash-preview-tts',
-                contents: previewText,
-                config: {
-                    responseModalities: ["AUDIO"],
-                    speechConfig: {
-                        voiceConfig: {
-                            prebuiltVoiceConfig: {
-                                voiceName: voiceId
-                            }
-                        }
-                    }
-                }
-            });
-            
-            const response = await genAiCall;
-            const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            if (audioData) {
-                const pcmBuffer = Buffer.from(audioData, 'base64');
-                const header = Buffer.alloc(44);
-                header.write('RIFF', 0);
-                header.writeUInt32LE(36 + pcmBuffer.length, 4);
-                header.write('WAVE', 8);
-                header.write('fmt ', 12);
-                header.writeUInt32LE(16, 16);
-                header.writeUInt16LE(1, 20);
-                header.writeUInt16LE(1, 22);
-                header.writeUInt32LE(24000, 24);
-                header.writeUInt32LE(24000 * 2, 28);
-                header.writeUInt16LE(2, 32);
-                header.writeUInt16LE(16, 34);
-                header.write('data', 36);
-                header.writeUInt32LE(pcmBuffer.length, 40);
-                
-                const wavBuffer = Buffer.concat([header, pcmBuffer]);
-                res.set({
-                    'Content-Type': 'audio/wav',
-                    'Content-Length': wavBuffer.length
-                });
-                return res.send(wavBuffer);
-            } else {
-                console.error("[TTS DEBUG] No audio data. Full response:", JSON.stringify(response, null, 2));
-                console.error("[TTS DEBUG] Candidate finishReason:", response.candidates?.[0]?.finishReason);
-                console.error("[TTS DEBUG] Safety ratings:", response.candidates?.[0]?.safetyRatings);
-                throw new Error("No audio data returned from Gemini API");
-            }
-        } else {
-            const config = getVoiceConfig(voiceId);
-            if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
+        const config = getVoiceConfig(voiceId);
+        if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
             
             const ttsClient = new EdgeTTS({ 
                 voice: config.edgeVoice,
@@ -251,12 +139,7 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     }
 
     const user = req.user;
-    const geminiApiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
     
-    if (!geminiApiKey) {
-        return res.status(400).json({ error: 'System configuration error: Gemini API Key is missing. Please contact admin.' });
-    }
-
     // Credits check
     if (user.role !== 'admin' && user.credits <= 0) {
         if (req.file && fs.existsSync(req.file.path)) {
@@ -272,8 +155,6 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
     const subtitleColor = req.body.subtitleColor || "white";
     const speed = parseFloat(req.body.speed) || 1.0;
     const flipped = req.body.flipped === 'true' ? 1 : 0;
-    const voiceProvider = req.body.voiceProvider || 'edge';
-    const geminiVoiceName = req.body.geminiVoiceName || 'Puck';
 
     // Transactional-ish update (SQLite is simple)
     if (user.role !== 'admin') {
@@ -290,11 +171,8 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
         subtitleColor: subtitleColor,
         speed: speed,
         flipped: flipped,
-        userId: user.id,
-        voiceProvider: voiceProvider,
-        geminiVoiceName: geminiVoiceName
+        userId: user.id
     });
-    setJobKeys(jobId, { geminiApiKey });
     
     res.json({ jobId });
 
@@ -325,12 +203,7 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      if (!videoFile) return res.status(400).json({ error: 'Video file required' });
      
      const user = req.user;
-     const geminiApiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
      
-     if (!geminiApiKey) {
-         return res.status(400).json({ error: 'System configuration error: Gemini API Key is missing. Please contact admin.' });
-     }
-
      // Credits check
      if (user.role !== 'admin' && user.credits <= 0) {
          if (req.file && fs.existsSync(req.file.path)) {
@@ -346,8 +219,8 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
-     const voiceProvider = req.body.voiceProvider || 'edge';
-     const geminiVoiceName = req.body.geminiVoiceName || 'Puck';
+     
+     
 
      // Transactional-ish update (SQLite is simple)
      if (user.role !== 'admin') {
@@ -365,10 +238,10 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
          speed: speed,
          flipped: flipped,
          userId: user.id,
-         voiceProvider: voiceProvider,
-         geminiVoiceName: geminiVoiceName
+         
+         
      });
-     setJobKeys(jobId, { geminiApiKey });
+     
      res.json({ jobId });
      
      addJobToQueue(jobId);

@@ -6,7 +6,6 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import { EdgeTTS } from 'node-edge-tts';
 import { getVoiceConfig } from './voices.js';
-import { getTranslationSystemInstruction } from './translation.js';
 import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { fileURLToPath } from 'url';
@@ -103,116 +102,6 @@ export const transcribeWav = async (wavPath, cachePath) => {
 };
 
 
-export const translateWithGemini = async (originalTranscript, cachePath, apiKey = null) => {
-    if (!originalTranscript || originalTranscript.length === 0) return [];
-    
-    if (cachePath && fs.existsSync(cachePath)) {
-        try {
-            const cachedData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-            if (cachedData.length === originalTranscript.length) {
-                return cachedData;
-            }
-        } catch(e) {}
-    }
-    
-    if (!apiKey) {
-        throw new Error("Gemini API key is required for translation.");
-    }
-    
-    if (apiKey === 'bypass') return originalTranscript;
-    
-    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    
-    const systemInstructionText = getTranslationSystemInstruction();
-    
-    const BATCH_SIZE = 40;
-    const finalResult = [];
-    
-    for (let batchStart = 0; batchStart < originalTranscript.length; batchStart += BATCH_SIZE) {
-        const batch = originalTranscript.slice(batchStart, batchStart + BATCH_SIZE);
-        const inputPayload = batch.map((t, i) => ({
-            index: batchStart + i,
-            text: t.text
-        }));
-        
-        const maxRetries = 3;
-        let attempt = 0;
-        let delay = 1000;
-        let batchSuccess = false;
-        
-        while (attempt < maxRetries && !batchSuccess) {
-            attempt++;
-            try {
-                const response = await axios.post(url, {
-                    system_instruction: {
-                        parts: [{ text: systemInstructionText }]
-                    },
-                    contents: [{
-                        role: "user",
-                        parts: [{ text: JSON.stringify(inputPayload) }]
-                    }],
-                    generationConfig: {
-                        response_mime_type: "application/json",
-                        temperature: 0.2
-                    }
-                }, {
-                    headers: { 'Content-Type': 'application/json' },
-                    timeout: 120000
-                });
-                
-                const textResponse = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (!textResponse) throw new Error("Empty response from Gemini.");
-                
-                let parsed;
-                try {
-                    parsed = JSON.parse(textResponse);
-                } catch (e) {
-                    throw new Error("Invalid JSON response from Gemini.");
-                }
-                
-                if (!Array.isArray(parsed)) throw new Error("Gemini response is not an array.");
-                if (parsed.length !== batch.length) {
-                    throw new Error(`Gemini response length (${parsed.length}) does not match input batch length (${batch.length}).`);
-                }
-                
-                for (let i = 0; i < batch.length; i++) {
-                    const globalIndex = batchStart + i;
-                    const item = parsed.find(p => p.index === globalIndex);
-                    if (!item || typeof item.text !== 'string') {
-                        throw new Error(`Missing or invalid translation for chunk ${globalIndex}.`);
-                    }
-                    finalResult.push({
-                        timestamp: originalTranscript[globalIndex].timestamp,
-                        text: item.text
-                    });
-                }
-                batchSuccess = true;
-            } catch (err) {
-                let errorMsg = err.message;
-                if (err.response && err.response.status === 404) {
-                    errorMsg = `Model '${modelName}' not found or unsupported (HTTP 404). Please configure a valid GEMINI_MODEL.`;
-                }
-                console.error(`[AI] Gemini translation attempt ${attempt} failed for batch ${batchStart}: ${errorMsg}`);
-                
-                const isTransient = !err.response || err.response.status >= 500 || err.response.status === 429 || err.code === 'ECONNABORTED';
-                if (attempt === maxRetries || !isTransient || (err.response && err.response.status === 404)) {
-                    throw new Error(`Gemini translation failed at batch ${batchStart}. ${errorMsg}`);
-                }
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2;
-            }
-        }
-    }
-    
-    if (cachePath) {
-        fs.writeFileSync(cachePath, JSON.stringify(finalResult, null, 2));
-    }
-    
-    return finalResult;
-};
-
-export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _ignoredOriginalTranscript) => {
     try {
         console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
         const cacheMetaPath = cachePath + '.meta.json';
@@ -557,4 +446,4 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, _
         throw err;
     }
 };
-export { generateNarrationTTS_Gemini } from './gemini-tts.js';
+

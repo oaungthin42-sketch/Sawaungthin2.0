@@ -1,10 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer-core';
-import { updateJob, getJob, getJobKeys, clearJobKeys } from '../services/jobManager.js';
+import { updateJob, getJob } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { transcribeWav, computeSimilarity, translateWithGemini, generateNarrationTTS, generateNarrationTTS_Gemini } from '../ai/index.js';
+import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
 import db from '../services/db.js';
 
@@ -42,10 +42,9 @@ export const processRecapPipeline = async (jobId) => {
     let job = getJob(jobId);
     if (!job || !job.videoPath) throw new Error("Invalid job data: missing videoPath");
 
-    const { geminiApiKey } = getJobKeys(jobId);
-    if (!geminiApiKey) {
-        throw new Error("Job interrupted due to server restart. Credentials lost. Please resubmit the job with your API keys.");
-    }
+    
+    
+        
 
     const tmpDir = path.join(process.cwd(), 'src', 'tmp');
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
@@ -59,7 +58,6 @@ export const processRecapPipeline = async (jobId) => {
     let state = { warnings: [] };
     if (fs.existsSync(statePath)) {
         try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {}
-    }
 
     const saveState = () => fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
@@ -118,7 +116,7 @@ export const processRecapPipeline = async (jobId) => {
         const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
             advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
-            state.translatedTranscript = await translateWithGemini(state.originalTranscript, translatedTranscriptCache, geminiApiKey);
+            state.translatedTranscript = state.originalTranscript; // No longer translating
             saveState();
         }
 
@@ -132,13 +130,8 @@ export const processRecapPipeline = async (jobId) => {
                 scene_end: t.timestamp[1]
             }));
 
-            if (job.voiceProvider === 'gemini') {
-                const geminiVoice = job.geminiVoiceName || 'Puck';
-                state.ttsAudioPath = await generateNarrationTTS_Gemini(mappedTranscript, ttsAudioCache, geminiVoice, geminiApiKey);
-            } else {
-                const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
-                state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
-            }
+            const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
+            state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
             saveState();
         }
 
@@ -877,7 +870,6 @@ export const processRecapPipeline = async (jobId) => {
             }
         }
         advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
-    }
 
         // 11.7 SUBTITLE BURN
         if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
@@ -1079,7 +1071,5 @@ export const processRecapPipeline = async (jobId) => {
         } catch (cleanupErr) {
             console.error(`[Job ${jobId}] Cleanup Error:`, cleanupErr);
         } finally {
-            clearJobKeys(jobId);
         }
-    }
 };

@@ -104,7 +104,7 @@ export const deleteSetting = (key) => {
 };
 
 export const getAllSettingsMasked = () => {
-    const keys = ['GEMINI_API_KEY', 'EDGE_TTS_VOICE', 'DIALOGUE_MODE', 'COLLOQUIAL_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
+    const keys = ['EDGE_TTS_VOICE', 'DIALOGUE_MODE', 'COLLOQUIAL_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER'];
     const result = {};
     for (const k of keys) {
         const val = getSetting(k);

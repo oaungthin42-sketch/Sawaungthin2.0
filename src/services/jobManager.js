@@ -1,23 +1,19 @@
 import db from './db.js';
 
-const jobKeys = new Map();
 
-export const setJobKeys = (id, keys) => {
-    jobKeys.set(id, keys);
+
 };
 
-export const getJobKeys = (id) => {
-    return jobKeys.get(id) || {};
+
 };
 
-export const clearJobKeys = (id) => {
-    jobKeys.delete(id);
+
 };
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, voiceProvider, geminiVoiceName)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId)
+        VALUES (?)
     `);
     stmt.run(
         id, 
@@ -35,8 +31,6 @@ export const createJob = (id, data) => {
         data.speed !== undefined ? data.speed : 1.0,
         data.flipped !== undefined ? data.flipped : 0,
         data.userId || null,
-        data.voiceProvider || 'edge',
-        data.geminiVoiceName || 'Puck'
     );
     return getJob(id);
 };
