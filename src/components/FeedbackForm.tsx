@@ -40,8 +40,8 @@ export const FeedbackForm: React.FC<FeedbackFormProps> = ({ jobId, onSuccess }) 
                 <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto">
                     <CheckCircle2 className="w-8 h-8" />
                 </div>
-                <h3 className="text-xl font-bold text-white">Thank you for your feedback!</h3>
-                <p className="text-gray-400 text-sm max-w-sm mx-auto">Your input helps us improve the AI processing quality for everyone.</p>
+                <h3 className="text-xl font-bold text-white">အကြံပြုချက်ပေးရန် ကျေးဇူးတင်ပါသည်!</h3>
+                <p className="text-gray-400 text-sm max-w-sm mx-auto">သင့်အကြံပြုချက်သည် ကျွန်ုပ်တို့၏ AI ကို ပိုမိုကောင်းမွန်အောင် ကူညီပေးပါသည်။</p>
             </div>
         );
     }
@@ -49,8 +49,8 @@ export const FeedbackForm: React.FC<FeedbackFormProps> = ({ jobId, onSuccess }) 
     return (
         <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-6">
             <div className="space-y-1 text-center">
-                <h3 className="text-xl font-bold text-white">Rate the Processing Quality</h3>
-                <p className="text-gray-400 text-sm">How satisfied are you with the Burmese reconstruction?</p>
+                <h3 className="text-xl font-bold text-white">အရည်အသွေးကို အမှတ်ပေးရန်</h3>
+                <p className="text-gray-400 text-sm">မြန်မာအသံထပ်မှုအပေါ် မည်မျှကျေနပ်မှုရှိပါသလဲ?</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -76,11 +76,11 @@ export const FeedbackForm: React.FC<FeedbackFormProps> = ({ jobId, onSuccess }) 
                 </div>
 
                 <div className="space-y-2">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest px-1">Any additional comments? (Optional)</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest px-1">အခြား မှတ်ချက်များ (ရွေးချယ်နိုင်သည်)</label>
                     <textarea 
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
-                        placeholder="Tell us what you liked or what could be better..."
+                        placeholder="သင်နှစ်သက်သောအရာ သို့မဟုတ် ပိုကောင်းသင့်သောအရာကို ပြောပြပါ..."
                         className="w-full bg-gray-950 border border-gray-800 rounded-2xl p-4 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[100px] transition-all"
                     />
                 </div>
@@ -91,7 +91,7 @@ export const FeedbackForm: React.FC<FeedbackFormProps> = ({ jobId, onSuccess }) 
                     className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-95 shadow-xl shadow-indigo-900/20"
                 >
                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                    Submit Feedback
+                    အကြံပြုမည်
                 </button>
             </form>
         </div>

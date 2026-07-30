@@ -190,8 +190,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <Shield className="w-8 h-8" />
                             </div>
                             <div>
-                                <h1 className="text-3xl font-bold font-display tracking-tight">Admin Console</h1>
-                                <p className="text-gray-500 text-sm font-medium">System management and oversight</p>
+                                <h1 className="text-3xl font-bold font-display tracking-tight">စီမံခန့်ခွဲသူ ဧရိယာ</h1>
+                                <p className="text-gray-500 text-sm font-medium">စနစ် စီမံခန့်ခွဲမှု</p>
                             </div>
                         </div>
                     </div>
@@ -207,31 +207,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                             onClick={() => setActiveTab('users')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
-                            <Users className="w-4 h-4" /> Users
+                            <Users className="w-4 h-4" /> အသုံးပြုသူများ
                         </button>
                         <button 
                             onClick={() => setActiveTab('jobs')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'jobs' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
-                            <List className="w-4 h-4" /> Jobs
+                            <List className="w-4 h-4" /> လုပ်ငန်းများ
                         </button>
                         <button 
                             onClick={() => setActiveTab('feedback')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'feedback' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
-                            <MessageSquare className="w-4 h-4" /> Feedback
+                            <MessageSquare className="w-4 h-4" /> မှတ်ချက်များ
                         </button>
                         <button 
                             onClick={() => setActiveTab('payments')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'payments' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
-                            <CreditCard className="w-4 h-4" /> Payments
+                            <CreditCard className="w-4 h-4" /> ငွေပေးချေမှုများ
                         </button>
                         <button 
                             onClick={() => setActiveTab('settings')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
-                            <Settings className="w-4 h-4" /> Settings
+                            <Settings className="w-4 h-4" /> ဆက်တင်များ
                         </button>
                     </div>
                 </div>
@@ -240,7 +240,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-indigo-400 transition-colors" />
                     <input 
                         type="text" 
-                        placeholder={`Search ${activeTab}...`} 
+                        placeholder="ရှာဖွေရန်..." 
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="bg-gray-900 border border-gray-800 rounded-2xl pl-12 pr-6 py-3 w-full focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
@@ -250,7 +250,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-20 gap-4">
                         <Loader2 className="w-12 h-12 animate-spin text-indigo-500" />
-                        <p className="text-gray-500 font-medium">Syncing with server...</p>
+                        <p className="text-gray-500 font-medium">ဆာဗာနှင့် ချိတ်ဆက်နေသည်...</p>
                     </div>
                 ) : (
                     <div className="bg-gray-900 border border-gray-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -259,11 +259,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <table className="w-full text-left">
                                     <thead>
                                         <tr className="bg-gray-950/50 border-b border-gray-800">
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">အသုံးပြုသူ</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">အခြေအနေ</th>
                                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Credits</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Last Login</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">နောက်ဆုံး ဝင်ရောက်ချိန်</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">လုပ်ဆောင်ချက်များ</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-800">
@@ -273,7 +273,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                     <div className="flex flex-col">
                                                         <span className="font-semibold text-white group-hover:text-indigo-300 transition-colors">{user.name}</span>
                                                         <span className="text-xs text-gray-500 font-mono">{user.email}</span>
-                                                        <span className="text-[10px] text-gray-600 mt-1 uppercase font-bold tracking-tighter">Joined {new Date(user.created_at).toLocaleDateString()}</span>
+                                                        <span className="text-[10px] text-gray-600 mt-1 uppercase font-bold tracking-tighter">အကောင့်ဖွင့်ရက် {new Date(user.created_at).toLocaleDateString()}</span>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
@@ -308,12 +308,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className="text-xs font-medium text-gray-400">
-                                                        {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                                                        {user.last_login ? new Date(user.last_login).toLocaleString() : 'မရှိပါ'}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
                                                     <button onClick={() => toggleStatus(user)} disabled={user.role === 'admin'} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none ${user.status === 'active' ? 'bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white shadow-lg shadow-red-900/20' : 'bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white shadow-lg shadow-green-900/20'}`}>
-                                                        {user.status === 'active' ? <><UserMinus className="w-4 h-4" /> SUSPEND</> : <><UserCheck className="w-4 h-4" /> ACTIVATE</>}
+                                                        {user.status === 'active' ? <><UserMinus className="w-4 h-4" /> ပိတ်ရန်</> : <><UserCheck className="w-4 h-4" /> ဖွင့်ရန်</>}
                                                     </button>
                                                 </td>
                                             </tr>
@@ -326,9 +326,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <table className="w-full text-left">
                                     <thead>
                                         <tr className="bg-gray-950/50 border-b border-gray-800">
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Job / User</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Date</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">လုပ်ငန်း / အသုံးပြုသူ</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">အခြေအနေ</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">ရက်စွဲ</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-800">
@@ -336,7 +336,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                             <tr key={job.id} className="hover:bg-gray-800/30 transition-colors group">
                                                 <td className="px-6 py-4">
                                                     <div className="flex flex-col">
-                                                        <span className="font-semibold text-white truncate max-w-xs">{job.originalFilename || 'Untitled Video'}</span>
+                                                        <span className="font-semibold text-white truncate max-w-xs">{job.originalFilename || 'အမည်မရှိသော ဗီဒီယို'}</span>
                                                         <span className="text-xs text-gray-400">{job.userName} ({job.userEmail})</span>
                                                         <span className="text-[10px] text-gray-600 mt-1 font-mono">{job.id}</span>
                                                     </div>
@@ -375,17 +375,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                         <span className="text-sm font-bold text-white">{item.userName}</span>
                                                         <span className="text-xs text-gray-500">{item.userEmail}</span>
                                                     </div>
-                                                    <p className="text-gray-300 text-sm leading-relaxed">{item.comment || <span className="italic text-gray-600">No comment provided</span>}</p>
+                                                    <p className="text-gray-300 text-sm leading-relaxed">{item.comment || <span className="italic text-gray-600">မှတ်ချက်မရှိပါ</span>}</p>
                                                     {item.adminReply && (
                                                         <div className="mt-2 p-3 bg-indigo-900/20 border border-indigo-500/20 rounded-xl">
-                                                            <p className="text-xs font-bold text-indigo-400 mb-1">Admin Reply</p>
+                                                            <p className="text-xs font-bold text-indigo-400 mb-1">Admin ပြန်စာ</p>
                                                             <p className="text-sm text-indigo-100">{item.adminReply}</p>
                                                         </div>
                                                     )}
                                                     <div className="text-[10px] text-gray-600 font-mono">Job ID: {item.jobId || 'N/A'}</div>
                                                     <div className="mt-4 flex flex-col gap-2">
                                                         <textarea 
-                                                            placeholder="Write a reply..."
+                                                            placeholder="ပြန်စာရေးရန်..."
                                                             value={replyInputs[item.id] || ''}
                                                             onChange={e => setReplyInputs({ ...replyInputs, [item.id]: e.target.value })}
                                                             className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 resize-none h-20"
@@ -395,7 +395,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                             onClick={() => handleReplyFeedback(item.id)}
                                                             className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
                                                         >
-                                                            Send Reply
+                                                            ပြန်စာပို့ရန်
                                                         </button>
                                                     </div>
                                                 </div>
@@ -406,7 +406,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                         </div>
                                     ))}
                                     {filteredFeedback.length === 0 && (
-                                        <div className="p-12 text-center text-gray-500 italic">No feedback received yet.</div>
+                                        <div className="p-12 text-center text-gray-500 italic">မှတ်ချက်များ မရှိသေးပါ။</div>
                                     )}
                                 </div>
                             )}
@@ -414,10 +414,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <table className="w-full text-left">
                                     <thead>
                                         <tr className="bg-gray-950/50 border-b border-gray-800">
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Slip</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">အသုံးပြုသူ</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">ဖြတ်ပိုင်း</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">အခြေအနေ</th>
+                                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">လုပ်ဆောင်ချက်</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-800">
@@ -431,7 +431,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <a href={req.slipImagePath} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300 text-xs font-bold underline">View Slip</a>
+                                                    <a href={req.slipImagePath} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300 text-xs font-bold underline">ဖြတ်ပိုင်းကြည့်ရန်</a>
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tracking-tight ${req.status === 'approved' ? 'bg-green-500/10 text-green-400' : req.status === 'rejected' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
@@ -452,14 +452,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                                 onClick={() => handleApprovePayment(req.id, creditAmounts[req.id] || 0)}
                                                                 disabled={!creditAmounts[req.id]}
                                                                 className="p-1.5 bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white rounded-lg transition-all disabled:opacity-50 disabled:pointer-events-none"
-                                                                title="Approve"
+                                                                title="အတည်ပြုရန်"
                                                             >
                                                                 <Check className="w-4 h-4" />
                                                             </button>
                                                             <button 
                                                                 onClick={() => handleRejectPayment(req.id)}
                                                                 className="p-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all"
-                                                                title="Reject"
+                                                                title="ပယ်ချရန်"
                                                             >
                                                                 <X className="w-4 h-4" />
                                                             </button>
@@ -473,7 +473,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                             )}
                             {activeTab === 'settings' && (
                                 <div className="p-8 space-y-6 max-w-2xl">
-                                    <h2 className="text-xl font-bold text-white">System Settings</h2>
+                                    <h2 className="text-xl font-bold text-white">စနစ် ဆက်တင်များ</h2>
                                     <div className="space-y-4">
                                         <div>
                                             <label className="block text-sm font-bold text-gray-400 mb-2">Gemini API Key</label>
@@ -482,8 +482,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                 value={settingsValues.GEMINI_API_KEY || ''} 
                                                 onChange={e => setSettingsValues({...settingsValues, GEMINI_API_KEY: e.target.value})} 
                                                 placeholder={settingsMeta.GEMINI_API_KEY?.configured && settingsMeta.GEMINI_API_KEY.masked 
-                                                    ? `Currently set: ${settingsMeta.GEMINI_API_KEY.masked} (leave blank to keep, or type a new key to replace)` 
-                                                    : "Enter Gemini API Key to enable AI features"}
+                                                    ? `လက်ရှိ: ${settingsMeta.GEMINI_API_KEY.masked} (ဆက်ထားရန် အလွတ်ထားပါ၊ သို့မဟုတ် အသစ်ထည့်ပါ)` 
+                                                    : "AI လုပ်ဆောင်ချက်များသုံးရန် Gemini API Key ထည့်ပါ"}
                                                 className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500" 
                                             />
                                         </div>
@@ -496,15 +496,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                                             await axios.post('/api/settings', { key, value: val });
                                                         }
                                                     }
-                                                    alert('Settings saved successfully');
+                                                    alert('ဆက်တင်များ Save လုပ်ပြီးပါပြီ');
                                                     fetchData();
                                                 } catch (err: any) {
-                                                    alert(err.response?.data?.error || 'Failed to save settings');
+                                                    alert(err.response?.data?.error || 'ဆက်တင်များ Save မလုပ်နိုင်ပါ');
                                                 }
                                             }}
                                             className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
                                         >
-                                            Save Settings
+                                            Save ဆက်တင်များ
                                         </button>
                                     </div>
                                 </div>

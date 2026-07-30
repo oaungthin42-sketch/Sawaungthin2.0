@@ -139,7 +139,7 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
             const ai = new GoogleGenAI({ apiKey: geminiApiKey });
             
             const genAiCall = ai.models.generateContent({
-                model: 'gemini-2.5-flash-tts',
+                model: 'gemini-2.5-flash-preview-tts',
                 contents: previewText,
                 config: {
                     responseModalities: ["AUDIO"],

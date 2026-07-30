@@ -612,8 +612,7 @@ function App() {
         <div className="space-y-4 max-w-md">
           <h1 className="text-5xl font-black tracking-tighter text-white">SuperClick AI</h1>
           <p className="text-gray-400 font-medium leading-relaxed">
-            Professional Burmese AI Reconstruction for your videos. 
-            High-quality recap processing with advanced lip-sync and tone matching.
+            သင့်ဗီဒီယိုများအတွက် အကောင်းဆုံး မြန်မာ AI အသံထပ်ခြင်း။
           </p>
         </div>
 
@@ -624,12 +623,12 @@ function App() {
           
           <div className="flex items-center gap-4 text-gray-700">
             <div className="flex-1 h-px bg-gray-900"></div>
-            <span className="text-[10px] font-bold uppercase tracking-widest">Authorized Access Only</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">ခွင့်ပြုချက်ရှိသူများသာ</span>
             <div className="flex-1 h-px bg-gray-900"></div>
           </div>
 
           <p className="text-[10px] text-gray-600 leading-normal">
-            By signing in, you agree to our Terms of Service and Privacy Policy regarding AI-generated content.
+            ဝင်ရောက်ခြင်းဖြင့် သင်သည် ကျွန်ုပ်တို့၏ စည်းမျဉ်းများနှင့် ကိုယ်ရေးအချက်အလက် မူဝါဒကို သဘောတူပါသည်။
           </p>
         </div>
       </div>
@@ -643,11 +642,11 @@ function App() {
                   <div className="w-24 h-24 bg-red-950 text-red-500 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-red-900/50 mb-4">
                       <CreditCard className="w-12 h-12" />
                   </div>
-                  <h1 className="text-4xl font-black text-white">Insufficient Credits</h1>
+                  <h1 className="text-4xl font-black text-white">Credits မလုံလောက်ပါ</h1>
                   <p className="text-gray-400 max-w-sm">
-                      You need credits to use this tool. Please purchase credits to continue processing videos.
+                      ဤကိရိယာကိုသုံးရန် credits လိုအပ်ပါသည်။ ဗီဒီယိုများ ဆက်လက်လုပ်ဆောင်ရန် credits ဝယ်ယူပါ။
                   </p>
-                  <button onClick={() => setActiveView('credits')} className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-bold transition-all">Buy Credits</button>
+                  <button onClick={() => setActiveView('credits')} className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-bold transition-all">Credits ဝယ်မည်</button>
               </div>
           );
       }
@@ -675,12 +674,12 @@ function App() {
           return (
               <div className="max-w-2xl mx-auto space-y-6">
                   <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl">
-                      <h2 className="text-2xl font-bold text-white mb-6">Send Feedback</h2>
+                      <h2 className="text-2xl font-bold text-white mb-6">မှတ်ချက်ပေးရန်</h2>
                       <FeedbackForm jobId={null} />
                   </div>
                   {userFeedback.length > 0 && (
                       <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-6">
-                          <h2 className="text-xl font-bold text-white mb-6">Your Feedback History</h2>
+                          <h2 className="text-xl font-bold text-white mb-6">သင့်မှတ်ချက်များ</h2>
                           <div className="space-y-4">
                               {userFeedback.map((fb, i) => (
                                   <div key={i} className="p-4 bg-gray-950 border border-gray-800 rounded-2xl">
@@ -692,7 +691,7 @@ function App() {
                                               ))}
                                           </span>
                                       </div>
-                                      <p className="text-sm text-gray-300 mb-4">{fb.comment || <span className="italic text-gray-600">No comment</span>}</p>
+                                      <p className="text-sm text-gray-300 mb-4">{fb.comment || <span className="italic text-gray-600">မှတ်ချက်မရှိပါ</span>}</p>
                                       {fb.adminReply && (
                                           <div className="p-3 bg-indigo-900/20 border border-indigo-500/20 rounded-xl relative">
                                               {fb.isRead === 0 && (
@@ -701,7 +700,7 @@ function App() {
                                                       <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500"></span>
                                                   </span>
                                               )}
-                                              <p className="text-xs font-bold text-indigo-400 mb-1">Admin Reply</p>
+                                              <p className="text-xs font-bold text-indigo-400 mb-1">Admin ပြန်စာ</p>
                                               <p className="text-sm text-indigo-100">{fb.adminReply}</p>
                                           </div>
                                       )}
@@ -718,7 +717,7 @@ function App() {
           return (
               <div className="max-w-2xl mx-auto space-y-6">
                   <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-6">
-                      <h2 className="text-2xl font-bold text-white mb-6">Your Profile</h2>
+                      <h2 className="text-2xl font-bold text-white mb-6">ပရိုဖိုင်</h2>
                       <div className="flex items-center gap-6">
                           <div className="w-20 h-20 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-3xl uppercase">
                               {user?.name?.charAt(0) || '?'}
@@ -732,7 +731,7 @@ function App() {
                           </div>
                       </div>
                       <div className="pt-6 border-t border-gray-800">
-                          <h3 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4">Account Stats</h3>
+                          <h3 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4">အကောင့် အချက်အလက်</h3>
                           <div className="grid grid-cols-2 gap-4">
                               <div className="bg-gray-950 p-4 rounded-xl border border-gray-800">
                                   <p className="text-xs text-gray-500 font-bold uppercase mb-1">Credits</p>
@@ -751,14 +750,14 @@ function App() {
                   <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto">
                       <CreditCard className="w-8 h-8" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white mb-6">Your Credit Balance</h2>
+                  <h2 className="text-2xl font-bold text-white mb-6">သင့် Credit လက်ကျန်</h2>
                   {user?.role === 'admin'
                       ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2">∞ Unlimited</div>
                       : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>)}
-                  <p className="text-gray-400 my-8">Credits are used for processing high-quality Burmese AI reconstructions.</p>
+                  <p className="text-gray-400 my-8">Credits ကို မြန်မာ AI အသံထပ် ဗီဒီယိုများ လုပ်ဆောင်ရာတွင် အသုံးပြုပါသည်။</p>
                   
                   <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
-                      <h3 className="text-lg font-bold text-white">Buy Credits via Bank Transfer</h3>
+                      <h3 className="text-lg font-bold text-white">ဘဏ်မှတစ်ဆင့် Credits ဝယ်ရန်</h3>
                       <div className="p-4 bg-gray-900 rounded-xl whitespace-pre-wrap font-mono text-sm text-gray-300">
                           {getBankInfo()}
                       </div>
@@ -770,7 +769,7 @@ function App() {
                           </div>
                       ) : (
                           <div className="space-y-4 mt-6">
-                              <p className="text-sm text-gray-400">Please transfer the amount and upload your payment slip receipt below:</p>
+                              <p className="text-sm text-gray-400">ငွေလွှဲပြီးပါက အောက်တွင် ငွေလွှဲဖြတ်ပိုင်းကို တင်ပေးပါ။</p>
                               <div className="flex items-center gap-4">
                                   <input 
                                       type="file" 
@@ -785,7 +784,7 @@ function App() {
                                   className="w-full bg-indigo-600 disabled:bg-gray-800 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold transition-all disabled:text-gray-500 flex items-center justify-center gap-2"
                               >
                                   {uploadingSlip && <Loader2 className="w-4 h-4 animate-spin" />}
-                                  Submit Payment Slip
+                                  ငွေလွှဲဖြတ်ပိုင်း တင်မည်
                               </button>
                           </div>
                       )}
@@ -801,10 +800,10 @@ function App() {
               <div className="mb-8">
                 <div className="flex items-center justify-between overflow-x-auto pb-4 custom-scrollbar max-w-5xl mx-auto px-4">
                   {[
-                    "Upload & Voice",
-                    "Blur Mask",
-                    "Subtitles & Fonts",
-                    "Render"
+                    "ဗီဒီယိုနှင့် အသံ",
+                    "Blur ပြုလုပ်ခြင်း",
+                    "စာတန်းနှင့် ဖောင့်များ",
+                    "ထုတ်လုပ်မည်"
                   ].map((stepLabel, i) => {
                     const stepNum = i + 1;
                     const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 4);
@@ -842,9 +841,9 @@ function App() {
                             <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                                 <div className="flex items-center gap-2 mb-2">
                                     <span className="text-lg sm:text-xl">🎬</span>
-                                    <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Upload Video</h3>
+                                    <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">ဗီဒီယို တင်ရန်</h3>
                                 </div>
-                                <p className="text-xs text-gray-500 mb-5">Upload the original video you want to process.</p>
+                                <p className="text-xs text-gray-500 mb-5">သင်လုပ်ဆောင်လိုသော မူရင်းဗီဒီယိုကို တင်ပါ။</p>
                                 
                                 <div className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setVideoFile(e.dataTransfer.files[0]); }} onClick={() => videoInputRef.current?.click()}>
                                     <input type="file" ref={videoInputRef} className="hidden" accept="video/*" onChange={(e) => e.target.files && setVideoFile(e.target.files[0])} />
@@ -864,7 +863,7 @@ function App() {
                                     ) : (
                                         <div className="text-center space-y-3">
                                             <div className="w-16 h-16 bg-gray-900 rounded-2xl flex items-center justify-center mx-auto text-indigo-400"><UploadCloud className="w-8 h-8" /></div>
-                                            <div><p className="text-sm font-bold text-white">Click or drag video here</p><p className="text-[10px] text-gray-600 font-medium">MP4, MOV up to 100MB</p></div>
+                                            <div><p className="text-sm font-bold text-white">ဗီဒီယိုကို ဤနေရာသို့ ဆွဲချပါ သို့မဟုတ် နှိပ်ပါ</p><p className="text-[10px] text-gray-600 font-medium">MP4, MOV 100MB အထိ</p></div>
                                         </div>
                                     )}
                                 </div>
@@ -873,7 +872,7 @@ function App() {
                             {videoFile && (
                               <div className="flex flex-row justify-center gap-6 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
                                   <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
-                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Speed</span>
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">အမြန်နှုန်း</span>
                                       <select value={outputSpeed} onChange={(e) => setOutputSpeed(parseFloat(e.target.value))} className="bg-gray-950 border border-gray-700 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500">
                                           <option value="0.9">0.9x</option>
                                           <option value="1">1.0x</option>
@@ -883,7 +882,7 @@ function App() {
                                       </select>
                                   </div>
                                   <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
-                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Flip Video</span>
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">ဗီဒီယို လှည့်ရန်</span>
                                       <button onClick={() => setIsFlipped(!isFlipped)} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isFlipped ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
                                           <ArrowRight size={14} className={`transition-transform duration-300 ${isFlipped ? 'rotate-180' : ''}`} />
                                       </button>
@@ -895,9 +894,9 @@ function App() {
                                 <div className="flex items-center justify-between mb-4">
                                     <div className="flex items-center gap-2">
                                         <Volume2 className="w-5 h-5 text-indigo-400" />
-                                        <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Recap Voice</h3>
+                                        <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">အသံ ပြောင်းရန်</h3>
                                     </div>
-                                    <button onClick={() => setShowVoiceDrawer(true)} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-400/5 px-2 py-1 rounded-md border border-indigo-500/20">CHANGE VOICE</button>
+                                    <button onClick={() => setShowVoiceDrawer(true)} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-400/5 px-2 py-1 rounded-md border border-indigo-500/20">အသံ ပြောင်းမည်</button>
                                 </div>
                                 <div className="flex items-center gap-4 bg-gray-950/60 p-4 rounded-xl border border-gray-800">
                                     <div className="w-12 h-12 bg-indigo-600/10 rounded-xl flex items-center justify-center text-xl">{selectedGender === 'male' ? '👨' : '👩'}</div>
@@ -917,9 +916,9 @@ function App() {
                         <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-lg sm:text-xl">🌫️</span>
-                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur Mask Editor</h3>
+                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Blur ပြုလုပ်ရန် ကိရိယာ</h3>
                           </div>
-                          <p className="text-xs text-gray-500 mb-6">Hide sensitive areas in the video like faces or watermarks.</p>
+                          <p className="text-xs text-gray-500 mb-6">မျက်နှာ သို့မဟုတ် ရေစာကဲ့သို့သော ဖုံးကွယ်လိုသည့်နေရာများကို ဖုံးကွယ်ပါ။</p>
                           
                           <div className="flex flex-col md:flex-row gap-6">
                             <div className="w-full md:w-2/3">
@@ -957,14 +956,14 @@ function App() {
                               ) : null}
                             </div>
                             <div className="w-full md:w-1/3 flex flex-col gap-4">
-                              <button onClick={addBlurBox} disabled={blurBoxes.length >= 3 || !videoFile} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all">+ Add Blur Box</button>
+                              <button onClick={addBlurBox} disabled={blurBoxes.length >= 3 || !videoFile} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all">+ Blur Box ထည့်ရန်</button>
                               {selectedElement && blurBoxes.find(b => b.id === selectedElement) ? (
                                 <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                                  <label className="text-xs text-gray-400 block mb-2">Blur Strength: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
+                                  <label className="text-xs text-gray-400 block mb-2">Blur ပြင်းအား: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
                                   <input type="range" min="1" max="30" value={blurBoxes.find(b => b.id === selectedElement)?.strength} onChange={(e) => setBlurBoxes(prev => prev.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))} className="w-full accent-indigo-500" />
-                                  <button onClick={() => { setBlurBoxes(prev => prev.filter(b => b.id !== selectedElement)); setSelectedElement(null); }} className="w-full mt-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold">Remove Box</button>
+                                  <button onClick={() => { setBlurBoxes(prev => prev.filter(b => b.id !== selectedElement)); setSelectedElement(null); }} className="w-full mt-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold">ဖယ်ရှားမည်</button>
                                 </div>
-                              ) : <p className="text-xs text-gray-500 text-center italic">Select a box to edit</p>}
+                              ) : <p className="text-xs text-gray-500 text-center italic">ပြင်ဆင်ရန် Box တစ်ခုကို ရွေးပါ</p>}
                             </div>
                           </div>
                         </div>
@@ -974,7 +973,7 @@ function App() {
                         <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-lg sm:text-xl">🔤</span>
-                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Subtitles & Appearance</h3>
+                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">စာတန်းနှင့် အပြင်အဆင်</h3>
                           </div>
                           <div className="flex flex-col md:flex-row gap-6">
                             <div className="w-full md:w-2/3">
@@ -1000,14 +999,14 @@ function App() {
                             </div>
                             <div className="w-full md:w-1/3 space-y-6">
                                 <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Color Palette</h4>
+                                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">အရောင် ရွေးချယ်ရန်</h4>
                                   <div className="flex flex-wrap gap-3">
                                     {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(c => (
                                       <button key={c} onClick={() => setSubtitleColor(c)} className={`w-8 h-8 rounded-lg border-2 ${subtitleColor === c ? 'border-indigo-500 scale-110 shadow-lg' : 'border-gray-800'}`} style={{ backgroundColor: c }} />
                                     ))}
                                   </div>
                                 </div>
-                                <button onClick={() => setSelectedElement('subtitle')} className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl border border-gray-800">Adjust Position</button>
+                                <button onClick={() => setSelectedElement('subtitle')} className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl border border-gray-800">နေရာ ရွှေ့ရန်</button>
                             </div>
                           </div>
                         </div>
@@ -1019,15 +1018,15 @@ function App() {
                               <div className="w-20 h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mx-auto mb-4 text-indigo-400">
                                   <Play className="w-10 h-10 fill-current" />
                               </div>
-                              <h2 className="text-2xl font-bold text-white mb-2">Ready to Render</h2>
-                              <p className="text-gray-400 text-sm">Your Burmese video reconstruction is configured. AI processing will begin now.</p>
+                              <h2 className="text-2xl font-bold text-white mb-2">အသင့်ဖြစ်ပါပြီ</h2>
+                              <p className="text-gray-400 text-sm">မြန်မာ AI အသံထပ်ရန် အသင့်ဖြစ်ပါပြီ။ AI ဖြင့် စတင်လုပ်ဆောင်ပါမည်။</p>
                            </div>
                            {credits !== null && credits <= 0 && user?.role !== 'admin' ? (
                              <div className="w-full p-4 bg-amber-950/20 border border-amber-900/30 rounded-2xl text-center">
-                               <p className="text-amber-400 text-sm font-bold">Insufficient Credits</p>
+                               <p className="text-amber-400 text-sm font-bold">Credits မလုံလောက်ပါ</p>
                              </div>
                            ) : (
-                             <button onClick={startAnalysis} disabled={!videoFile} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">Start AI Processing</button>
+                             <button onClick={startAnalysis} disabled={!videoFile} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">AI ဖြင့် လုပ်ဆောင်မည်</button>
                            )}
                         </div>
                       )}
@@ -1037,9 +1036,9 @@ function App() {
               {/* Navigation Controls */}
               {status === 'idle' && (
                 <div className="flex items-center justify-between max-w-3xl mx-auto mt-8 pt-4 border-t border-gray-900">
-                  <button onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))} disabled={currentStep === 1} className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm disabled:opacity-30">Back</button>
+                  <button onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))} disabled={currentStep === 1} className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm disabled:opacity-30">နောက်သို့</button>
                   {currentStep < 4 && (
-                    <button onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))} disabled={currentStep === 1 && !videoFile} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">Next Step <ArrowRight size={16} /></button>
+                    <button onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))} disabled={currentStep === 1 && !videoFile} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">ရှေ့သို့ <ArrowRight size={16} /></button>
                   )}
                 </div>
               )}
@@ -1052,9 +1051,9 @@ function App() {
                         <div className="absolute inset-4 bg-indigo-500/10 rounded-full border border-indigo-500/20" />
                       </div>
                       <div className="space-y-3">
-                        <h2 className="text-3xl font-bold text-white font-display tracking-tight">{status === 'uploading' ? 'Uploading...' : 'Processing...'}</h2>
+                        <h2 className="text-3xl font-bold text-white font-display tracking-tight">{status === 'uploading' ? 'တင်နေသည်...' : 'လုပ်ဆောင်နေသည်...'}</h2>
                         <p className="text-gray-500 text-sm max-w-xs mx-auto">
-                            {currentBackendStep ? `Current Task: ${currentBackendStep}` : 'Gemini AI is analyzing and reconstructing your video. This may take up to 3 minutes.'}
+                            {currentBackendStep ? `လက်ရှိ လုပ်ဆောင်နေသော အဆင့်: ${currentBackendStep}` : 'Gemini AI သည် သင့်ဗီဒီယိုကို ခွဲခြမ်းစိတ်ဖြာ၍ အသံထပ်နေပါသည်။ ၃ မိနစ်ခန့် ကြာနိုင်ပါသည်။'}
                         </p>
                       </div>
                       <div className="w-full max-w-md mx-auto space-y-4">
@@ -1067,11 +1066,11 @@ function App() {
               {status === 'error' && (
                 <div className="max-w-2xl mx-auto bg-gray-900/40 border border-red-900/30 rounded-3xl p-10 text-center space-y-6 shadow-2xl">
                     <div className="w-16 h-16 bg-red-950/30 text-red-500 rounded-2xl flex items-center justify-center mx-auto border border-red-500/20"><AlertCircle className="w-8 h-8" /></div>
-                    <h2 className="text-2xl font-bold text-red-400 font-display">Processing Failed</h2>
+                    <h2 className="text-2xl font-bold text-red-400 font-display">လုပ်ဆောင်မှု မအောင်မြင်ပါ</h2>
                     <div className="p-4 bg-red-950/20 border border-red-900/30 rounded-xl text-xs font-mono text-red-300/80 break-words">{errorMsg}</div>
                     <div className="flex justify-center gap-4 pt-4">
-                      <button onClick={retryAnalysis} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center gap-2">Retry</button>
-                      <button onClick={reset} className="px-6 py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl">Back to Start</button>
+                      <button onClick={retryAnalysis} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center gap-2">ပြန်ကြိုးစားမည်</button>
+                      <button onClick={reset} className="px-6 py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl">အစသို့ ပြန်သွားမည်</button>
                     </div>
                 </div>
               )}
@@ -1082,11 +1081,11 @@ function App() {
                         <div className="flex items-center gap-5">
                           <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center border border-emerald-500/20"><CheckCircle className="w-8 h-8" /></div>
                           <div>
-                            <h2 className="text-2xl font-bold text-white font-display">Recap Complete!</h2>
-                            <p className="text-emerald-400/70 text-sm">Your professional Burmese reconstruction is ready.</p>
+                            <h2 className="text-2xl font-bold text-white font-display">အောင်မြင်ပါပြီ!</h2>
+                            <p className="text-emerald-400/70 text-sm">သင့်မြန်မာဗီဒီယို အသင့်ဖြစ်ပါပြီ။</p>
                           </div>
                         </div>
-                        <button onClick={reset} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all active:scale-95">Start New Video</button>
+                        <button onClick={reset} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all active:scale-95">အသစ်ပြန်လုပ်မည်</button>
                     </div>
 
                     {analysisData.videoUrl && (
@@ -1095,7 +1094,7 @@ function App() {
                               <video src={analysisData.videoUrl} controls className="w-full h-full object-contain" />
                           </div>
                           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-                              <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> Download Burmese Video</a>
+                              <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> မြန်မာဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်</a>
                           </div>
                           <div className="mt-12 pt-8 border-t border-gray-800"><FeedbackForm jobId={jobId} /></div>
                       </div>
@@ -1152,7 +1151,7 @@ function App() {
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <div className="bg-gray-950 border border-gray-800 rounded-t-3xl sm:rounded-3xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
                 <div className="flex justify-between items-center px-6 py-5 border-b border-gray-900">
-                    <h2 className="text-xl font-bold text-white">Choose Narration Voice</h2>
+                    <h2 className="text-xl font-bold text-white">အသံထပ်ရန် အသံကို ရွေးချယ်ပါ</h2>
                     <button onClick={() => setShowVoiceDrawer(false)} className="p-2 text-gray-500 hover:text-white bg-gray-900 rounded-xl transition-colors"><X size={20} /></button>
                 </div>
                 <div className="p-4 bg-gray-950 border-b border-gray-900 flex gap-2">
@@ -1162,7 +1161,7 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
                     {user?.role === 'admin' && (
                         <div className="space-y-3">
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Pro Voice (Admin Only)</h3>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Pro Voice (Admin သာ)</h3>
                             {selectedGender === 'male' && (
                                 <div className="space-y-2">
                                     {[

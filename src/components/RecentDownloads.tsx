@@ -34,7 +34,7 @@ export const RecentDownloads: React.FC = () => {
                 
             } catch (err) {
                 console.error('Failed to fetch recent jobs:', err);
-                setError('Failed to load recent downloads.');
+                setError('မကြာသေးမီက ဒေါင်းလုဒ်များကို ရယူ၍မရပါ။');
             } finally {
                 setLoading(false);
             }
@@ -66,8 +66,8 @@ export const RecentDownloads: React.FC = () => {
                 <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
                     <FileVideo className="w-8 h-8 opacity-20" />
                 </div>
-                <p className="font-medium text-lg text-white">No recent downloads available.</p>
-                <p className="text-sm">Processed videos will appear here for 24 hours.</p>
+                <p className="font-medium text-lg text-white">မကြာသေးမီက ဒေါင်းလုဒ်များ မရှိပါ။</p>
+                <p className="text-sm">လုပ်ဆောင်ပြီးသော ဗီဒီယိုများကို ၂၄ နာရီအတွင်း ဤနေရာတွင် ကြည့်နိုင်သည်။</p>
             </div>
         );
     }
@@ -75,8 +75,8 @@ export const RecentDownloads: React.FC = () => {
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-2xl font-bold text-white mb-2">Recent Downloads</h2>
-                <p className="text-gray-400">Re-download your processed videos. Files expire after 24 hours.</p>
+                <h2 className="text-2xl font-bold text-white mb-2">မကြာသေးမီက ဒေါင်းလုဒ်များ</h2>
+                <p className="text-gray-400">လုပ်ဆောင်ပြီးသော ဗီဒီယိုများကို ပြန်လည်ဒေါင်းလုဒ်လုပ်ပါ။ ဖိုင်များကို ၂၄ နာရီကြာလျှင် ဖျက်ပါမည်။</p>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -95,21 +95,21 @@ export const RecentDownloads: React.FC = () => {
                                     <h3 className="text-white font-bold truncate" title={job.originalFilename}>{job.originalFilename}</h3>
                                     <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                                         <Clock className="w-3 h-3" />
-                                        Processed: {new Date(job.completedAt).toLocaleString()}
+                                        လုပ်ဆောင်ခဲ့သည်- {new Date(job.completedAt).toLocaleString()}
                                     </p>
                                 </div>
                             </div>
                             
                             <div className="flex items-center justify-between mt-auto">
                                 <div className="text-xs font-bold text-amber-500/80 bg-amber-500/10 px-2 py-1 rounded">
-                                    Expires in {hoursLeft}h {minsLeft}m
+                                    သက်တမ်းကုန်ဆုံးရန် {hoursLeft}h {minsLeft}m
                                 </div>
                                 <a 
                                     href={job.videoUrl} 
                                     download 
                                     className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all"
                                 >
-                                    <Download className="w-4 h-4" /> Download
+                                    <Download className="w-4 h-4" /> ဒေါင်းလုဒ်လုပ်ရန်
                                 </a>
                             </div>
                         </div>

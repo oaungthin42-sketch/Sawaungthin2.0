@@ -21,19 +21,19 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'tool', label: 'Video Tool', icon: Video },
-    { id: 'recent', label: 'Recent Downloads', icon: Download },
+    { id: 'dashboard', label: 'ပင်မစာမျက်နှာ', icon: LayoutDashboard },
+    { id: 'tool', label: 'ဗီဒီယို ကိရိယာ', icon: Video },
+    { id: 'recent', label: 'မကြာသေးမီက ဒေါင်းလုဒ်များ', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
-    { id: 'feedback', label: 'Feedback', icon: MessageSquare },
-    { id: 'profile', label: 'Profile', icon: User },
+    { id: 'feedback', label: 'မှတ်ချက်', icon: MessageSquare },
+    { id: 'profile', label: 'ပရိုဖိုင်', icon: User },
     
     // Admin Items
-    { id: 'admin-users', label: 'Users', icon: Shield, adminOnly: true },
-    { id: 'admin-jobs', label: 'Jobs', icon: List, adminOnly: true },
-    { id: 'admin-feedback', label: 'Admin Inbox', icon: MessageSquare, adminOnly: true },
-    { id: 'admin-payments', label: 'Payment Requests', icon: CreditCard, adminOnly: true },
-    { id: 'admin-settings', label: 'Settings', icon: Settings, adminOnly: true },
+    { id: 'admin-users', label: 'အသုံးပြုသူများ', icon: Shield, adminOnly: true },
+    { id: 'admin-jobs', label: 'လုပ်ငန်းများ', icon: List, adminOnly: true },
+    { id: 'admin-feedback', label: 'Admin ဝင်စာ', icon: MessageSquare, adminOnly: true },
+    { id: 'admin-payments', label: 'ငွေပေးချေမှု တောင်းဆိုချက်များ', icon: CreditCard, adminOnly: true },
+    { id: 'admin-settings', label: 'ဆက်တင်များ', icon: Settings, adminOnly: true },
 ];
 
 interface NavigationProps {
@@ -90,7 +90,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                     {/* Nav Items */}
                     <div className="flex-1 overflow-y-auto py-6 px-4 space-y-8">
                         <div className="space-y-1">
-                            <span className="text-[10px] font-bold text-gray-600 uppercase tracking-[0.2em] px-4 mb-2 block">Menu</span>
+                            <span className="text-[10px] font-bold text-gray-600 uppercase tracking-[0.2em] px-4 mb-2 block">မီနူး</span>
                             {NAV_ITEMS.filter(item => !item.adminOnly).map(item => (
                                 <button
                                     key={item.id}
@@ -112,7 +112,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
                         {isAdmin && (
                             <div className="space-y-1">
-                                <span className="text-[10px] font-bold text-indigo-500/50 uppercase tracking-[0.2em] px-4 mb-2 block text-center bg-indigo-500/5 py-1 rounded-md">Admin Portal</span>
+                                <span className="text-[10px] font-bold text-indigo-500/50 uppercase tracking-[0.2em] px-4 mb-2 block text-center bg-indigo-500/5 py-1 rounded-md">စီမံခန့်ခွဲသူ ဧရိယာ</span>
                                 {NAV_ITEMS.filter(item => item.adminOnly).map(item => (
                                     <button
                                         key={item.id}
@@ -143,7 +143,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-400 hover:bg-red-500/10 transition-all"
                         >
                             <LogOut className="w-5 h-5" />
-                            Sign Out
+                            ထွက်မည်
                         </button>
                     </div>
                 </div>
