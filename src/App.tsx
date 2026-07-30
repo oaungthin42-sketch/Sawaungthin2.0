@@ -586,7 +586,7 @@ function App() {
   const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
   let selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
   if (voiceProvider === 'gemini') {
-    const boyVoices = ['Puck', 'Charon', 'Fenrir', 'Orion', 'Apollo'];
+    const boyVoices = ['Puck', 'Charon', 'Fenrir', 'Umbriel', 'Iapetus'];
     selectedVoiceName = boyVoices.includes(geminiVoiceName) ? `Pro Voice (Boy - ${geminiVoiceName})` : `Pro Voice (Girl - ${geminiVoiceName})`;
   }
 
@@ -1170,8 +1170,8 @@ function App() {
                                         { name: 'Puck', desc: 'Gemini 2.5 Flash TTS (Puck)' },
                                         { name: 'Charon', desc: 'Gemini 2.5 Flash TTS (Charon)' },
                                         { name: 'Fenrir', desc: 'Gemini 2.5 Flash TTS (Fenrir)' },
-                                        { name: 'Orion', desc: 'Gemini 2.5 Flash TTS (Orion)' },
-                                        { name: 'Apollo', desc: 'Gemini 2.5 Flash TTS (Apollo)' }
+                                        { name: 'Umbriel', desc: 'Gemini 2.5 Flash TTS (Umbriel)' },
+                                        { name: 'Iapetus', desc: 'Gemini 2.5 Flash TTS (Iapetus)' }
                                     ].map((voice) => (
                                         <button key={voice.name} onClick={() => { setVoiceProvider('gemini'); setGeminiVoiceName(voice.name); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${voiceProvider === 'gemini' && geminiVoiceName === voice.name ? 'bg-amber-500/10 border-amber-500 text-amber-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
                                             <div className="flex items-center gap-4">

@@ -179,6 +179,9 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
                 });
                 return res.send(wavBuffer);
             } else {
+                console.error("[TTS DEBUG] No audio data. Full response:", JSON.stringify(response, null, 2));
+                console.error("[TTS DEBUG] Candidate finishReason:", response.candidates?.[0]?.finishReason);
+                console.error("[TTS DEBUG] Safety ratings:", response.candidates?.[0]?.safetyRatings);
                 throw new Error("No audio data returned from Gemini API");
             }
         } else {
