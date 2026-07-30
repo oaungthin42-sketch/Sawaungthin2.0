@@ -240,8 +240,10 @@ function App() {
         audio.play();
         audio.onended = () => setPreviewingVoice(null);
         audio.onerror = () => setPreviewingVoice(null);
-    } catch(err) {
+    } catch(err: any) {
         console.error("Voice preview failed", err);
+        const message = err?.response?.data?.error || err?.message || "Voice preview failed";
+        alert(message);
         setPreviewingVoice(null);
     }
   };
@@ -904,7 +906,7 @@ function App() {
                                         <span className="text-sm font-bold text-white">{selectedVoiceName}</span>
                                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Active Burmese Recapitulator</p>
                                     </div>
-                                    <button onClick={() => handlePreviewVoice(voiceProvider === 'gemini' ? geminiVoiceName : currentVoiceId, voiceProvider)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === (voiceProvider === 'gemini' ? geminiVoiceName : currentVoiceId) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
+                                    <button onClick={() => handlePreviewVoice(voiceProvider === 'gemini' ? geminiVoiceName : currentVoiceId, voiceProvider as 'edge' | 'gemini')} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === (voiceProvider === 'gemini' ? geminiVoiceName : currentVoiceId) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
                                 </div>
                             </div>
                             
