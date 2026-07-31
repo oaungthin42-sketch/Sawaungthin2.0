@@ -794,7 +794,7 @@ function App() {
       return (
           <div className="space-y-6">
               {/* WIZARD PROGRESS BAR */}
-              <div className="mb-8">
+              <div className="mb-8 w-full max-w-full overflow-x-hidden">
                 <div className="flex items-center justify-between overflow-x-auto pb-4 custom-scrollbar max-w-5xl mx-auto px-4">
                   {[
                     "ဗီဒီယိုနှင့် အသံ",
@@ -822,7 +822,7 @@ function App() {
                           <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
                         </button>
                         {i < 3 && (
-                          <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
+                          <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[10px] sm:min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
                         )}
                       </div>
                     );
@@ -1110,7 +1110,7 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-indigo-500/30 selection:text-white">
+    <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-indigo-500/30 selection:text-white w-full max-w-full overflow-x-hidden">
       
       <Navigation 
         isOpen={isNavOpen}

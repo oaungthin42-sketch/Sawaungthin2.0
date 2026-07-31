@@ -173,7 +173,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     );
 
     return (
-        <div className="min-h-screen bg-gray-950 text-gray-100 p-4 sm:p-8">
+        <div className="min-h-screen bg-gray-950 text-gray-100 p-4 sm:p-8 w-full max-w-full overflow-x-hidden">
             <div className="max-w-6xl mx-auto space-y-8">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
@@ -200,34 +200,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                         </div>
                     )}
 
-                    <div className="flex items-center gap-2 p-1 bg-gray-900 border border-gray-800 rounded-2xl mt-6 sm:mt-0">
+                    <div className="flex items-center gap-2 p-1 bg-gray-900 border border-gray-800 rounded-2xl mt-6 sm:mt-0 overflow-x-auto max-w-full custom-scrollbar">
                         <button 
                             onClick={() => setActiveTab('users')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
                             <Users className="w-4 h-4" /> အသုံးပြုသူများ
                         </button>
                         <button 
                             onClick={() => setActiveTab('jobs')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'jobs' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${activeTab === 'jobs' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
                             <List className="w-4 h-4" /> လုပ်ငန်းများ
                         </button>
                         <button 
                             onClick={() => setActiveTab('feedback')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'feedback' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${activeTab === 'feedback' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
                             <MessageSquare className="w-4 h-4" /> မှတ်ချက်များ
                         </button>
                         <button 
                             onClick={() => setActiveTab('payments')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'payments' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${activeTab === 'payments' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
                             <CreditCard className="w-4 h-4" /> ငွေပေးချေမှုများ
                         </button>
                         <button 
                             onClick={() => setActiveTab('settings')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
                         >
                             <Settings className="w-4 h-4" /> ဆက်တင်များ
                         </button>
