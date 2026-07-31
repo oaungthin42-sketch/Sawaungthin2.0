@@ -171,7 +171,7 @@ export const detectScenes = async (videoPath, cachePath) => {
     return scenes;
 };
 
-export const runFFmpeg = (args, cwd, onProgress, timeoutMs = 600000) => {
+export const runFFmpeg = (args, cwd, onProgress, timeoutMs = 1200000) => {
     return new Promise((resolve, reject) => {
         if (!fs.existsSync(cwd)) {
             return reject(new Error(`CWD does not exist: ${cwd}`));

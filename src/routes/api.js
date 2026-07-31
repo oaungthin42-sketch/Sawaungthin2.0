@@ -18,7 +18,7 @@ const router = express.Router();
 const tmpDir = path.join(process.cwd(), 'src', 'tmp');
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-let maxUploadSize = 500 * 1024 * 1024; // 500 MB default
+let maxUploadSize = 1500 * 1024 * 1024; // 1500 MB default
 if (process.env.MAX_UPLOAD_SIZE_MB) {
     const parsed = parseInt(process.env.MAX_UPLOAD_SIZE_MB, 10);
     if (Number.isFinite(parsed) && parsed > 0) {
