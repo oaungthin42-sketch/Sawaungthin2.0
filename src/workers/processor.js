@@ -7,6 +7,8 @@ import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles } from '../utils/index.js';
 import db from '../services/db.js';
+import { GoogleGenAI } from '@google/genai';
+import { getTranslationSystemInstruction } from '../ai/translation.js';
 
 // Pipeline steps
 const STEPS = {
@@ -117,7 +119,86 @@ export const processRecapPipeline = async (jobId) => {
         const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
             advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
-            state.translatedTranscript = state.originalTranscript; // No longer translating
+            
+            if (!state.originalTranscript || state.originalTranscript.length === 0) {
+                state.translatedTranscript = [];
+                fs.writeFileSync(translatedTranscriptCache, JSON.stringify([], null, 2));
+            } else {
+                const geminiApiKey = getSetting('GEMINI_API_KEY');
+                if (!geminiApiKey || !geminiApiKey.trim()) {
+                    throw new Error("Gemini API key is not configured. Please add your GEMINI_API_KEY in Settings.");
+                }
+
+                const ai = new GoogleGenAI({
+                    apiKey: geminiApiKey,
+                    httpOptions: {
+                        headers: {
+                            'User-Agent': 'aistudio-build',
+                        }
+                    }
+                });
+
+                const translationInput = state.originalTranscript.map((t, index) => ({
+                    index,
+                    text: t.text
+                }));
+
+                const systemInstruction = getTranslationSystemInstruction();
+
+                // Retry once on transient API errors
+                let response;
+                let attempts = 0;
+                const maxAttempts = 2;
+                let lastError = null;
+
+                while (attempts < maxAttempts) {
+                    try {
+                        attempts++;
+                        response = await ai.models.generateContent({
+                            model: 'gemini-3.6-flash',
+                            contents: JSON.stringify(translationInput),
+                            config: {
+                                systemInstruction: systemInstruction,
+                                responseMimeType: 'application/json'
+                            }
+                        });
+                        if (response && response.text) {
+                            break;
+                        }
+                        throw new Error("Empty response from Gemini API");
+                    } catch (err) {
+                        lastError = err;
+                        console.warn(`[TRANSLATION] Gemini API call attempt ${attempts} failed:`, err);
+                        if (attempts < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+                    }
+                }
+
+                if (!response || !response.text) {
+                    throw new Error(`Gemini translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
+                }
+
+                // Parse response and map back to translatedTranscript
+                try {
+                    const translatedItems = JSON.parse(response.text.trim());
+                    if (!Array.isArray(translatedItems)) {
+                        throw new Error("Response is not a JSON array");
+                    }
+                    state.translatedTranscript = state.originalTranscript.map((t, index) => {
+                        const matched = translatedItems.find(item => item.index === index);
+                        return {
+                            ...t,
+                            text: matched ? matched.text : t.text
+                        };
+                    });
+                    fs.writeFileSync(translatedTranscriptCache, JSON.stringify(state.translatedTranscript, null, 2));
+                } catch (parseErr) {
+                    console.error("[TRANSLATION] Failed to parse translation response:", response.text, parseErr);
+                    throw new Error(`Failed to parse translation from Gemini: ${parseErr.message}`);
+                }
+            }
+
             saveState();
         }
 
