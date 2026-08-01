@@ -29,3 +29,7 @@ export function cleanupFiles(files) {
         }
     });
 }
+
+export const computeCreditsForDuration = (durationSeconds) => {
+    return Math.max(1, Math.ceil((durationSeconds - 15) / 60));
+};

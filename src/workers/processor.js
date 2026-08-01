@@ -1114,6 +1114,20 @@ export const processRecapPipeline = async (jobId) => {
         console.error(`[Job ${jobId}] Error:`, err);
         const safeErrorMsg = err.message ? err.message.replace(/key=[A-Za-z0-9_\-]+/gi, 'key=HIDDEN') : 'Unknown error';
         updateJob(jobId, { status: 'error', error: safeErrorMsg });
+
+        try {
+            const currentJob = getJob(jobId);
+            if (currentJob && currentJob.userId) {
+                const userRow = db.prepare('SELECT role FROM users WHERE id = ?').get(currentJob.userId);
+                if (userRow && userRow.role !== 'admin') {
+                    const refundAmount = currentJob.creditsCost !== undefined && currentJob.creditsCost !== null ? currentJob.creditsCost : 1;
+                    db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(refundAmount, currentJob.userId);
+                    console.log(`[Job ${jobId}] Refunded ${refundAmount} credits to user ${currentJob.userId}`);
+                }
+            }
+        } catch (refundErr) {
+            console.error(`[Job ${jobId}] Failed to refund credits on job failure:`, refundErr);
+        }
     } finally {
         // ALWAYS CLEANUP
         const currentJob = getJob(jobId);

@@ -11,6 +11,8 @@ import { EdgeTTS } from '@seepine/edge-tts';
 import db from '../services/db.js';
 import { authMiddleware, adminOnly } from './auth.js';
 import { decrypt } from '../services/settings.js';
+import { getDuration } from '../ffmpeg/index.js';
+import { computeCreditsForDuration } from '../utils/index.js';
 
 
 const router = express.Router();
@@ -132,7 +134,7 @@ router.post('/settings', authMiddleware, adminOnly, (req, res) => {
 });
 
 
-router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
+router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => {
     const videoFile = req.file;
 
     if (!videoFile) {
@@ -141,17 +143,31 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
 
     const user = req.user;
     
-    // Credits check
-    if (user.role !== 'admin' && user.credits <= 0) {
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
+    let durationSeconds = 0;
+    try {
+        durationSeconds = await getDuration(videoFile.path);
+    } catch (err) {
+        console.error("[API] Failed to get video duration:", err);
+        if (videoFile.path && fs.existsSync(videoFile.path)) {
+            fs.unlinkSync(videoFile.path);
         }
-        return res.status(400).json({ error: 'Insufficient Credits' });
+        return res.status(400).json({ error: 'Failed to read video duration. The uploaded file might be corrupt or an invalid video format.' });
+    }
+
+    const requiredCredits = computeCreditsForDuration(durationSeconds);
+
+    if (user.role !== 'admin' && user.credits < requiredCredits) {
+        if (videoFile.path && fs.existsSync(videoFile.path)) {
+            fs.unlinkSync(videoFile.path);
+        }
+        return res.status(400).json({
+            error: `Insufficient credits. This ${Math.round(durationSeconds)}-second video needs ${requiredCredits} credit(s), you have ${user.credits}.`
+        });
     }
 
     const jobId = uuidv4();
     const blurBoxes = req.body.blurBoxes || '[]';
-     const subtitlePosition = req.body.subtitlePosition || null;
+    const subtitlePosition = req.body.subtitlePosition || null;
     const selectedFontId = req.body.selectedFontId || null;
     const subtitleColor = req.body.subtitleColor || "white";
     const speed = parseFloat(req.body.speed) || 1.0;
@@ -159,7 +175,7 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
 
     // Transactional-ish update (SQLite is simple)
     if (user.role !== 'admin') {
-        db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+        db.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').run(requiredCredits, user.id);
     }
 
     createJob(jobId, {
@@ -174,6 +190,8 @@ router.post('/process-recap', authMiddleware, handleUpload, (req, res) => {
         flipped: flipped,
         userId: user.id
     });
+
+    updateJob(jobId, { creditsCost: user.role === 'admin' ? 0 : requiredCredits });
     
     res.json({ jobId });
 
@@ -197,7 +215,7 @@ router.get('/status/:jobId', (req, res) => {
 });
 
 // Adding compatibility routes based on instructions
-router.post('/process', authMiddleware, handleUpload, (req, res) => {
+router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      // Forward to process-recap logic
      const videoFile = req.file;
      const audioFile = null;
@@ -205,12 +223,26 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      
      const user = req.user;
      
-     // Credits check
-     if (user.role !== 'admin' && user.credits <= 0) {
-         if (req.file && fs.existsSync(req.file.path)) {
-             fs.unlinkSync(req.file.path);
+     let durationSeconds = 0;
+     try {
+         durationSeconds = await getDuration(videoFile.path);
+     } catch (err) {
+         console.error("[API] Failed to get video duration:", err);
+         if (videoFile.path && fs.existsSync(videoFile.path)) {
+             fs.unlinkSync(videoFile.path);
          }
-         return res.status(400).json({ error: 'Insufficient Credits' });
+         return res.status(400).json({ error: 'Failed to read video duration. The uploaded file might be corrupt or an invalid video format.' });
+     }
+
+     const requiredCredits = computeCreditsForDuration(durationSeconds);
+
+     if (user.role !== 'admin' && user.credits < requiredCredits) {
+         if (videoFile.path && fs.existsSync(videoFile.path)) {
+             fs.unlinkSync(videoFile.path);
+         }
+         return res.status(400).json({
+             error: `Insufficient credits. This ${Math.round(durationSeconds)}-second video needs ${requiredCredits} credit(s), you have ${user.credits}.`
+         });
      }
      
      const jobId = uuidv4();
@@ -220,12 +252,10 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
-     
-     
 
      // Transactional-ish update (SQLite is simple)
      if (user.role !== 'admin') {
-         db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ?').run(user.id);
+         db.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').run(requiredCredits, user.id);
      }
 
      createJob(jobId, { 
@@ -238,10 +268,10 @@ router.post('/process', authMiddleware, handleUpload, (req, res) => {
          subtitleColor: subtitleColor,
          speed: speed,
          flipped: flipped,
-         userId: user.id,
-         
-         
+         userId: user.id
      });
+
+     updateJob(jobId, { creditsCost: user.role === 'admin' ? 0 : requiredCredits });
      
      res.json({ jobId });
      

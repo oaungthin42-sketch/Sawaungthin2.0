@@ -70,6 +70,7 @@ try {
 }
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN userId TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN creditsCost INTEGER`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN last_login DATETIME`); } catch (e) {}
 
