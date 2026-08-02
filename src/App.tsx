@@ -82,6 +82,14 @@ const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement
   );
 };
 
+const CREDIT_PACKAGES = [
+    { credits: 30, price: 150, bonus: 1 },
+    { credits: 60, price: 300, bonus: 3 },
+    { credits: 90, price: 450, bonus: 6, tag: 'အသင့်တော်ဆုံး' },
+    { credits: 120, price: 600, bonus: 10 },
+    { credits: 150, price: 750, bonus: 20 },
+];
+
 function App() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -127,6 +135,7 @@ function App() {
   const [uploadingSlip, setUploadingSlip] = useState(false);
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [slipUploadSuccess, setSlipUploadSuccess] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState(2);
 
   useEffect(() => {
     axios.get('/api/auth/me').then(res => {
@@ -758,6 +767,54 @@ function App() {
                       ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2">∞ Unlimited</div>
                       : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>)}
                   <p className="text-gray-400 my-8">Credits ကို မြန်မာ AI အသံထပ် ဗီဒီယိုများ လုပ်ဆောင်ရာတွင် အသုံးပြုပါသည်။</p>
+                  
+                  <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-3 mb-6">
+                      <h3 className="text-lg font-bold text-white mb-1">Credit Package ရွေးချယ်ပါ</h3>
+                      <div className="space-y-2">
+                          {CREDIT_PACKAGES.map((pkg, i) => (
+                              <button
+                                  key={i}
+                                  onClick={() => setSelectedPackage(i)}
+                                  className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition-all text-left ${
+                                      selectedPackage === i
+                                          ? 'bg-indigo-950/40 border-indigo-500'
+                                          : 'bg-gray-900 border-gray-800 hover:border-gray-700'
+                                  }`}
+                              >
+                                  <div className="flex items-center gap-3">
+                                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                          selectedPackage === i ? 'border-indigo-400' : 'border-gray-600'
+                                      }`}>
+                                          {selectedPackage === i && <div className="w-2.5 h-2.5 rounded-full bg-indigo-400" />}
+                                      </div>
+                                      <div>
+                                          <p className="text-sm font-bold text-white">{pkg.credits} Credits</p>
+                                          <p className="text-xs text-emerald-400">+{pkg.bonus} Free</p>
+                                      </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      {pkg.tag && (
+                                          <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-md">
+                                              {pkg.tag}
+                                          </span>
+                                      )}
+                                      <span className="text-sm font-bold text-white">{pkg.price} THB</span>
+                                  </div>
+                              </button>
+                          ))}
+                      </div>
+                      <div className="flex items-center justify-between pt-3 mt-1 border-t border-gray-800">
+                          <div>
+                              <p className="text-xs text-gray-500">စုစုပေါင်း ရရှိမည့် Credits</p>
+                              <p className="text-lg font-bold text-white">
+                                  {CREDIT_PACKAGES[selectedPackage].credits + CREDIT_PACKAGES[selectedPackage].bonus} Credits
+                              </p>
+                          </div>
+                          <span className="text-sm font-bold text-indigo-400">
+                              {CREDIT_PACKAGES[selectedPackage].price} THB
+                          </span>
+                      </div>
+                  </div>
                   
                   <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
                       <h3 className="text-lg font-bold text-white">ဘဏ်မှတစ်ဆင့် Credits ဝယ်ရန်</h3>
