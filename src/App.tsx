@@ -1038,7 +1038,7 @@ function App() {
                               {videoFile && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                 <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
-                                  <video ref={videoRef} src={videoPreviewUrl} muted playsInline style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-cover" />
+                                  <video ref={videoRef} src={videoPreviewUrl} muted playsInline onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-cover" />
                                   <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                                     {blurBoxes.map((box) => (
                                       <div
@@ -1093,7 +1093,7 @@ function App() {
                               {videoFile && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                   <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
-                                    <video ref={videoRef} src={videoPreviewUrl} muted playsInline style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-cover" />
+                                    <video ref={videoRef} src={videoPreviewUrl} muted playsInline onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-cover" />
                                     <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                                       <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')} className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors flex items-center justify-center touch-none`} style={{ left: `${subtitlePosition.xPct}%`, top: `${subtitlePosition.yPct}%`, width: `${subtitlePosition.widthPct}%`, height: `${subtitlePosition.heightPct}%` }}>
                                         <span className="text-white font-bold text-center w-full drop-shadow-md" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)`, color: subtitleColor }}>နမူနာ စာတန်း</span>
