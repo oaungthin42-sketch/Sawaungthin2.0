@@ -66,6 +66,11 @@ router.get('/voices', authMiddleware, (req, res) => {
     res.json(VOICES);
 });
 
+router.get('/telegram-link', authMiddleware, (req, res) => {
+    const link = getSetting('TELEGRAM_LINK');
+    res.json({ link: link || 'https://t.me/saw_oliver' });
+});
+
 router.post('/preview-voice', authMiddleware, async (req, res) => {
     const { voiceId } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });

@@ -122,6 +122,7 @@ function App() {
   const [settings, setSettings] = useState<any>({});
   const [editSettings, setEditSettings] = useState<any>({});
   const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
+  const [telegramLink, setTelegramLink] = useState<string | null>(null);
 
   const [uploadingSlip, setUploadingSlip] = useState(false);
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -194,11 +195,16 @@ function App() {
     if (user) {
       fetchVoices();
       fetchUserFeedback();
+      fetchTelegramLink();
     }
     if (user?.role === 'admin') {
       fetchSettings();
     }
   }, [user]);
+
+  const fetchTelegramLink = () => {
+    axios.get('/api/telegram-link').then(res => setTelegramLink(res.data.link)).catch(() => {});
+  };
   
   const fetchUserFeedback = async () => {
     try {
@@ -1120,6 +1126,7 @@ function App() {
         user={user}
         onLogout={logout}
         unreadFeedbackCount={userFeedback.filter(f => f.isRead === 0).length}
+        telegramLink={telegramLink}
       />
 
       <div className="lg:pl-[280px] min-h-screen flex flex-col">

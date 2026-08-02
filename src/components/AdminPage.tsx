@@ -473,6 +473,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <div className="p-8 space-y-6 max-w-2xl">
                                     <h2 className="text-xl font-bold text-white">စနစ် ဆက်တင်များ</h2>
                                     <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-400 mb-2">
+                                                Telegram Support Link
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={settingsValues['TELEGRAM_LINK'] || ''}
+                                                onChange={(e) => setSettingsValues({ ...settingsValues, TELEGRAM_LINK: e.target.value })}
+                                                placeholder="https://t.me/your_username"
+                                                className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
+                                            />
+                                        </div>
                                         <button 
                                             onClick={async () => {
                                                 try {

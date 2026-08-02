@@ -10,7 +10,8 @@ import {
     List,
     Settings,
     X,
-    Download
+    Download,
+    Send
 } from 'lucide-react';
 
 interface NavItem {
@@ -48,6 +49,7 @@ interface NavigationProps {
     };
     onLogout: () => void;
     unreadFeedbackCount?: number;
+    telegramLink?: string | null;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({ 
@@ -57,7 +59,8 @@ export const Navigation: React.FC<NavigationProps> = ({
     onNavigate, 
     user, 
     onLogout,
-    unreadFeedbackCount = 0
+    unreadFeedbackCount = 0,
+    telegramLink
 }) => {
     const isAdmin = user?.role === 'admin';
 
@@ -108,6 +111,17 @@ export const Navigation: React.FC<NavigationProps> = ({
                                     )}
                                 </button>
                             ))}
+                            {telegramLink && (
+                                <a
+                                    href={telegramLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-gray-400 hover:text-white hover:bg-gray-900 transition-all"
+                                >
+                                    <Send className="w-5 h-5" />
+                                    Telegram - အကူအညီတောင်းရန်
+                                </a>
+                            )}
                         </div>
 
                         {isAdmin && (
