@@ -8,7 +8,7 @@ import { CreditGauge } from './components/CreditGauge';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Play, Menu, 
-  Volume2, ArrowRight, Check, X, CreditCard, Star
+  Volume2, ArrowRight, Check, X, CreditCard, Star, Copy
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -164,8 +164,8 @@ function App() {
     }
   };
 
-  const getBankInfo = () => {
-    return settings['BANK_PAYMENT_INFO']?.value || 'Bank Name: XYZ Bank\nAccount: 1234567890\nName: Admin Name';
+  const copyToClipboard = (text: string) => {
+      navigator.clipboard.writeText(text);
   };
 
   useEffect(() => {
@@ -818,8 +818,28 @@ function App() {
                   
                   <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
                       <h3 className="text-lg font-bold text-white">ဘဏ်မှတစ်ဆင့် Credits ဝယ်ရန်</h3>
-                      <div className="p-4 bg-gray-900 rounded-xl whitespace-pre-wrap font-mono text-sm text-gray-300">
-                          {getBankInfo()}
+                      <div className="p-4 bg-gray-900 rounded-xl space-y-3 font-mono text-sm text-gray-300">
+                          <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Bank:</span>
+                              <span className="text-white font-bold">{settings['BANK_NAME']?.value || '-'}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Account Name:</span>
+                              <span className="text-white font-bold">{settings['BANK_ACCOUNT_NAME']?.value || '-'}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Account Number:</span>
+                              <div className="flex items-center gap-2">
+                                  <span className="text-white font-bold">{settings['BANK_ACCOUNT_NUMBER']?.value || '-'}</span>
+                                  <button
+                                      onClick={() => copyToClipboard(settings['BANK_ACCOUNT_NUMBER']?.value || '')}
+                                      className="text-indigo-400 hover:text-indigo-300"
+                                      title="Copy account number"
+                                  >
+                                      <Copy className="w-4 h-4" />
+                                  </button>
+                              </div>
+                          </div>
                       </div>
                       
                       {slipUploadSuccess ? (

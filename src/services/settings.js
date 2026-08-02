@@ -104,7 +104,7 @@ export const deleteSetting = (key) => {
 };
 
 export const getAllSettingsMasked = () => {
-    const keys = ['GEMINI_API_KEY', 'EDGE_TTS_VOICE', 'DIALOGUE_MODE', 'COLLOQUIAL_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER', 'TELEGRAM_LINK'];
+    const keys = ['GEMINI_API_KEY', 'EDGE_TTS_VOICE', 'DIALOGUE_MODE', 'COLLOQUIAL_MODE', 'VOICE_SPEED', 'VOICE_PITCH', 'AUDIO_LOUDNESS', 'SYNC_MODE', 'OUTPUT_SPEED_MULTIPLIER', 'TELEGRAM_LINK', 'BANK_NAME', 'BANK_ACCOUNT_NUMBER', 'BANK_ACCOUNT_NAME'];
     const result = {};
     for (const k of keys) {
         const val = getSetting(k);
@@ -121,3 +121,9 @@ export const getAllSettingsMasked = () => {
     }
     return result;
 };
+
+if (!getSetting('BANK_ACCOUNT_NUMBER')) {
+    setSetting('BANK_NAME', 'K PLUS');
+    setSetting('BANK_ACCOUNT_NUMBER', '2288440657');
+    setSetting('BANK_ACCOUNT_NAME', 'AUNG THIN OO');
+}

@@ -63,6 +63,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [settingsValues, setSettingsValues] = useState<Record<string, string>>({});
+    const [totalUserCount, setTotalUserCount] = useState<number | null>(null);
+
+    useEffect(() => {
+        axios.get('/api/user/admin/users')
+            .then(res => setTotalUserCount(res.data.length))
+            .catch(() => {});
+    }, []);
 
     const fetchData = async () => {
         setLoading(true);
@@ -190,6 +197,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                             <div>
                                 <h1 className="text-3xl font-bold font-display tracking-tight">စီမံခန့်ခွဲသူ ဧရိယာ</h1>
                                 <p className="text-gray-500 text-sm font-medium">စနစ် စီမံခန့်ခွဲမှု</p>
+                            </div>
+                            <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border border-gray-800 rounded-2xl">
+                                <Users className="w-4 h-4 text-indigo-400" />
+                                <span className="text-sm text-gray-400">စုစုပေါင်း အသုံးပြုသူ</span>
+                                <span className="text-sm font-bold text-white">
+                                    {totalUserCount !== null ? totalUserCount : '...'}
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -470,39 +484,81 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 </table>
                             )}
                             {activeTab === 'settings' && (
-                                <div className="p-8 space-y-6 max-w-2xl">
+                                <div className="p-8 space-y-8 max-w-2xl">
                                     <h2 className="text-xl font-bold text-white">စနစ် ဆက်တင်များ</h2>
-                                    <div className="space-y-4">
+
+                                    <div className="space-y-4 pb-8 border-b border-gray-800">
+                                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">ဘဏ်အချက်အလက်</h3>
                                         <div>
-                                            <label className="block text-sm font-bold text-gray-400 mb-2">
-                                                Telegram Support Link
-                                            </label>
+                                            <label className="block text-xs font-bold text-gray-500 mb-2">ဘဏ်အမျိုးအစား</label>
                                             <input
                                                 type="text"
-                                                value={settingsValues['TELEGRAM_LINK'] || ''}
-                                                onChange={(e) => setSettingsValues({ ...settingsValues, TELEGRAM_LINK: e.target.value })}
-                                                placeholder="https://t.me/your_username"
+                                                value={settingsValues['BANK_NAME'] || ''}
+                                                onChange={(e) => setSettingsValues({ ...settingsValues, BANK_NAME: e.target.value })}
+                                                placeholder="K PLUS"
                                                 className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
                                             />
                                         </div>
-                                        <button 
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-2">ဘဏ် Account Number</label>
+                                            <input
+                                                type="text"
+                                                value={settingsValues['BANK_ACCOUNT_NUMBER'] || ''}
+                                                onChange={(e) => setSettingsValues({ ...settingsValues, BANK_ACCOUNT_NUMBER: e.target.value })}
+                                                placeholder="2288440657"
+                                                className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm font-mono focus:border-indigo-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-2">Account Name</label>
+                                            <input
+                                                type="text"
+                                                value={settingsValues['BANK_ACCOUNT_NAME'] || ''}
+                                                onChange={(e) => setSettingsValues({ ...settingsValues, BANK_ACCOUNT_NAME: e.target.value })}
+                                                placeholder="AUNG THIN OO"
+                                                className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
+                                            />
+                                        </div>
+                                        <button
                                             onClick={async () => {
                                                 try {
-                                                    for (const key of Object.keys(settingsValues)) {
-                                                        const val = settingsValues[key];
-                                                        if (val) {
-                                                            await axios.post('/api/settings', { key, value: val });
-                                                        }
-                                                    }
-                                                    alert('ဆက်တင်များ Save လုပ်ပြီးပါပြီ');
+                                                    await axios.post('/api/settings', { key: 'BANK_NAME', value: settingsValues['BANK_NAME'] || '' });
+                                                    await axios.post('/api/settings', { key: 'BANK_ACCOUNT_NUMBER', value: settingsValues['BANK_ACCOUNT_NUMBER'] || '' });
+                                                    await axios.post('/api/settings', { key: 'BANK_ACCOUNT_NAME', value: settingsValues['BANK_ACCOUNT_NAME'] || '' });
+                                                    alert('ဘဏ်အချက်အလက် Save လုပ်ပြီးပါပြီ');
                                                     fetchData();
                                                 } catch (err: any) {
-                                                    alert(err.response?.data?.error || 'ဆက်တင်များ Save မလုပ်နိုင်ပါ');
+                                                    alert(err.response?.data?.error || 'Save မလုပ်နိုင်ပါ');
                                                 }
                                             }}
                                             className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
                                         >
-                                            Save ဆက်တင်များ
+                                            ဘဏ်အချက်အလက် Save
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Telegram Support Link</h3>
+                                        <input
+                                            type="text"
+                                            value={settingsValues['TELEGRAM_LINK'] || ''}
+                                            onChange={(e) => setSettingsValues({ ...settingsValues, TELEGRAM_LINK: e.target.value })}
+                                            placeholder="https://t.me/your_username"
+                                            className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
+                                        />
+                                        <button
+                                            onClick={async () => {
+                                                try {
+                                                    await axios.post('/api/settings', { key: 'TELEGRAM_LINK', value: settingsValues['TELEGRAM_LINK'] || '' });
+                                                    alert('Telegram Link Save လုပ်ပြီးပါပြီ');
+                                                    fetchData();
+                                                } catch (err: any) {
+                                                    alert(err.response?.data?.error || 'Save မလုပ်နိုင်ပါ');
+                                                }
+                                            }}
+                                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
+                                        >
+                                            Telegram Link Save
                                         </button>
                                     </div>
                                 </div>

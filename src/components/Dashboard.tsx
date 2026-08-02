@@ -1,6 +1,6 @@
 import React from 'react';
 import { CreditGauge } from './CreditGauge';
-import { Video, CreditCard, History, Zap, ArrowRight, Play } from 'lucide-react';
+import { Video, CreditCard, History, ArrowRight, Play, AlertTriangle } from 'lucide-react';
 
 interface DashboardProps {
     credits: number | null;
@@ -52,20 +52,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, userRol
                     </div>
                 </div>
 
-                <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl flex flex-col justify-between">
+                <div className="bg-gray-900 border border-amber-500/20 p-8 rounded-3xl flex flex-col justify-between">
                     <div className="flex items-center justify-between">
                         <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl">
-                            <Zap className="w-6 h-6" />
+                            <AlertTriangle className="w-6 h-6" />
                         </div>
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">စနစ် အခြေအနေ</span>
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Credit စည်းမျဉ်း</span>
                     </div>
-                    <div className="space-y-4">
-                        <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                            <span className="text-white font-bold">စနစ်များအားလုံး ပုံမှန်အလုပ်လုပ်နေပါသည်</span>
-                        </div>
+                    <div className="space-y-2">
+                        <span className="text-white font-bold">⚠️ Credit သုံးစွဲမှု စည်းမျဉ်း</span>
                         <p className="text-gray-400 text-sm leading-relaxed">
-                            လုပ်ဆောင်မှု ဆာဗာများ အလုပ်လုပ်နေပါသည်။ ခန့်မှန်းခြေ ကြာချိန် - ဗီဒီယိုတစ်ခုလျှင် ၂ မိနစ်ခန့်။
+                            Credit 1 ခုလျှင် video 1 မိနစ် 15 စက္ကန့်အထိ ထည့်နိုင်ပါသည်။
+                            Credit 2 ခုလျှင် 2 မိနစ် 15 စက္ကန့်အထိ၊ Credit 3 ခုလျှင် 3 မိနစ် 15 စက္ကန့်အထိ —
+                            ဤအတိုင်း credit အရေအတွက်နှင့် video မိနစ်ရှည်လျားမှု အချိုးကျ တိုးလာပါမည်။
+                            Credit မလုံလောက်ပါက video ကို လုပ်ဆောင်၍ မရပါ။
                         </p>
                     </div>
                 </div>
