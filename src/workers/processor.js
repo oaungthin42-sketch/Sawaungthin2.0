@@ -428,12 +428,66 @@ export const processRecapPipeline = async (jobId) => {
             advanceStep(STEPS.SUBTITLE_BUILDER, 75, 'Adjusting Subtitle Timing');
             
             let srt = '';
-            state.narrationTranscript.forEach((chunk, index) => {
+            let srtIndex = 1;
+            state.narrationTranscript.forEach((chunk) => {
                 let start = chunk.timestamp[0];
-                let end = chunk.timestamp[1] || start + 2; 
-                srt += `${index + 1}\n`;
-                srt += `${formatTime(start)} --> ${formatTime(end)}\n`;
-                srt += `${chunk.text.trim()}\n\n`;
+                let end = chunk.timestamp[1] || start + 2;
+                let duration = end - start;
+                
+                const text = (chunk.text || '').trim();
+                if (!text) return;
+                
+                const words = text.split(/\s+/);
+                const pieces = [];
+                let currentPiece = '';
+                
+                for (const word of words) {
+                    if (!word) continue;
+                    if (!currentPiece) {
+                        currentPiece = word;
+                    } else {
+                        if (currentPiece.length + 1 + word.length > 40) {
+                            pieces.push(currentPiece);
+                            currentPiece = word;
+                        } else {
+                            currentPiece += ' ' + word;
+                        }
+                    }
+                }
+                if (currentPiece) {
+                    pieces.push(currentPiece);
+                }
+                
+                if (pieces.length <= 1) {
+                    srt += `${srtIndex}\n`;
+                    srt += `${formatTime(start)} --> ${formatTime(end)}\n`;
+                    srt += `${text}\n\n`;
+                    srtIndex++;
+                } else {
+                    const totalChars = pieces.reduce((sum, p) => sum + p.length, 0);
+                    let currentStart = start;
+                    
+                    pieces.forEach((piece, pIdx) => {
+                        let pieceDuration = 0;
+                        if (totalChars > 0) {
+                            pieceDuration = (piece.length / totalChars) * duration;
+                        } else {
+                            pieceDuration = duration / pieces.length;
+                        }
+                        
+                        let pieceEnd = currentStart + pieceDuration;
+                        if (pIdx === pieces.length - 1) {
+                            pieceEnd = end;
+                        }
+                        
+                        srt += `${srtIndex}\n`;
+                        srt += `${formatTime(currentStart)} --> ${formatTime(pieceEnd)}\n`;
+                        srt += `${piece.trim()}\n\n`;
+                        srtIndex++;
+                        
+                        currentStart = pieceEnd;
+                    });
+                }
             });
             
             state.srtFile = path.join(cacheDir, 'subs.srt');
