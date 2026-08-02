@@ -30,6 +30,19 @@ export function cleanupFiles(files) {
     });
 }
 
+export function safeMoveFile(src, dest) {
+    try {
+        fs.renameSync(src, dest);
+    } catch (err) {
+        if (err.code === 'EXDEV') {
+            fs.copyFileSync(src, dest);
+            fs.unlinkSync(src);
+        } else {
+            throw err;
+        }
+    }
+}
+
 export const computeCreditsForDuration = (durationSeconds) => {
     return Math.max(1, Math.ceil((durationSeconds - 15) / 60));
 };

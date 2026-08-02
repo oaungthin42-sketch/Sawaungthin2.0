@@ -5,7 +5,7 @@ import { updateJob, getJob } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
-import { formatTime, cleanupFiles } from '../utils/index.js';
+import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { GoogleGenAI } from '@google/genai';
 import { getTranslationSystemInstruction } from '../ai/translation.js';
@@ -877,7 +877,7 @@ export const processRecapPipeline = async (jobId) => {
                 updateJob(jobId, { progress: 94 + (pct * 0.05) });
             });
             
-            fs.renameSync(finalFileTmp, finalOutPath);
+            safeMoveFile(finalFileTmp, finalOutPath);
             
             // Validate final output duration
             const finalDurs = await getStreamsDuration(finalOutPath);
@@ -994,7 +994,7 @@ export const processRecapPipeline = async (jobId) => {
                         
                         if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
                             fs.unlinkSync(finalOutPath);
-                            fs.renameSync(blurTmpPath, finalOutPath);
+                            safeMoveFile(blurTmpPath, finalOutPath);
                         } else {
                             console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
                             state.warnings.push("⚠ Blur could not be applied: FFmpeg failed to produce output file");
@@ -1100,7 +1100,7 @@ export const processRecapPipeline = async (jobId) => {
                         
                         if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
                             fs.unlinkSync(finalOutPath);
-                            fs.renameSync(subTmpPath, finalOutPath);
+                            safeMoveFile(subTmpPath, finalOutPath);
                         } else {
                             console.error("[SUBTITLE] Error: subtitle burn failed to produce output file, skipping.");
                             state.warnings.push("⚠ Subtitles could not be burned in: FFmpeg failed to produce output file");
@@ -1138,7 +1138,7 @@ export const processRecapPipeline = async (jobId) => {
                 
                 if (fs.existsSync(speedTmpPath) && fs.statSync(speedTmpPath).size > 0) {
                     fs.unlinkSync(finalOutPath);
-                    fs.renameSync(speedTmpPath, finalOutPath);
+                    safeMoveFile(speedTmpPath, finalOutPath);
                 } else {
                     throw new Error("Pipeline Error: Speed adjustment failed to produce output file.");
                 }
