@@ -131,6 +131,7 @@ function App() {
   const [editSettings, setEditSettings] = useState<any>({});
   const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
   const [telegramLink, setTelegramLink] = useState<string | null>(null);
+  const [bankInfo, setBankInfo] = useState<{ bankName: string | null, accountName: string | null, accountNumber: string | null }>({ bankName: null, accountName: null, accountNumber: null });
 
   const [uploadingSlip, setUploadingSlip] = useState(false);
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -205,6 +206,7 @@ function App() {
       fetchVoices();
       fetchUserFeedback();
       fetchTelegramLink();
+      fetchBankInfo();
     }
     if (user?.role === 'admin') {
       fetchSettings();
@@ -213,6 +215,10 @@ function App() {
 
   const fetchTelegramLink = () => {
     axios.get('/api/telegram-link').then(res => setTelegramLink(res.data.link)).catch(() => {});
+  };
+
+  const fetchBankInfo = () => {
+    axios.get('/api/bank-info').then(res => setBankInfo(res.data)).catch(() => {});
   };
   
   const fetchUserFeedback = async () => {
@@ -821,18 +827,18 @@ function App() {
                       <div className="p-4 bg-gray-900 rounded-xl space-y-3 font-mono text-sm text-gray-300">
                           <div className="flex items-center justify-between">
                               <span className="text-gray-500">Bank:</span>
-                              <span className="text-white font-bold">{settings['BANK_NAME']?.value || '-'}</span>
+                              <span className="text-white font-bold">{bankInfo.bankName || '-'}</span>
                           </div>
                           <div className="flex items-center justify-between">
                               <span className="text-gray-500">Account Name:</span>
-                              <span className="text-white font-bold">{settings['BANK_ACCOUNT_NAME']?.value || '-'}</span>
+                              <span className="text-white font-bold">{bankInfo.accountName || '-'}</span>
                           </div>
                           <div className="flex items-center justify-between">
                               <span className="text-gray-500">Account Number:</span>
                               <div className="flex items-center gap-2">
-                                  <span className="text-white font-bold">{settings['BANK_ACCOUNT_NUMBER']?.value || '-'}</span>
+                                  <span className="text-white font-bold">{bankInfo.accountNumber || '-'}</span>
                                   <button
-                                      onClick={() => copyToClipboard(settings['BANK_ACCOUNT_NUMBER']?.value || '')}
+                                      onClick={() => copyToClipboard(bankInfo.accountNumber || '')}
                                       className="text-indigo-400 hover:text-indigo-300"
                                       title="Copy account number"
                                   >
