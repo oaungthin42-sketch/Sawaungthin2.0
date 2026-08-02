@@ -109,3 +109,5 @@ try {
 } catch (e) {
     console.error("Error creating payment_requests table", e);
 }
+
+try { db.exec(`ALTER TABLE jobs ADD COLUMN coverText TEXT`); } catch (e) {}

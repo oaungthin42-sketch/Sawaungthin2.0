@@ -50,8 +50,8 @@ export const processRecapPipeline = async (jobId) => {
 
     const tmpDir = path.join(process.cwd(), 'src', 'tmp');
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const outDir = path.join(process.cwd(), 'public', 'output');
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    const outDir = path.join(process.cwd(), 'data', 'output');
+    fs.mkdirSync(outDir, { recursive: true });
 
     const cacheDir = path.join(process.cwd(), 'data', 'cache', jobId);
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
@@ -1145,6 +1145,39 @@ export const processRecapPipeline = async (jobId) => {
             }
         }
         
+        let generatedCaption = null;
+        try {
+            if (state.translatedTranscript && state.translatedTranscript.length > 0) {
+                const geminiApiKey = getSetting('GEMINI_API_KEY');
+                if (geminiApiKey && geminiApiKey.trim()) {
+                    const ai = new GoogleGenAI({
+                        apiKey: geminiApiKey,
+                        httpOptions: {
+                            headers: {
+                                'User-Agent': 'aistudio-build',
+                            }
+                        }
+                    });
+                    
+                    const response = await ai.models.generateContent({
+                        model: 'gemini-3.6-flash',
+                        contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
+                        config: {
+                            systemInstruction: "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese."
+                        }
+                    });
+                    
+                    if (response && response.text) {
+                        generatedCaption = response.text.trim();
+                        db.prepare('UPDATE jobs SET coverText = ? WHERE id = ?').run(generatedCaption, jobId);
+                        console.log(`[CAPTION-GENERATION] Generated caption: ${generatedCaption}`);
+                    }
+                }
+            }
+        } catch (captionErr) {
+            console.error(`[CAPTION-GENERATION] Failed to generate cover text:`, captionErr);
+        }
+
         updateJob(jobId, {
             status: 'complete',
             progress: 100,
@@ -1158,7 +1191,8 @@ export const processRecapPipeline = async (jobId) => {
                 narrationTranscript: state.narrationTranscript,
                 mapping: state.mapping,
                 timeline: state.timeline,
-                videoUrl: `/output/${jobId}.mp4`
+                videoUrl: `/output/${jobId}.mp4`,
+                coverText: generatedCaption || null
             }
         });
 

@@ -9,7 +9,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-const slipDir = path.join(process.cwd(), 'public', 'output', 'slips');
+const slipDir = path.join(process.cwd(), 'data', 'output', 'slips');
 if (!fs.existsSync(slipDir)) fs.mkdirSync(slipDir, { recursive: true });
 
 const storage = multer.diskStorage({

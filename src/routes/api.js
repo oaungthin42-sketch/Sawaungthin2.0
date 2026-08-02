@@ -307,14 +307,14 @@ router.get('/completed-jobs', (req, res) => {
     if (ids.length === 0) return res.json([]);
     
     const placeholders = ids.map(() => '?').join(',');
-    const stmt = db.prepare(`SELECT id, originalFilename, completed_at FROM jobs WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at > ? AND id IN (${placeholders})`);
+    const stmt = db.prepare(`SELECT id, originalFilename, completed_at, coverText FROM jobs WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at > ? AND id IN (${placeholders})`);
     
     const timeLimit = Date.now() - 24 * 60 * 60 * 1000;
     const rows = stmt.all(timeLimit, ...ids);
     
     const validJobs = [];
     for (const row of rows) {
-        const outputPath = path.join(process.cwd(), 'public', 'output', `${row.id}.mp4`);
+        const outputPath = path.join(process.cwd(), 'data', 'output', `${row.id}.mp4`);
         if (fs.existsSync(outputPath)) {
             const stat = fs.statSync(outputPath);
             validJobs.push({
@@ -323,7 +323,8 @@ router.get('/completed-jobs', (req, res) => {
                 completedAt: row.completed_at,
                 sizeBytes: stat.size,
                 videoUrl: `/output/${row.id}.mp4`,
-                expiresAt: row.completed_at + 24 * 60 * 60 * 1000
+                expiresAt: row.completed_at + 24 * 60 * 60 * 1000,
+                coverText: row.coverText || null
             });
         }
     }

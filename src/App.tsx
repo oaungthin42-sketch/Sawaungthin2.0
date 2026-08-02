@@ -118,7 +118,7 @@ function App() {
 
   const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'>('idle');
   const [progressPct, setProgressPct] = useState<number>(0);
-  const [currentBackendStep, setCurrentBackendStep] = useState<string>('');
+  const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [analysisData, setAnalysisData] = useState<any>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -211,6 +211,30 @@ function App() {
     if (user?.role === 'admin') {
       fetchSettings();
     }
+  }, [user]);
+
+  useEffect(() => {
+      if (!user) return;
+      const activeJobId = localStorage.getItem('superclick_active_job');
+      if (!activeJobId) return;
+      axios.get(`/api/status/${activeJobId}`).then(res => {
+          const job = res.data;
+          if (job.status === 'complete') {
+              setJobId(activeJobId);
+              setAnalysisData(job.result);
+              setStatus('complete');
+              localStorage.removeItem('superclick_active_job');
+          } else if (job.status === 'error') {
+              localStorage.removeItem('superclick_active_job');
+          } else {
+              setJobId(activeJobId);
+              setStatus('analyzing');
+              setAnalysisStartTime(Date.now() - (job.progress ? (job.progress / 100) * 180000 : 0));
+              startPolling(activeJobId);
+          }
+      }).catch(() => {
+          localStorage.removeItem('superclick_active_job');
+      });
   }, [user]);
 
   const fetchTelegramLink = () => {
@@ -507,6 +531,7 @@ function App() {
 
     setStatus('uploading');
     setProgressPct(5);
+    setAnalysisStartTime(Date.now());
 
     const formData = new FormData();
     formData.append('video', videoFile);
@@ -526,6 +551,7 @@ function App() {
 
       const newJobId = response.data.jobId;
       setJobId(newJobId);
+      localStorage.setItem('superclick_active_job', newJobId);
       setStatus('analyzing');
       startPolling(newJobId);
 
@@ -544,12 +570,11 @@ function App() {
         const statusRes = await axios.get(`/api/status/${id}`);
         const job = statusRes.data;
         
-        setCurrentBackendStep(job.currentStep || '');
-        
         if (job.status === 'complete') {
           clearInterval(interval);
           setAnalysisData(job.result);
           setStatus('complete');
+          localStorage.removeItem('superclick_active_job');
           
           try {
              let recentJobs = JSON.parse(localStorage.getItem('superclick_recent_jobs') || '[]');
@@ -562,6 +587,7 @@ function App() {
           clearInterval(interval);
           setStatus('error');
           setErrorMsg(job.error || 'Processing failed');
+          localStorage.removeItem('superclick_active_job');
         } else {
           setProgressPct(job.progress || 0);
         }
@@ -599,7 +625,8 @@ function App() {
     setStatus('idle');
     setAnalysisData(null);
     setJobId(null);
-    setCurrentBackendStep('');
+    setAnalysisStartTime(null);
+    localStorage.removeItem('superclick_active_job');
     setCurrentStep(1);
   };
 
@@ -1139,7 +1166,16 @@ function App() {
                       <div className="space-y-3">
                         <h2 className="text-3xl font-bold text-white font-display tracking-tight">{status === 'uploading' ? 'တင်နေသည်...' : 'လုပ်ဆောင်နေသည်...'}</h2>
                         <p className="text-gray-500 text-sm max-w-xs mx-auto">
-                            {currentBackendStep ? `လက်ရှိ လုပ်ဆောင်နေသော အဆင့်: ${currentBackendStep}` : 'Gemini AI သည် သင့်ဗီဒီယိုကို ခွဲခြမ်းစိတ်ဖြာ၍ အသံထပ်နေပါသည်။ ၃ မိနစ်ခန့် ကြာနိုင်ပါသည်။'}
+                            {(() => {
+                                if (!analysisStartTime || progressPct <= 2) {
+                                    return 'သင့်ဗီဒီယိုကို AI ဖြင့် လုပ်ဆောင်နေပါသည်။ ခဏစောင့်ပေးပါ။';
+                                }
+                                const elapsedSec = (Date.now() - analysisStartTime) / 1000;
+                                const estTotalSec = elapsedSec / (progressPct / 100);
+                                const remainingSec = Math.max(0, estTotalSec - elapsedSec);
+                                const remainingMin = Math.max(1, Math.round(remainingSec / 60));
+                                return `သင့်ဗီဒီယိုကို AI ဖြင့် လုပ်ဆောင်နေပါသည်။ ခန့်မှန်းခြေ ${remainingMin} မိနစ်ခန့် ကျန်ရှိပါသည်။`;
+                            })()}
                         </p>
                       </div>
                       <div className="w-full max-w-md mx-auto space-y-4">
@@ -1182,6 +1218,17 @@ function App() {
                           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
                               <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> မြန်မာဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်</a>
                           </div>
+                          {analysisData.coverText && (
+                              <div className="mt-6 bg-gray-900 border border-gray-800 rounded-2xl p-4 flex items-center justify-between gap-3">
+                                  <p className="text-sm text-gray-300 flex-1">{analysisData.coverText}</p>
+                                  <button
+                                      onClick={() => navigator.clipboard.writeText(analysisData.coverText)}
+                                      className="shrink-0 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg"
+                                  >
+                                      Copy
+                                  </button>
+                              </div>
+                          )}
                           <div className="mt-12 pt-8 border-t border-gray-800"><FeedbackForm jobId={jobId} /></div>
                       </div>
                     )}

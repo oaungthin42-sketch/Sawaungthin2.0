@@ -31,7 +31,7 @@ app.use(session({
 }));
 
 // Serve outputs
-app.use('/output', express.static(path.join(process.cwd(), 'public', 'output')));
+app.use('/output', express.static(path.join(process.cwd(), 'data', 'output')));
 
 // Setup API routes
 app.use('/api/auth', authRoutes);

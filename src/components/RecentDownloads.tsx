@@ -8,6 +8,7 @@ interface Job {
     completedAt: number;
     videoUrl: string;
     expiresAt: number;
+    coverText?: string;
 }
 
 export const RecentDownloads: React.FC = () => {
@@ -99,6 +100,18 @@ export const RecentDownloads: React.FC = () => {
                                     </p>
                                 </div>
                             </div>
+                            
+                            {job.coverText && (
+                                <div className="mb-4 bg-gray-950 border border-gray-800 rounded-xl p-3 flex items-center justify-between gap-2 text-xs">
+                                    <p className="text-gray-400 truncate flex-1">{job.coverText}</p>
+                                    <button
+                                        onClick={() => navigator.clipboard.writeText(job.coverText || '')}
+                                        className="shrink-0 px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded cursor-pointer"
+                                    >
+                                        Copy
+                                    </button>
+                                </div>
+                            )}
                             
                             <div className="flex items-center justify-between mt-auto">
                                 <div className="text-xs font-bold text-amber-500/80 bg-amber-500/10 px-2 py-1 rounded">

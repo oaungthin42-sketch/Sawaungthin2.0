@@ -18,7 +18,7 @@ export const startCleanupSweep = () => {
                 let freedBytes = 0;
 
                 // Delete output file
-                const outputPath = path.join(process.cwd(), 'public', 'output', `${jobId}.mp4`);
+                const outputPath = path.join(process.cwd(), 'data', 'output', `${jobId}.mp4`);
                 try {
                     if (fs.existsSync(outputPath)) {
                         const stat = fs.statSync(outputPath);
