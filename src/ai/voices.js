@@ -4,7 +4,7 @@ export const VOICES = [
         name: 'တက်ကြွသောလူငယ်အသံ',
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
-        pitch: '+4Hz',
+        pitch: '+14Hz',
         rate: '+38%'
     },
     {
@@ -12,7 +12,7 @@ export const VOICES = [
         name: 'လူငယ်အမျိုးသားအသံ',
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
-        pitch: '+0Hz',
+        pitch: '+2Hz',
         rate: '+35%'
     },
     {
@@ -28,7 +28,7 @@ export const VOICES = [
         name: 'လူလတ်ပိုင်းအမျိုးသားအသံ',
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
-        pitch: '-4Hz',
+        pitch: '-6Hz',
         rate: '+34%'
     },
     {
@@ -36,7 +36,7 @@ export const VOICES = [
         name: 'နက်ရှိုင်းသောအမျိုးသားအသံ',
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
-        pitch: '-8Hz',
+        pitch: '-10Hz',
         rate: '+33%'
     },
     {
