@@ -3,8 +3,9 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { EdgeTTS } from 'node-edge-tts';
+import ffprobePath from 'ffprobe-static';
 import { getVoiceConfig } from './voices.js';
 import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
@@ -256,7 +257,35 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             }
 
             const standardizedPath = path.join(ttsDir, `chunk_std_${String(bIdx).padStart(4, '0')}.wav`);
-            await runFFmpeg(['-i', rawChunk, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', '-y', standardizedPath], ttsDir);
+            
+            // Log ffprobe -show_streams output (codec_name, sample_fmt) for the raw chunk BEFORE standardization
+            try {
+                const ffprobeCmd = `"${ffprobePath.path}" -v error -show_entries stream=codec_name,sample_fmt -of default=noprint_wrappers=1 "${rawChunk}"`;
+                const ffprobeOut = execSync(ffprobeCmd).toString().trim();
+                console.log(`[DEBUG-TTS] Raw chunk ${bIdx} ffprobe show_streams output:\n${ffprobeOut}`);
+            } catch (probeErr) {
+                console.error(`[DEBUG-TTS] Failed to run ffprobe on raw chunk ${bIdx}:`, probeErr);
+            }
+
+            const trimTailSec = 0.040; // 40ms tail safety trim
+            const trimmedDur = Math.max(0.1, chunkDur - trimTailSec);
+            const fadeInSec = 0.015; // 15ms fade-in
+            const fadeOutSec = 0.030; // 30ms fade-out
+            const fadeOutStart = Math.max(0, trimmedDur - fadeOutSec);
+
+            // Audio filter chain: tail trim, reset pts, fade in, and fade out
+            const filterStr = `atrim=end=${trimmedDur.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${fadeInSec.toFixed(3)},afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutSec.toFixed(3)}`;
+
+            await runFFmpeg([
+                '-f', 'mp3',
+                '-i', rawChunk,
+                '-af', filterStr,
+                '-acodec', 'pcm_s16le',
+                '-ar', '24000',
+                '-ac', '1',
+                '-y',
+                standardizedPath
+            ], ttsDir);
             processedChunks.push(standardizedPath);
             
             let actualFinalDur = chunkDur;
@@ -425,7 +454,9 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(authoritativeTimeline, null, 2));
         
         try {
-            if (fs.existsSync(ttsDir)) {
+            if (process.env.DEBUG_TTS === 'true') {
+                console.log(`[DEBUG-TTS] Preserving ttsDir because DEBUG_TTS is true: ${ttsDir}`);
+            } else if (fs.existsSync(ttsDir)) {
                 fs.rmSync(ttsDir, { recursive: true, force: true });
             }
         } catch (cleanupErr) { }
@@ -437,7 +468,9 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         const cacheDir = path.dirname(cachePath);
         const ttsDir = path.join(cacheDir, 'tts_chunks_scene');
         try {
-            if (fs.existsSync(ttsDir)) {
+            if (process.env.DEBUG_TTS === 'true') {
+                console.log(`[DEBUG-TTS] Preserving ttsDir on error because DEBUG_TTS is true: ${ttsDir}`);
+            } else if (fs.existsSync(ttsDir)) {
                 fs.rmSync(ttsDir, { recursive: true, force: true });
             }
         } catch (cleanupErr) { }

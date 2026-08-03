@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer-core';
+import { execSync } from 'child_process';
+import _ffmpegPath from 'ffmpeg-static';
+
+let ffmpegPath = _ffmpegPath;
+try { execSync('ffmpeg -version'); ffmpegPath = 'ffmpeg'; } catch (e) {}
 import { updateJob, getJob } from '../services/jobManager.js';
 import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
@@ -861,6 +866,38 @@ export const processRecapPipeline = async (jobId) => {
                 await runFFmpeg(bgArgs, tmpDir);
             }
             
+            // Two-pass loudnorm analysis (Pass 1: Measurement)
+            let measured_I = '-14';
+            let measured_LRA = '11';
+            let measured_TP = '-1.5';
+            let measured_thresh = '-24';
+            let target_offset = '0';
+
+            try {
+                console.log(`[LOUDNORM-TWOPASS] Starting Pass 1 analysis on: ${state.ttsAudioPath}`);
+                const measureCmd = `"${ffmpegPath}" -i "${path.resolve(state.ttsAudioPath)}" -af loudnorm=I=-14:LRA=11:TP=-1.5:print_format=json -f null - 2>&1`;
+                const output = execSync(measureCmd).toString();
+                
+                const jsonStart = output.lastIndexOf('{');
+                const jsonEnd = output.lastIndexOf('}');
+                if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+                    const jsonStr = output.substring(jsonStart, jsonEnd + 1);
+                    const data = JSON.parse(jsonStr);
+                    measured_I = data.input_i;
+                    measured_LRA = data.input_lra;
+                    measured_TP = data.input_tp;
+                    measured_thresh = data.input_thresh;
+                    target_offset = data.target_offset;
+                    console.log(`[LOUDNORM-TWOPASS] Pass 1 success. Measured params: I=${measured_I}, LRA=${measured_LRA}, TP=${measured_TP}, thresh=${measured_thresh}, offset=${target_offset}`);
+                } else {
+                    console.warn('[LOUDNORM-TWOPASS] Could not find loudnorm JSON output in ffmpeg logs, using defaults.');
+                }
+            } catch (e) {
+                console.error('[LOUDNORM-TWOPASS] Pass 1 analysis failed, using defaults:', e.message);
+            }
+
+            const loudnormFilter = `loudnorm=I=-14:LRA=11:TP=-1.5:measured_I=${measured_I}:measured_LRA=${measured_LRA}:measured_TP=${measured_TP}:measured_thresh=${measured_thresh}:measured_offset=${target_offset}:linear=true`;
+
             let finalArgs = [];
             console.log(`[AUDIO-MIX] Using TTS narration only (background audio skipped).`);
             finalArgs = [
@@ -873,7 +910,7 @@ export const processRecapPipeline = async (jobId) => {
                 '-c:v', 'copy',
                 '-c:a', 'aac',
                 '-b:a', '128k',
-                '-filter:a', 'loudnorm=I=-14:LRA=11:TP=-1.5',
+                '-filter:a', loudnormFilter,
                 '-movflags', '+faststart',
                 '-y', finalFileTmp
             ];
