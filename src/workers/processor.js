@@ -896,7 +896,7 @@ export const processRecapPipeline = async (jobId) => {
                 console.error('[LOUDNORM-TWOPASS] Pass 1 analysis failed, using defaults:', e.message);
             }
 
-            const loudnormFilter = `loudnorm=I=-14:LRA=11:TP=-1.5:measured_I=${measured_I}:measured_LRA=${measured_LRA}:measured_TP=${measured_TP}:measured_thresh=${measured_thresh}:measured_offset=${target_offset}:linear=true`;
+            const loudnormFilter = `loudnorm=I=-14:LRA=11:TP=-1.5:measured_I=${measured_I}:measured_LRA=${measured_LRA}:measured_TP=${measured_TP}:measured_thresh=${measured_thresh}:offset=${target_offset}:linear=true`;
 
             let finalArgs = [];
             console.log(`[AUDIO-MIX] Using TTS narration only (background audio skipped).`);
