@@ -12,7 +12,7 @@ public/output/
 assets/
 *.mp4
 *.mp3
--e venv/
+venv/
 test_venv/
 *.pyc
 __pycache__/

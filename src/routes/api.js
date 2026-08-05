@@ -185,8 +185,14 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
     const subtitleColor = req.body.subtitleColor || "white";
     const speed = parseFloat(req.body.speed) || 1.0;
     const flipped = req.body.flipped === 'true' ? 1 : 0;
-    const useVoiceClone = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1' ? 1 : 0;
-    const referenceVoiceId = req.body.referenceVoiceId || null;
+    const useVoiceCloneRaw = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1';
+    let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
+    let referenceVoiceId = req.body.referenceVoiceId || null;
+
+    if (useVoiceClone && user.role !== 'admin') {
+        useVoiceClone = 0;
+        referenceVoiceId = null;
+    }
 
     // Transactional-ish update (SQLite is simple)
     if (user.role !== 'admin') {
@@ -271,8 +277,14 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
-     const useVoiceClone = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1' ? 1 : 0;
-     const referenceVoiceId = req.body.referenceVoiceId || null;
+     const useVoiceCloneRaw = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1';
+     let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
+     let referenceVoiceId = req.body.referenceVoiceId || null;
+
+     if (useVoiceClone && user.role !== 'admin') {
+         useVoiceClone = 0;
+         referenceVoiceId = null;
+     }
 
      // Transactional-ish update (SQLite is simple)
      if (user.role !== 'admin') {
