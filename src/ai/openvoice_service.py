@@ -1,8 +1,26 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+import logging
+
+# Monkeypatch faster-whisper BEFORE any imports to force CPU usage
+try:
+    from faster_whisper import WhisperModel
+    # Save original class
+    OriginalWhisperModel = WhisperModel
+    # Override class
+    class CPUWhisperModel(OriginalWhisperModel):
+        def __init__(self, *args, **kwargs):
+            kwargs['device'] = 'cpu'
+            kwargs['compute_type'] = 'int8'
+            super().__init__(*args, **kwargs)
+    import faster_whisper
+    faster_whisper.WhisperModel = CPUWhisperModel
+    logging.info("Monkey-patched faster_whisper to force CPU.")
+except ImportError:
+    pass
+
 import sys
 import torch
-import logging
 
 # Ensure src/ai is in the python path to load openvoice dependencies if needed
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
