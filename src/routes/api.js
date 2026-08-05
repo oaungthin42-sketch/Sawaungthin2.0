@@ -393,7 +393,8 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
 
     try {
         // Move the uploaded file from tmp to dataDir
-        fs.renameSync(req.file.path, finalAudioPath);
+        fs.copyFileSync(req.file.path, finalAudioPath);
+        fs.unlinkSync(req.file.path);
 
         // Call python microservice to extract embedding
         const port = process.env.VOICE_CLONE_PORT || '5001';
