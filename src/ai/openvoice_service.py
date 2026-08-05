@@ -47,7 +47,7 @@ def load_models():
     try:
         logging.info(f"Loading ToneColorConverter from {CONVERTER_DIR}...")
         tone_color_converter = ToneColorConverter(config_path, device=device)
-        tone_color_converter.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        tone_color_converter.load_ckpt(checkpoint_path)
         logging.info("ToneColorConverter successfully loaded and resident in memory.")
     except Exception as e:
         logging.error(f"Failed to load ToneColorConverter: {e}")
