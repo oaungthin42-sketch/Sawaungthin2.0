@@ -5,7 +5,6 @@ faster-whisper==1.0.3
 requests
 fastapi
 uvicorn
-git+https://github.com/myshell-ai/OpenVoice.git --no-deps
 librosa==0.9.1
 pydub==0.25.1
 wavmark==0.0.3

@@ -30,7 +30,8 @@ COPY requirements.txt ./
 
 # Create a virtual environment and install faster-whisper and python dependencies
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir --no-deps git+https://github.com/myshell-ai/OpenVoice.git
 
 # Copy package configurations
 COPY package*.json ./
