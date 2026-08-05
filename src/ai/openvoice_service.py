@@ -10,6 +10,13 @@ try:
     # Override class
     class CPUWhisperModel(OriginalWhisperModel):
         def __init__(self, *args, **kwargs):
+            # Force 'small' model size
+            model_size = 'small'
+            if len(args) > 0:
+                args = (model_size,) + args[1:]
+            else:
+                kwargs['model_size_or_path'] = model_size
+            
             kwargs['device'] = 'cpu'
             kwargs['compute_type'] = 'int8'
             super().__init__(*args, **kwargs)

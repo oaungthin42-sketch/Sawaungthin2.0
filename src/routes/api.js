@@ -405,7 +405,7 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
         const response = await axios.post(serviceUrl, {
             audio_path: path.resolve(finalAudioPath),
             cache_path: path.resolve(embeddingPath)
-        }, { timeout: 60000 }); // 1 min timeout
+        }, { timeout: 600000 }); // 10 min timeout
 
         if (response.data && response.data.status === 'success') {
             // Save to DB
