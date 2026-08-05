@@ -138,10 +138,31 @@ function App() {
   const [slipUploadSuccess, setSlipUploadSuccess] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState(2);
 
+  const [voiceCloneEnabled, setVoiceCloneEnabled] = useState(false);
+  const [referenceVoices, setReferenceVoices] = useState<any[]>([]);
+  const [useVoiceClone, setUseVoiceClone] = useState(false);
+  const [selectedReferenceVoiceId, setSelectedReferenceVoiceId] = useState<string>('');
+
   useEffect(() => {
     axios.get('/api/auth/me').then(res => {
-      setUser(res.data.user);
+      const userData = res.data.user;
+      setUser(userData);
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
+
+      // Fetch voice clone configuration if admin
+      if (userData && userData.role === 'admin') {
+        axios.get('/api/voice-clones/config').then(cfgRes => {
+          setVoiceCloneEnabled(cfgRes.data.enabled);
+          if (cfgRes.data.enabled) {
+            axios.get('/api/voice-clones/reference-voices').then(refRes => {
+              setReferenceVoices(refRes.data);
+              if (refRes.data.length > 0) {
+                setSelectedReferenceVoiceId(refRes.data[0].id);
+              }
+            }).catch(console.error);
+          }
+        }).catch(console.error);
+      }
     }).catch(() => {
       setUser(null);
     }).finally(() => {
@@ -541,7 +562,10 @@ function App() {
     formData.append('speed', outputSpeed.toString());
     formData.append('flipped', isFlipped.toString());
     
-
+    if (user?.role === 'admin' && voiceCloneEnabled) {
+      formData.append('useVoiceClone', useVoiceClone ? 'true' : 'false');
+      formData.append('referenceVoiceId', selectedReferenceVoiceId || '');
+    }
     try {
       const response = await axios.post('/api/process-recap', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -1020,6 +1044,51 @@ function App() {
                                     <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === (currentVoiceId) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
                                 </div>
                             </div>
+                            
+                            {user?.role === 'admin' && voiceCloneEnabled && (
+                              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto mt-6 space-y-4 text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">👥</span>
+                                    <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">Voice Cloning (Admin)</h3>
+                                  </div>
+                                  <label className="relative inline-flex items-center cursor-pointer">
+                                    <input 
+                                      type="checkbox" 
+                                      checked={useVoiceClone} 
+                                      onChange={(e) => setUseVoiceClone(e.target.checked)} 
+                                      className="sr-only peer" 
+                                    />
+                                    <div className="w-11 h-6 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white"></div>
+                                  </label>
+                                </div>
+                                
+                                {useVoiceClone && (
+                                  <div className="space-y-3 animate-in fade-in duration-300">
+                                    {referenceVoices.length === 0 ? (
+                                      <p className="text-xs text-amber-400 bg-amber-950/20 p-3 rounded-xl border border-amber-900/30">
+                                        {"သင်တန်းပေးထားသော voice embedding မရှိသေးပါ။ Reference voice ကို Admin Area > Voice Clone တက်ဘ်တွင် အရင်ဆုံး တင်ပေးပါ။"}
+                                      </p>
+                                    ) : (
+                                      <div className="flex flex-col gap-2">
+                                        <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Select Reference Voice</label>
+                                        <select 
+                                          value={selectedReferenceVoiceId} 
+                                          onChange={(e) => setSelectedReferenceVoiceId(e.target.value)}
+                                          className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500 font-bold"
+                                        >
+                                          {referenceVoices.map((voice) => (
+                                            <option key={voice.id} value={voice.id}>
+                                              {voice.name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             
 
                         </div>

@@ -103,7 +103,7 @@ export const transcribeWav = async (wavPath, cachePath) => {
 };
 
 
-export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, originalTranscript) => {
+export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, originalTranscript, options = {}) => {
     try {
         console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
         const cacheMetaPath = cachePath + '.meta.json';
@@ -396,24 +396,65 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             runningAudioTime += actualFinalDur;
         }
 
-        const concatListPath = path.join(ttsDir, 'concat.txt');
-        let concatLines = processedChunks.map(c => `file '${path.basename(c)}'`).join('\n');
+        if (options && options.useVoiceClone === 1 && options.referenceVoiceId) {
+            try {
+                console.log(`[AI] Voice clone is active. Cloning ${processedChunks.length} chunks...`);
+                const { applyVoiceClone } = await import('./voiceClone.js');
+                const clonedChunks = await applyVoiceClone(processedChunks, options.referenceVoiceId);
+                for (let i = 0; i < processedChunks.length; i++) {
+                    if (clonedChunks[i] && clonedChunks[i] !== processedChunks[i]) {
+                        processedChunks[i] = clonedChunks[i];
+                    }
+                }
+            } catch (cloneErr) {
+                console.error("[AI] Error during voice cloning. Falling back to original TTS audio:", cloneErr);
+            }
+        }
 
         if (processedChunks.length === 0) {
             console.warn("[WARNING] No audio chunks to concatenate. Generating 100ms silent audio...");
             const gapPath = path.join(ttsDir, 'gap_empty.wav');
             await runFFmpeg(['-f', 'lavfi', '-i', `anullsrc=r=24000:cl=mono`, '-t', '0.1', '-acodec', 'pcm_s16le', '-y', gapPath], ttsDir);
-            concatLines = `file 'gap_empty.wav'`;
             processedChunks.push(gapPath);
         }
 
-        fs.writeFileSync(concatListPath, concatLines);
-        
+        console.log(`[AI] Stripping WAV headers for seamless raw PCM concatenation of ${processedChunks.length} chunks...`);
+        const rawPaths = [];
+        for (let i = 0; i < processedChunks.length; i++) {
+            const wavPath = processedChunks[i];
+            const rawPath = wavPath + '.raw';
+            await runFFmpeg([
+                '-y',
+                '-i', wavPath,
+                '-f', 's16le',
+                '-acodec', 'pcm_s16le',
+                '-ar', '24000',
+                '-ac', '1',
+                rawPath
+            ], ttsDir);
+            rawPaths.push(rawPath);
+        }
+
+        console.log("[AI] Concatenating raw PCM files in Node.js...");
+        const concatBuffer = [];
+        for (const rawPath of rawPaths) {
+            concatBuffer.push(fs.readFileSync(rawPath));
+        }
+        const mergedRawPath = path.join(ttsDir, 'merged.raw');
+        fs.writeFileSync(mergedRawPath, Buffer.concat(concatBuffer));
+
+        console.log("[AI] Re-encoding merged raw PCM into final standard WAV...");
         const args = [
-            '-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
-            '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '24000', cachePath
+            '-y',
+            '-f', 's16le',
+            '-ar', '24000',
+            '-ac', '1',
+            '-i', 'merged.raw',
+            '-acodec', 'pcm_s16le',
+            '-ar', '24000',
+            '-ac', '1',
+            cachePath
         ];
-        
         await runFFmpeg(args, ttsDir);
         
         if (!fs.existsSync(cachePath) || fs.statSync(cachePath).size === 0) {

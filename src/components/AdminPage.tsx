@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserMinus, UserCheck, Search, Loader2, ArrowLeft, MessageSquare, List, Star, CreditCard, Check, X, Settings } from 'lucide-react';
+import { Users, UserMinus, UserCheck, Search, Loader2, ArrowLeft, MessageSquare, List, Star, CreditCard, Check, X, Settings, Mic } from 'lucide-react';
 import axios from 'axios';
 
 interface User {
@@ -47,11 +47,11 @@ interface PaymentRequest {
 
 interface AdminPageProps {
     onBack: () => void;
-    initialTab?: 'users' | 'jobs' | 'feedback' | 'payments' | 'settings';
+    initialTab?: 'users' | 'jobs' | 'feedback' | 'payments' | 'settings' | 'voice-clone';
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
-    const [activeTab, setActiveTab] = useState<'users' | 'jobs' | 'feedback' | 'payments' | 'settings'>(initialTab || 'users');
+    const [activeTab, setActiveTab] = useState<'users' | 'jobs' | 'feedback' | 'payments' | 'settings' | 'voice-clone'>(initialTab || 'users');
     const [users, setUsers] = useState<User[]>([]);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [feedback, setFeedback] = useState<Feedback[]>([]);
@@ -66,6 +66,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
     const [totalUserCount, setTotalUserCount] = useState<number | null>(null);
     const [showHistory, setShowHistory] = useState(false);
     const [showFeedbackHistory, setShowFeedbackHistory] = useState(false);
+
+    // Voice Clone Management States
+    const [voiceClonesEnabled, setVoiceClonesEnabled] = useState(false);
+    const [refVoices, setRefVoices] = useState<any[]>([]);
+    const [newVoiceName, setNewVoiceName] = useState('');
+    const [newVoiceFile, setNewVoiceFile] = useState<File | null>(null);
+    const [uploadingVoice, setUploadingVoice] = useState(false);
 
     useEffect(() => {
         axios.get('/api/user/admin/users')
@@ -98,6 +105,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                     }
                 });
                 setSettingsValues(mapped);
+            } else if (activeTab === 'voice-clone') {
+                const cfg = await axios.get('/api/voice-clones/config');
+                setVoiceClonesEnabled(cfg.data.enabled);
+                if (cfg.data.enabled) {
+                    const refRes = await axios.get('/api/voice-clones/reference-voices');
+                    setRefVoices(refRes.data);
+                }
             }
         } catch (err: any) {
             console.error('Failed to fetch data', err);
@@ -162,6 +176,41 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
             fetchData();
         } catch (e: any) {
             alert(e.response?.data?.error || 'Failed to reject payment');
+        }
+    };
+
+    const handleUploadReferenceVoice = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newVoiceName.trim() || !newVoiceFile) return;
+        setUploadingVoice(true);
+        const formData = new FormData();
+        formData.append('name', newVoiceName.trim());
+        formData.append('audio', newVoiceFile);
+        try {
+            await axios.post('/api/voice-clones/reference-voices', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            setNewVoiceName('');
+            setNewVoiceFile(null);
+            // Refresh
+            const refRes = await axios.get('/api/voice-clones/reference-voices');
+            setRefVoices(refRes.data);
+            alert("Reference voice uploaded and processed successfully!");
+        } catch (err: any) {
+            console.error(err);
+            alert("Failed to process reference voice: " + (err.response?.data?.error || err.message));
+        } finally {
+            setUploadingVoice(false);
+        }
+    };
+
+    const handleDeleteReferenceVoice = async (id: string) => {
+        if (!confirm("Are you sure you want to delete this reference voice?")) return;
+        try {
+            await axios.delete(`/api/voice-clones/reference-voices/${id}`);
+            setRefVoices(prev => prev.filter(v => v.id !== id));
+        } catch (err: any) {
+            alert("Failed to delete reference voice: " + (err.response?.data?.error || err.message));
         }
     };
 
@@ -421,6 +470,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                             title="ဆက်တင်များ"
                         >
                             <Settings className="w-5 h-5 sm:w-4 sm:h-4" /> <span className="hidden sm:inline">ဆက်တင်များ</span>
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('voice-clone')}
+                            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 p-3 sm:px-4 sm:py-2 rounded-xl text-sm font-bold transition-all shrink-0 ${activeTab === 'voice-clone' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white'}`}
+                            title="Voice Clone"
+                        >
+                            <Mic className="w-5 h-5 sm:w-4 sm:h-4" /> <span className="hidden sm:inline">Voice Clone</span>
                         </button>
                     </div>
                 </div>
@@ -842,6 +898,93 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                         Telegram Link Save
                                     </button>
                                 </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'voice-clone' && (
+                            <div className="p-4 sm:p-8 space-y-8 max-w-4xl text-left">
+                                <div className="space-y-2">
+                                    <h2 className="text-xl font-bold text-white">Voice Cloning Dashboard</h2>
+                                    <p className="text-xs text-gray-500 font-bold">
+                                        OpenVoice V2 ဖြင့် မြန်မာအသံထပ်ရာတွင် သုံးရန် Reference Voice (WAV/MP3/M4A) တင်ပြီး embedding ထုတ်ယူနိုင်သည်။
+                                    </p>
+                                </div>
+
+                                {!voiceClonesEnabled ? (
+                                    <div className="p-6 bg-red-950/20 border border-red-900/30 text-red-400 rounded-2xl flex items-center gap-3">
+                                        <X className="w-6 h-6 shrink-0" />
+                                        <div>
+                                            <h4 className="font-bold text-sm">Voice Cloning is Disabled</h4>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                စနစ်၏ environment variable တွင် <code>VOICE_CLONE_ENABLED=true</code> ကို ဖွင့်ထားရန် လိုအပ်ပါသည်။
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                        {/* Upload form */}
+                                        <div className="lg:col-span-1 bg-gray-950/40 p-6 rounded-2xl border border-gray-800 space-y-4 h-fit">
+                                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">တင်ရန်</h3>
+                                            <form onSubmit={handleUploadReferenceVoice} className="space-y-4">
+                                                <div>
+                                                    <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide">အသံအမည်</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={newVoiceName}
+                                                        onChange={(e) => setNewVoiceName(e.target.value)}
+                                                        placeholder="e.g. Nay Min, Su Su"
+                                                        className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-xs font-bold focus:border-indigo-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide">အသံဖိုင် (Standard Audio, ideally mono WAV)</label>
+                                                    <input 
+                                                        type="file" 
+                                                        accept="audio/*"
+                                                        onChange={(e) => setNewVoiceFile(e.target.files?.[0] || null)}
+                                                        className="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-indigo-500/10 file:text-indigo-400 hover:file:bg-indigo-500/20"
+                                                    />
+                                                </div>
+                                                <button 
+                                                    type="submit"
+                                                    disabled={uploadingVoice || !newVoiceName.trim() || !newVoiceFile}
+                                                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
+                                                >
+                                                    {uploadingVoice && <Loader2 className="w-4 h-4 animate-spin" />}
+                                                    စတင်ပြီး Processing လုပ်မည်
+                                                </button>
+                                            </form>
+                                        </div>
+
+                                        {/* Listing of voices */}
+                                        <div className="lg:col-span-2 space-y-4">
+                                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">စနစ်အတွင်းရှိ Reference Voices</h3>
+                                            {refVoices.length === 0 ? (
+                                                <div className="p-8 text-center bg-gray-950/20 border border-gray-800 rounded-2xl text-gray-500 italic text-xs">
+                                                    Reference voices မရှိသေးပါ။ အထက်ပါဖောင်မှ တင်သွင်းပါ။
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                    {refVoices.map((voice) => (
+                                                        <div key={voice.id} className="p-4 bg-gray-900/50 border border-gray-800 rounded-2xl flex items-center justify-between gap-4">
+                                                            <div className="space-y-1">
+                                                                <h4 className="font-bold text-sm text-white">{voice.name}</h4>
+                                                                <p className="text-[10px] text-gray-600 font-mono break-all">{voice.id}</p>
+                                                            </div>
+                                                            <button 
+                                                                onClick={() => handleDeleteReferenceVoice(voice.id)}
+                                                                className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-colors"
+                                                                title="Delete reference voice"
+                                                            >
+                                                                <X className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

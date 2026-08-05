@@ -223,7 +223,10 @@ export const processRecapPipeline = async (jobId) => {
             }));
 
             const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
-            state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript);
+            state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript, {
+                useVoiceClone: job.useVoiceClone,
+                referenceVoiceId: job.referenceVoiceId
+            });
             saveState();
         }
 

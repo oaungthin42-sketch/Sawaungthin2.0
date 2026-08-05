@@ -185,6 +185,8 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
     const subtitleColor = req.body.subtitleColor || "white";
     const speed = parseFloat(req.body.speed) || 1.0;
     const flipped = req.body.flipped === 'true' ? 1 : 0;
+    const useVoiceClone = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1' ? 1 : 0;
+    const referenceVoiceId = req.body.referenceVoiceId || null;
 
     // Transactional-ish update (SQLite is simple)
     if (user.role !== 'admin') {
@@ -204,7 +206,11 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
         userId: user.id
     });
 
-    updateJob(jobId, { creditsCost: user.role === 'admin' ? 0 : requiredCredits });
+    updateJob(jobId, { 
+        creditsCost: user.role === 'admin' ? 0 : requiredCredits,
+        useVoiceClone: useVoiceClone,
+        referenceVoiceId: referenceVoiceId
+    });
     
     res.json({ jobId });
 
@@ -265,6 +271,8 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
+     const useVoiceClone = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1' ? 1 : 0;
+     const referenceVoiceId = req.body.referenceVoiceId || null;
 
      // Transactional-ish update (SQLite is simple)
      if (user.role !== 'admin') {
@@ -284,7 +292,11 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          userId: user.id
      });
 
-     updateJob(jobId, { creditsCost: user.role === 'admin' ? 0 : requiredCredits });
+     updateJob(jobId, { 
+         creditsCost: user.role === 'admin' ? 0 : requiredCredits,
+         useVoiceClone: useVoiceClone,
+         referenceVoiceId: referenceVoiceId
+     });
      
      res.json({ jobId });
      
@@ -330,6 +342,125 @@ router.get('/completed-jobs', (req, res) => {
     }
     
     res.json(validJobs);
+});
+
+const handleAudioUpload = (req, res, next) => {
+    upload.single('audio')(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            return res.status(400).json({ error: err.message });
+        } else if (err) {
+            return res.status(500).json({ error: "Audio upload failed." });
+        }
+        next();
+    });
+};
+
+router.get('/voice-clones/config', (req, res) => {
+    res.json({ enabled: process.env.VOICE_CLONE_ENABLED === 'true' });
+});
+
+router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleAudioUpload, async (req, res) => {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+        if (req.file && fs.existsSync(req.file.path)) {
+            try { fs.unlinkSync(req.file.path); } catch (e) {}
+        }
+        return res.status(400).json({ error: "Reference voice name is required." });
+    }
+    if (!req.file) {
+        return res.status(400).json({ error: "Reference audio file is required." });
+    }
+
+    const refVoiceId = uuidv4();
+    const dataDir = path.join(process.cwd(), 'data', 'reference_voices');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+    const audioExt = path.extname(req.file.originalname) || '.wav';
+    const finalAudioPath = path.join(dataDir, `${refVoiceId}${audioExt}`);
+    const embeddingPath = path.join(dataDir, `${refVoiceId}.pt`);
+
+    try {
+        // Move the uploaded file from tmp to dataDir
+        fs.renameSync(req.file.path, finalAudioPath);
+
+        // Call python microservice to extract embedding
+        const port = process.env.VOICE_CLONE_PORT || '5001';
+        const serviceUrl = `http://127.0.0.1:${port}/extract-embedding`;
+
+        console.log(`[API] Extracting embedding for reference voice: ${finalAudioPath}`);
+        const response = await axios.post(serviceUrl, {
+            audio_path: path.resolve(finalAudioPath),
+            cache_path: path.resolve(embeddingPath)
+        }, { timeout: 60000 }); // 1 min timeout
+
+        if (response.data && response.data.status === 'success') {
+            // Save to DB
+            const stmt = db.prepare(`
+                INSERT INTO reference_voices (id, userId, name, audioPath, embeddingCachePath)
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            stmt.run(refVoiceId, req.user.id, name.trim(), finalAudioPath, embeddingPath);
+
+            console.log(`[API] Reference voice created successfully: ${refVoiceId}`);
+            return res.json({
+                id: refVoiceId,
+                name: name.trim(),
+                audioPath: finalAudioPath,
+                embeddingCachePath: embeddingPath
+            });
+        } else {
+            throw new Error("Python microservice did not return success status.");
+        }
+    } catch (err) {
+        console.error("[API] Failed to create reference voice:", err);
+        // Cleanup files if they exist
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            try { fs.unlinkSync(req.file.path); } catch (e) {}
+        }
+        if (fs.existsSync(finalAudioPath)) {
+            try { fs.unlinkSync(finalAudioPath); } catch (e) {}
+        }
+        if (fs.existsSync(embeddingPath)) {
+            try { fs.unlinkSync(embeddingPath); } catch (e) {}
+        }
+        return res.status(500).json({ error: `Failed to process reference voice: ${err.message}` });
+    }
+});
+
+router.get('/voice-clones/reference-voices', authMiddleware, adminOnly, (req, res) => {
+    try {
+        const rows = db.prepare('SELECT id, name, created_at FROM reference_voices ORDER BY created_at DESC').all();
+        res.json(rows);
+    } catch (e) {
+        console.error("[API] Failed to list reference voices:", e);
+        res.status(500).json({ error: "Failed to list reference voices." });
+    }
+});
+
+router.delete('/voice-clones/reference-voices/:id', authMiddleware, adminOnly, (req, res) => {
+    const { id } = req.params;
+    try {
+        const row = db.prepare('SELECT * FROM reference_voices WHERE id = ?').get(id);
+        if (!row) {
+            return res.status(404).json({ error: "Reference voice not found." });
+        }
+
+        // Delete from database
+        db.prepare('DELETE FROM reference_voices WHERE id = ?').run(id);
+
+        // Delete audio and embedding files
+        if (row.audioPath && fs.existsSync(row.audioPath)) {
+            try { fs.unlinkSync(row.audioPath); } catch (e) {}
+        }
+        if (row.embeddingCachePath && fs.existsSync(row.embeddingCachePath)) {
+            try { fs.unlinkSync(row.embeddingCachePath); } catch (e) {}
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error("[API] Failed to delete reference voice:", e);
+        res.status(500).json({ error: "Failed to delete reference voice." });
+    }
 });
 
 export default router;

@@ -56,8 +56,34 @@ async function startServer() {
   }
 
   const PORT = 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on port ${PORT}`);
+
+    if (process.env.VOICE_CLONE_ENABLED === 'true') {
+      const { spawn } = await import('child_process');
+      const pythonBin = process.env.PYTHON_BIN || (process.env.NODE_ENV === 'production' ? '/opt/venv/bin/python3' : 'python3');
+      const pyScript = path.join(process.cwd(), 'src', 'ai', 'openvoice_service.py');
+      console.log(`[OpenVoice] Starting persistent background service on port ${process.env.VOICE_CLONE_PORT || '5001'} using ${pythonBin}`);
+      
+      const openvoiceProcess = spawn(pythonBin, [pyScript], {
+        env: {
+          ...process.env,
+          VOICE_CLONE_PORT: process.env.VOICE_CLONE_PORT || '5001'
+        }
+      });
+
+      openvoiceProcess.stdout.on('data', (data) => {
+        console.log(`[OpenVoice Service STDOUT] ${data.toString().trim()}`);
+      });
+
+      openvoiceProcess.stderr.on('data', (data) => {
+        console.error(`[OpenVoice Service STDERR] ${data.toString().trim()}`);
+      });
+
+      openvoiceProcess.on('close', (code) => {
+        console.log(`[OpenVoice Service] Process exited with code ${code}`);
+      });
+    }
   });
 }
 

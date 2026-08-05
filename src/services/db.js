@@ -111,3 +111,21 @@ try {
 }
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN coverText TEXT`); } catch (e) {}
+
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS reference_voices (
+            id TEXT PRIMARY KEY,
+            userId TEXT,
+            name TEXT,
+            audioPath TEXT,
+            embeddingCachePath TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+} catch (e) {
+    console.error("Error creating reference_voices table", e);
+}
+
+try { db.exec(`ALTER TABLE jobs ADD COLUMN useVoiceClone INTEGER DEFAULT 0`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN referenceVoiceId TEXT`); } catch (e) {}
