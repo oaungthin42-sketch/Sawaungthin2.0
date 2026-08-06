@@ -204,17 +204,33 @@ def convert(req: ConvertRequest):
             
         # 4. Perform conversion
         logging.info(f"Converting voice: {req.source_audio_path} -> {output_path}")
-        converter.convert(
+        audio_array = converter.convert(
             audio_src_path=req.source_audio_path,
             src_se=src_se,
             tgt_se=tgt_se,
-            output_path=output_path,
+            output_path=None,
             tau=0.3
         )
+        
+        # OpenVoice V2 native sampling rate is typically 22050Hz
+        native_sr = getattr(converter.hps.data, 'sampling_rate', 22050)
+        target_sr = 24000
+        
+        import librosa
+        import soundfile as sf
+        
+        if native_sr != target_sr:
+            logging.info(f"Resampling output from {native_sr}Hz to {target_sr}Hz to prevent pitch-shift chipmunk effect")
+            audio_array = librosa.resample(audio_array, orig_sr=native_sr, target_sr=target_sr)
+            
+        sf.write(output_path, audio_array, target_sr)
         
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise Exception("Generated output file is missing or 0 bytes.")
             
+        info = sf.info(output_path)
+        logging.info(f"[Diagnostics] Written WAV actual sample rate: {info.samplerate}Hz, channels: {info.channels}, duration: {info.duration:.3f}s")
+        
         return {"status": "success", "converted_audio_path": output_path}
     except Exception as e:
         logging.error(f"Error in convert: {e}")
