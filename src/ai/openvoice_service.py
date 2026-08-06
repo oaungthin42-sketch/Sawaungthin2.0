@@ -93,6 +93,7 @@ class ExtractRequest(BaseModel):
 
 class ConvertRequest(BaseModel):
     source_audio_path: str
+    source_embedding_path: str = None
     reference_embedding_path: str = None
     reference_audio_path: str = None
     output_path: str = None
@@ -103,16 +104,20 @@ def get_se_safe(audio_path, converter):
     """
     try:
         se, _ = se_extractor.get_se(audio_path, converter, vad=True)
+        logging.info(f"[get_se_safe] Successfully extracted embedding with shape: {se.shape}")
         return se
     except Exception as e:
         logging.warning(f"Embedding extraction with VAD failed for {audio_path}: {e}. Retrying with vad=False...")
         try:
             se, _ = se_extractor.get_se(audio_path, converter, vad=False)
+            logging.info(f"[get_se_safe] Successfully extracted embedding with shape: {se.shape}")
             return se
         except Exception as inner_e:
             logging.warning(f"[get_se_safe] Using neutral fallback embedding for {audio_path} — no speech segments detected: {inner_e}")
             # Fallback to neutral zero embedding (assuming 256d based on OpenVoice V2 standard)
-            return torch.zeros(1, 256, device=device)
+            fallback = torch.zeros(1, 256, 1, device=device)
+            logging.info(f"[get_se_safe] Using fallback embedding with shape: {fallback.shape}")
+            return fallback
 
 @app.post("/extract-embedding")
 def extract_embedding(req: ExtractRequest):
