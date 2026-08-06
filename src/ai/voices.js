@@ -4,7 +4,7 @@ export const VOICES = [
         name: 'တက်ကြွသောလူငယ်အသံ',
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
-        pitch: '+14Hz',
+        pitch: '+10Hz',
         rate: '+38%'
     },
     {
