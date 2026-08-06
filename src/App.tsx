@@ -170,6 +170,17 @@ function App() {
     });
   }, []);
 
+  useEffect(() => {
+    if (activeView === 'tool' && user?.role === 'admin' && voiceCloneEnabled) {
+      axios.get('/api/voice-clones/reference-voices').then(refRes => {
+        setReferenceVoices(refRes.data);
+        if (refRes.data.length > 0 && !selectedReferenceVoiceId) {
+          setSelectedReferenceVoiceId(refRes.data[0].id);
+        }
+      }).catch(console.error);
+    }
+  }, [activeView, user, voiceCloneEnabled]);
+
   const handleSlipUpload = async () => {
     if (!slipFile) return;
     setUploadingSlip(true);
