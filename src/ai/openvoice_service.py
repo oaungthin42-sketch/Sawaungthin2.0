@@ -89,23 +89,18 @@ def get_converter_or_raise():
     return tone_color_converter
 
 def get_se_synthetic(audio_path, converter):
-    # Try the standard extractor with VAD disabled
+    # Synthetic TTS audio is clean and contains no background noise or long silences
+    # that would require VAD or Whisper-based segmentation. We can bypass se_extractor's
+    # brittle text-length and duration filters entirely and extract the embedding
+    # directly from the full audio waveform.
     try:
-        logging.info(f"[get_se_synthetic] Attempting standard extraction for {audio_path}")
-        se, _ = se_extractor.get_se(audio_path, converter, vad=False)
+        logging.info(f"[get_se_synthetic] Extracting embedding directly (no VAD/Whisper) for {audio_path}")
+        se = converter.extract_se([audio_path])
+        logging.info(f"[get_se_synthetic] Successfully extracted embedding with shape: {se.shape}")
         return se
     except Exception as e:
-        logging.warning(f"[get_se_synthetic] Standard extraction failed, trying direct method: {e}")
-        # If it fails, try a direct method if it exists
-        if hasattr(converter, 'extract_se'):
-            try:
-                return converter.extract_se(audio_path)
-            except Exception as direct_e:
-                logging.error(f"[get_se_synthetic] Direct extraction failed: {direct_e}")
-
-        # Final fallback to zero embedding
-        logging.warning(f"[get_se_synthetic] Using neutral fallback embedding for {audio_path}")
-        return torch.zeros(1, 256, 1, device=device)
+        logging.warning(f"[get_se_synthetic] Direct extraction failed: {e}. Falling back to get_se_safe...")
+        return get_se_safe(audio_path, converter)
 
 class ExtractRequest(BaseModel):
     audio_path: str
@@ -199,7 +194,7 @@ def convert(req: ConvertRequest):
             src_se = torch.load(req.source_embedding_path, map_location=device)
         else:
             logging.info(f"Extracting source embedding from chunk: {req.source_audio_path}")
-            src_se = get_se_safe(req.source_audio_path, converter)
+            src_se = get_se_synthetic(req.source_audio_path, converter)
         
         # 3. Determine output path
         output_path = req.output_path
