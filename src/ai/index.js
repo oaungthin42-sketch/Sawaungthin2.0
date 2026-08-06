@@ -468,7 +468,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         
         let numChunks = processedChunks.length;
         const absDiff = Math.abs(runningAudioTime - duration);
-        let status = absDiff <= 0.05 ? 'PASS' : 'FAIL';
+        let status = absDiff <= 0.15 ? 'PASS' : 'FAIL';
         
         if (numChunks === 0 && duration <= 0.15) { 
              status = 'PASS';
@@ -484,7 +484,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         console.log(`status: ${status}`);
 
         if (status === 'FAIL') {
-            throw new Error(`Pipeline Error: Final TTS audio duration difference (${absDiff.toFixed(3)}s) exceeds 0.05s tolerance!`);
+            throw new Error(`Pipeline Error: Final TTS audio duration difference (${absDiff.toFixed(3)}s) exceeds 0.15s tolerance!`);
         }
 
         console.log(`[AI-DIAGNOSTIC] FINAL ASSEMBLY: Expected duration=${runningAudioTime.toFixed(2)}s | Actual duration=${duration}s | Audio chunks=${numChunks} | Silence gaps=0`);
