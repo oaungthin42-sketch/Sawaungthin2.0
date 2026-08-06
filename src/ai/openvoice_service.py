@@ -27,6 +27,7 @@ except ImportError:
     pass
 
 import sys
+logging.info(f"sys.path: {sys.path}")
 import torch
 
 # Ensure src/ai is in the python path to load openvoice dependencies if needed
@@ -87,9 +88,29 @@ def get_converter_or_raise():
             raise HTTPException(status_code=503, detail="ToneColorConverter model is not loaded. Check checkpoints.")
     return tone_color_converter
 
+def get_se_synthetic(audio_path, converter):
+    # Try the standard extractor with VAD disabled
+    try:
+        logging.info(f"[get_se_synthetic] Attempting standard extraction for {audio_path}")
+        se, _ = se_extractor.get_se(audio_path, converter, vad=False)
+        return se
+    except Exception as e:
+        logging.warning(f"[get_se_synthetic] Standard extraction failed, trying direct method: {e}")
+        # If it fails, try a direct method if it exists
+        if hasattr(converter, 'extract_se'):
+            try:
+                return converter.extract_se(audio_path)
+            except Exception as direct_e:
+                logging.error(f"[get_se_synthetic] Direct extraction failed: {direct_e}")
+
+        # Final fallback to zero embedding
+        logging.warning(f"[get_se_synthetic] Using neutral fallback embedding for {audio_path}")
+        return torch.zeros(1, 256, 1, device=device)
+
 class ExtractRequest(BaseModel):
     audio_path: str
     cache_path: str
+    is_synthetic: bool = False
 
 class ConvertRequest(BaseModel):
     source_audio_path: str
@@ -103,6 +124,7 @@ def get_se_safe(audio_path, converter):
     Robust speaker embedding extraction, attempting VAD first and falling back to non-VAD if needed.
     """
     try:
+        logging.info(f"[get_se_safe] Converter methods: {dir(converter)}")
         se, _ = se_extractor.get_se(audio_path, converter, vad=True)
         logging.info(f"[get_se_safe] Successfully extracted embedding with shape: {se.shape}")
         return se
@@ -127,8 +149,11 @@ def extract_embedding(req: ExtractRequest):
         raise HTTPException(status_code=400, detail=f"Reference audio file not found: {req.audio_path}")
         
     try:
-        logging.info(f"Extracting embedding from reference audio: {req.audio_path}")
-        se = get_se_safe(req.audio_path, converter)
+        logging.info(f"Extracting embedding from reference audio: {req.audio_path}, synthetic: {req.is_synthetic}")
+        if req.is_synthetic:
+            se = get_se_synthetic(req.audio_path, converter)
+        else:
+            se = get_se_safe(req.audio_path, converter)
         
         # Ensure output directory exists
         os.makedirs(os.path.dirname(os.path.abspath(req.cache_path)), exist_ok=True)

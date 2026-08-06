@@ -60,7 +60,8 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
             try {
                 await axios.post(extractUrl, {
                     audio_path: path.resolve(longestPath),
-                    cache_path: path.resolve(sharedSourceEmbeddingPath)
+                    cache_path: path.resolve(sharedSourceEmbeddingPath),
+                    is_synthetic: true
                 }, { timeout: 120000 }); // Longer timeout for initial extraction
             } catch (err) {
                 console.error(`[VoiceClone] Failed to pre-compute source embedding: ${err.message}. Will compute per-chunk.`);
