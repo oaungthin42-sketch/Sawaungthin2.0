@@ -39,11 +39,27 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
         // Pre-compute shared source embedding
         let sharedSourceEmbeddingPath = null;
         if (chunkWavPaths.length > 0) {
-            sharedSourceEmbeddingPath = path.join(path.dirname(chunkWavPaths[0]), 'source_embedding_shared.pt');
+            // Get durations for all chunks to select the best candidate for embedding
+            const durations = await Promise.all(chunkWavPaths.map(p => getDuration(p)));
+            
+            // Find the longest chunk
+            let maxDuration = -1;
+            let longestIdx = 0;
+            for (let i = 0; i < durations.length; i++) {
+                if (durations[i] > maxDuration) {
+                    maxDuration = durations[i];
+                    longestIdx = i;
+                }
+            }
+            
+            const longestPath = chunkWavPaths[longestIdx];
+            console.log(`[VoiceClone] Selected chunk ${longestIdx} (duration: ${maxDuration.toFixed(2)}s) as source for shared embedding (longest of ${chunkWavPaths.length} chunks).`);
+
+            sharedSourceEmbeddingPath = path.join(path.dirname(longestPath), 'source_embedding_shared.pt');
             console.log(`[VoiceClone] Pre-computing shared source embedding: ${sharedSourceEmbeddingPath}`);
             try {
                 await axios.post(extractUrl, {
-                    audio_path: path.resolve(chunkWavPaths[0]),
+                    audio_path: path.resolve(longestPath),
                     cache_path: path.resolve(sharedSourceEmbeddingPath)
                 }, { timeout: 120000 }); // Longer timeout for initial extraction
             } catch (err) {
