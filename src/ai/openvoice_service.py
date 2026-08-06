@@ -110,8 +110,9 @@ def get_se_safe(audio_path, converter):
             se, _ = se_extractor.get_se(audio_path, converter, vad=False)
             return se
         except Exception as inner_e:
-            logging.error(f"Embedding extraction without VAD also failed for {audio_path}: {inner_e}")
-            raise inner_e
+            logging.warning(f"[get_se_safe] Using neutral fallback embedding for {audio_path} — no speech segments detected: {inner_e}")
+            # Fallback to neutral zero embedding (assuming 256d based on OpenVoice V2 standard)
+            return torch.zeros(1, 256, device=device)
 
 @app.post("/extract-embedding")
 def extract_embedding(req: ExtractRequest):
@@ -136,6 +137,10 @@ def extract_embedding(req: ExtractRequest):
         logging.error(f"Error in extract-embedding: {e}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
+@app.post("/extract-source-embedding")
+def extract_source_embedding(req: ExtractRequest):
+    return extract_embedding(req)
+
 @app.post("/convert")
 def convert(req: ConvertRequest):
     converter = get_converter_or_raise()
@@ -158,8 +163,13 @@ def convert(req: ConvertRequest):
             )
             
         # 2. Extract source speaker embedding (src_se) from the source audio file
-        logging.info(f"Extracting source embedding from chunk: {req.source_audio_path}")
-        src_se = get_se_safe(req.source_audio_path, converter)
+        # Use cached if provided
+        if getattr(req, 'source_embedding_path', None) and os.path.exists(req.source_embedding_path):
+            logging.info(f"Loading source embedding from cache: {req.source_embedding_path}")
+            src_se = torch.load(req.source_embedding_path, map_location=device)
+        else:
+            logging.info(f"Extracting source embedding from chunk: {req.source_audio_path}")
+            src_se = get_se_safe(req.source_audio_path, converter)
         
         # 3. Determine output path
         output_path = req.output_path

@@ -30,10 +30,27 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
 
         const port = process.env.VOICE_CLONE_PORT || '5001';
         const serviceUrl = `http://127.0.0.1:${port}/convert`;
+        const extractUrl = `http://127.0.0.1:${port}/extract-source-embedding`;
 
         // Sequential queue with concurrency 1
         const queue = new PQueue({ concurrency: 1 });
         const results = [];
+        
+        // Pre-compute shared source embedding
+        let sharedSourceEmbeddingPath = null;
+        if (chunkWavPaths.length > 0) {
+            sharedSourceEmbeddingPath = path.join(path.dirname(chunkWavPaths[0]), 'source_embedding_shared.pt');
+            console.log(`[VoiceClone] Pre-computing shared source embedding: ${sharedSourceEmbeddingPath}`);
+            try {
+                await axios.post(extractUrl, {
+                    audio_path: path.resolve(chunkWavPaths[0]),
+                    cache_path: path.resolve(sharedSourceEmbeddingPath)
+                }, { timeout: 120000 }); // Longer timeout for initial extraction
+            } catch (err) {
+                console.error(`[VoiceClone] Failed to pre-compute source embedding: ${err.message}. Will compute per-chunk.`);
+                sharedSourceEmbeddingPath = null;
+            }
+        }
 
         await queue.addAll(chunkWavPaths.map((chunkPath, idx) => async () => {
             try {
@@ -60,10 +77,11 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
 
                 const response = await axios.post(serviceUrl, {
                     source_audio_path: path.resolve(chunkPath),
+                    source_embedding_path: sharedSourceEmbeddingPath ? path.resolve(sharedSourceEmbeddingPath) : null,
                     reference_embedding_path: refVoice.embeddingCachePath ? path.resolve(refVoice.embeddingCachePath) : null,
                     reference_audio_path: refVoice.audioPath ? path.resolve(refVoice.audioPath) : null,
                     output_path: path.resolve(clonedChunkPath)
-                }, { timeout: 45000 }); // 45 seconds timeout per chunk
+                }, { timeout: 90000 }); // 90 seconds timeout per chunk
 
                 if (response.data && response.data.status === 'success' && fs.existsSync(clonedChunkPath)) {
                     // Check duration drift
