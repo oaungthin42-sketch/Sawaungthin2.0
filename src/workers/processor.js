@@ -1130,7 +1130,13 @@ export const processRecapPipeline = async (jobId) => {
                         const assPath = path.join(tmpDir, jobId + ".ass");
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
                         
-                        const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                        const cw = Math.max(2, Math.round((pos.widthPct / 100) * 1080));
+                        const ch = Math.max(2, Math.round((pos.heightPct / 100) * 1920));
+                        const cx = Math.max(0, marginL);
+                        const cy = Math.max(0, marginV);
+                        const strength = 20;
+
+                        const filterComplex = `[0:v]split=2[main_sub][blur_sub];[blur_sub]crop=${cw}:${ch}:${cx}:${cy},boxblur=${strength}:${strength}[blurred_sub];[main_sub][blurred_sub]overlay=${cx}:${cy}[withbg];[withbg]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
                         
                         const subArgs = [
                             '-i', finalOutPath,
