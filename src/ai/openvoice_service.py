@@ -113,6 +113,21 @@ class ConvertRequest(BaseModel):
     reference_embedding_path: str = None
     reference_audio_path: str = None
     output_path: str = None
+    tau: float = 0.3
+
+def get_se_target_direct(audio_path, converter):
+    """
+    Extracts target speaker embedding directly from the full audio file without VAD or Whisper-based segmentation.
+    This avoids chunking and averaging, which can dilute the voice characteristics.
+    """
+    try:
+        logging.info(f"[get_se_target_direct] Extracting reference embedding directly (no VAD/segmentation) for {audio_path}")
+        se = converter.extract_se([audio_path])
+        logging.info(f"[get_se_target_direct] Successfully extracted reference embedding with shape: {se.shape}")
+        return se
+    except Exception as e:
+        logging.warning(f"[get_se_target_direct] Direct extraction failed: {e}. Falling back to get_se_safe...")
+        return get_se_safe(audio_path, converter)
 
 def get_se_safe(audio_path, converter):
     """
@@ -148,7 +163,7 @@ def extract_embedding(req: ExtractRequest):
         if req.is_synthetic:
             se = get_se_synthetic(req.audio_path, converter)
         else:
-            se = get_se_safe(req.audio_path, converter)
+            se = get_se_target_direct(req.audio_path, converter)
         
         # Ensure output directory exists
         os.makedirs(os.path.dirname(os.path.abspath(req.cache_path)), exist_ok=True)
@@ -180,7 +195,7 @@ def convert(req: ConvertRequest):
             tgt_se = torch.load(req.reference_embedding_path, map_location=device)
         elif req.reference_audio_path and os.path.exists(req.reference_audio_path):
             logging.info(f"Extracting target embedding on-the-fly from: {req.reference_audio_path}")
-            tgt_se = get_se_safe(req.reference_audio_path, converter)
+            tgt_se = get_se_target_direct(req.reference_audio_path, converter)
         else:
             raise HTTPException(
                 status_code=400, 
@@ -203,13 +218,13 @@ def convert(req: ConvertRequest):
             output_path = f"{base}_cloned{ext}"
             
         # 4. Perform conversion
-        logging.info(f"Converting voice: {req.source_audio_path} -> {output_path}")
+        logging.info(f"Converting voice: {req.source_audio_path} -> {output_path} with tau={req.tau}")
         audio_array = converter.convert(
             audio_src_path=req.source_audio_path,
             src_se=src_se,
             tgt_se=tgt_se,
             output_path=None,
-            tau=0.3
+            tau=req.tau
         )
         
         # OpenVoice V2 native sampling rate is typically 22050Hz

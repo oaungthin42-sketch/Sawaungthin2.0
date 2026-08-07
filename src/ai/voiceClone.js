@@ -90,14 +90,18 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
                 const base = path.basename(chunkPath, ext);
                 const clonedChunkPath = path.join(dir, `${base}_cloned_${idx}${ext}`);
 
-                console.log(`[VoiceClone] Sending chunk ${idx + 1}/${chunkWavPaths.length} to Python microservice: ${chunkPath}`);
+                const tauValue = parseFloat(process.env.VOICE_CLONE_TAU);
+                const tau = !isNaN(tauValue) && tauValue >= 0.0 && tauValue <= 1.0 ? tauValue : 0.3;
+
+                console.log(`[VoiceClone] Sending chunk ${idx + 1}/${chunkWavPaths.length} to Python microservice: ${chunkPath} with tau=${tau}`);
 
                 const response = await axios.post(serviceUrl, {
                     source_audio_path: path.resolve(chunkPath),
                     source_embedding_path: sharedSourceEmbeddingPath ? path.resolve(sharedSourceEmbeddingPath) : null,
                     reference_embedding_path: refVoice.embeddingCachePath ? path.resolve(refVoice.embeddingCachePath) : null,
                     reference_audio_path: refVoice.audioPath ? path.resolve(refVoice.audioPath) : null,
-                    output_path: path.resolve(clonedChunkPath)
+                    output_path: path.resolve(clonedChunkPath),
+                    tau: tau
                 }, { timeout: 90000 }); // 90 seconds timeout per chunk
 
                 if (response.data && response.data.status === 'success' && fs.existsSync(clonedChunkPath)) {
