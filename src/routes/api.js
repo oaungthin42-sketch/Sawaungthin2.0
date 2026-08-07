@@ -477,4 +477,138 @@ router.delete('/voice-clones/reference-voices/:id', authMiddleware, adminOnly, (
     }
 });
 
+router.use('/ab-test-assets', express.static(path.join(process.cwd(), 'public', 'ab_test')));
+
+router.get('/admin/tau-ab-test', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { referenceVoiceId, text } = req.query;
+
+        if (!referenceVoiceId) {
+            return res.status(400).send("Missing referenceVoiceId parameter. Add ?referenceVoiceId=YOUR_ID to the URL.");
+        }
+
+        const refVoice = db.prepare('SELECT * FROM reference_voices WHERE id = ?').get(referenceVoiceId);
+        if (!refVoice) {
+            return res.status(404).send(`Reference voice ID ${referenceVoiceId} not found.`);
+        }
+
+        // 1. Find the newest chunk_std_*.wav or generate one
+        let chunkPath = null;
+        const tmpDir = path.join(process.cwd(), 'src', 'tmp');
+        if (fs.existsSync(tmpDir)) {
+            const jobs = fs.readdirSync(tmpDir);
+            let latestMtime = 0;
+            for (const jobDir of jobs) {
+                const jobPath = path.join(tmpDir, jobDir);
+                if (fs.statSync(jobPath).isDirectory()) {
+                    const files = fs.readdirSync(jobPath);
+                    for (const file of files) {
+                        if (file.startsWith('chunk_std_') && file.endsWith('.wav')) {
+                            const fullPath = path.join(jobPath, file);
+                            const mtime = fs.statSync(fullPath).mtimeMs;
+                            if (mtime > latestMtime) {
+                                latestMtime = mtime;
+                                chunkPath = fullPath;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        const outputDir = path.join(process.cwd(), 'public', 'ab_test');
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        let isSynthetic = false;
+        if (!chunkPath) {
+            chunkPath = path.join(outputDir, 'synthetic_source.wav');
+            const synthText = text || "Hello, this is a synthetic test audio generated on the fly for the A/B test. I hope it works well.";
+            const ttsClient = new EdgeTTS({ voice: 'en-US-GuyNeural', pitch: '+0Hz', rate: '+0%' });
+            await ttsClient.ttsPromise(synthText, chunkPath);
+            isSynthetic = true;
+        } else {
+            // copy the found chunk into the public folder so we can play it
+            fs.copyFileSync(chunkPath, path.join(outputDir, 'source_chunk.wav'));
+        }
+
+        // Run the 4 conversions
+        const taus = [0.20, 0.22, 0.25, 0.30];
+        const port = process.env.VOICE_CLONE_PORT || '5001';
+        const convertUrl = `http://127.0.0.1:${port}/convert`;
+
+        const results = [];
+
+        for (const tau of taus) {
+            const outFileName = `cloned_tau_${tau.toFixed(2)}.wav`;
+            const outPath = path.join(outputDir, outFileName);
+
+            try {
+                const response = await axios.post(convertUrl, {
+                    source_audio_path: path.resolve(chunkPath),
+                    reference_embedding_path: refVoice.embeddingCachePath ? path.resolve(refVoice.embeddingCachePath) : null,
+                    reference_audio_path: refVoice.audioPath ? path.resolve(refVoice.audioPath) : null,
+                    output_path: path.resolve(outPath),
+                    tau: tau
+                }, { timeout: 120000 });
+
+                if (response.data && response.data.status === 'success' && fs.existsSync(outPath)) {
+                    results.push({ tau, file: `/api/ab-test-assets/${outFileName}` });
+                } else {
+                    results.push({ tau, error: "Conversion failed or file missing" });
+                }
+            } catch (err) {
+                results.push({ tau, error: err.message });
+            }
+        }
+
+        // Generate HTML
+        let html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Tau A/B Test Results</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: #f9fafb; color: #111827; }
+                h1 { font-size: 24px; font-weight: bold; margin-bottom: 20px; }
+                .card { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                .card h2 { margin-top: 0; font-size: 18px; margin-bottom: 12px; }
+                audio { width: 100%; outline: none; }
+                .error { color: #dc2626; }
+                .info { margin-bottom: 24px; font-size: 14px; color: #4b5563; }
+            </style>
+        </head>
+        <body>
+            <h1>Tau A/B Test Results</h1>
+            <div class="info">
+                <strong>Source Chunk:</strong> ${isSynthetic ? 'Synthetic generation' : chunkPath}<br>
+                <strong>Reference Voice:</strong> ${refVoice.name} (ID: ${refVoice.id})
+            </div>
+            
+            <div class="card">
+                <h2>Original Source Chunk</h2>
+                <audio controls src="/api/ab-test-assets/${isSynthetic ? 'synthetic_source.wav' : 'source_chunk.wav'}?t=${Date.now()}"></audio>
+            </div>
+        `;
+
+        for (const res of results) {
+            html += `<div class="card"><h2>Tau = ${res.tau.toFixed(2)}</h2>`;
+            if (res.file) {
+                html += `<audio controls src="${res.file}?t=${Date.now()}"></audio>`;
+            } else {
+                html += `<div class="error">Error: ${res.error}</div>`;
+            }
+            html += `</div>`;
+        }
+
+        html += `</body></html>`;
+        res.send(html);
+    } catch (e) {
+        console.error(e);
+        res.status(500).send(`An error occurred: ${e.message}`);
+    }
+});
+
 export default router;
