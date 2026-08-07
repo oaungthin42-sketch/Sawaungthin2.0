@@ -1068,7 +1068,7 @@ export const processRecapPipeline = async (jobId) => {
                     .replace(/'/g, "\\'")
                     .replace(/%/g, "\\%");
                     
-                const fontfile = '/usr/share/fonts/truetype/freefont/FreeSans.ttf';
+                const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
                 
                 // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
                 const xExpr = "abs(mod(t*90,2*(W-tw))-(W-tw))";
@@ -1092,9 +1092,11 @@ export const processRecapPipeline = async (jobId) => {
                     safeMoveFile(wmTmpPath, finalOutPath);
                 } else {
                     console.error("[WATERMARK] Error: watermark adjustment failed to produce output file, skipping.");
+                    state.warnings.push("⚠ Watermark could not be applied: FFmpeg failed to produce output file");
                 }
             } catch (e) {
-                console.error("[WATERMARK] Error applying watermark:", e);
+                console.error("[WATERMARK] Error applying watermark:", e.message || e);
+                state.warnings.push("⚠ Watermark could not be applied: " + (e.message || "FFmpeg error"));
             }
         }
 
