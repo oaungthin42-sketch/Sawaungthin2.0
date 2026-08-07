@@ -2,8 +2,8 @@ import db from './db.js';
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
         id, 
@@ -15,6 +15,7 @@ export const createJob = (id, data) => {
         Date.now(), 
         data.originalFilename || null, 
         data.blurBoxes ? (typeof data.blurBoxes === 'string' ? data.blurBoxes : JSON.stringify(data.blurBoxes)) : null, 
+        data.watermarkText || null,
         data.subtitlePosition ? (typeof data.subtitlePosition === 'string' ? data.subtitlePosition : JSON.stringify(data.subtitlePosition)) : null, 
         data.selectedFontId || null, 
         data.subtitleColor || 'white',

@@ -993,7 +993,7 @@ export const processRecapPipeline = async (jobId) => {
                         const w = Math.max(2, x2 - x);
                         const h = Math.max(2, y2 - y);
 
-                        const pad = 12;
+                        const pad = 25;
                         const cx = Math.max(0, x - pad);
                         const cy = Math.max(0, y - pad);
                         const cw = Math.min(1080 - cx, w + pad * 2);
@@ -1001,7 +1001,6 @@ export const processRecapPipeline = async (jobId) => {
 
                         const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
                         const eff = strength * 2;
-                        const fw = 30; // feather width
                         
                         // we need to crop the region, blur it, and overlay it.
                         // to do this without complex splitting, we can use the following approach:
@@ -1015,7 +1014,7 @@ export const processRecapPipeline = async (jobId) => {
                         const blurred = `[blurred${i}]`;
                         
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${eff}:${eff},boxblur=${eff}:${eff},format=rgba,geq=a='255*min(1, min(min(X/${fw}, (W-X)/${fw}), min(Y/${fw}, (H-Y)/${fw})))'${blurred};`;
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${eff}:${eff},boxblur=${eff}:${eff}${blurred};`;
                         filterComplex += `${mainSplit}${blurred}overlay=${cx}:${cy}${nextMap};`;
                         
                         lastMap = nextMap;
@@ -1212,9 +1211,13 @@ export const processRecapPipeline = async (jobId) => {
 
                         let filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
                         if (!skipSubtitleBlur) {
+                            const pad = 25;
+                            const expandedCx = Math.max(0, cx - pad);
+                            const expandedCy = Math.max(0, cy - pad);
+                            const expandedCw = Math.min(1080 - expandedCx, cw + pad * 2);
+                            const expandedCh = Math.min(1920 - expandedCy, ch + pad * 2);
                             const strength = 35;
-                            const fw = 30; // feather width
-                            filterComplex = `[0:v]split=2[main_sub][blur_sub];[blur_sub]crop=${cw}:${ch}:${cx}:${cy},boxblur=${strength}:${strength},boxblur=${strength}:${strength},format=rgba,geq=a='255*min(1, min(min(X/${fw}, (W-X)/${fw}), min(Y/${fw}, (H-Y)/${fw})))'[blurred_sub];[main_sub][blurred_sub]overlay=${cx}:${cy}[withbg];[withbg]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                            filterComplex = `[0:v]split=2[main_sub][blur_sub];[blur_sub]crop=${expandedCw}:${expandedCh}:${expandedCx}:${expandedCy},boxblur=${strength}:${strength},boxblur=${strength}:${strength}[blurred_sub];[main_sub][blurred_sub]overlay=${expandedCx}:${expandedCy}[withbg];[withbg]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
                         }
                         
                         const subArgs = [
@@ -1228,19 +1231,51 @@ export const processRecapPipeline = async (jobId) => {
                             '-y', subTmpPath
                         ];
                         
-                        await runFFmpeg(subArgs, tmpDir);
-                        
-                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                            fs.unlinkSync(finalOutPath);
-                            safeMoveFile(subTmpPath, finalOutPath);
-                        } else {
-                            console.error("[SUBTITLE] Error: subtitle burn failed to produce output file, skipping.");
-                            state.warnings.push("⚠ Subtitles could not be burned in: FFmpeg failed to produce output file");
+                        try {
+                            await runFFmpeg(subArgs, tmpDir);
+                            
+                            if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                                fs.unlinkSync(finalOutPath);
+                                safeMoveFile(subTmpPath, finalOutPath);
+                            } else {
+                                throw new Error("FFmpeg failed to produce output file");
+                            }
+                        } catch (e) {
+                            console.error("[SUBTITLE] Error burning subtitles (with blur):", e.message || e);
+                            if (!skipSubtitleBlur) {
+                                console.log("[SUBTITLE] Falling back to subtitle burn WITHOUT blur background...");
+                                const fallbackFilterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                                const fallbackArgs = [
+                                    '-i', finalOutPath,
+                                    '-filter_complex', fallbackFilterComplex,
+                                    '-map', '[v]',
+                                    '-map', '0:a?',
+                                    '-c:a', 'copy',
+                                    '-c:v', 'libx264',
+                                    '-preset', 'fast',
+                                    '-y', subTmpPath
+                                ];
+                                try {
+                                    await runFFmpeg(fallbackArgs, tmpDir);
+                                    if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                                        fs.unlinkSync(finalOutPath);
+                                        safeMoveFile(subTmpPath, finalOutPath);
+                                        state.warnings.push("⚠ Subtitle background blur failed, but subtitles were applied successfully.");
+                                    } else {
+                                        state.warnings.push("⚠ Subtitles could not be burned in: FFmpeg failed to produce output file");
+                                    }
+                                } catch(e2) {
+                                    console.error("[SUBTITLE] Fallback subtitle burn also failed:", e2.message || e2);
+                                    state.warnings.push("⚠ Subtitles could not be burned in: " + (e2.message || "FFmpeg error"));
+                                }
+                            } else {
+                                state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
+                            }
                         }
                     }
                     } catch(e) {
-                        console.error("[SUBTITLE] Error burning subtitles:", e);
-                        state.warnings.push("⚠ Subtitles could not be burned in: " + e.message);
+                        console.error("[SUBTITLE] Error burning subtitles setup:", e);
+                        state.warnings.push("⚠ Subtitles could not be burned in setup: " + e.message);
                     }
             }
             advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
