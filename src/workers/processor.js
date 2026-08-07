@@ -1000,7 +1000,7 @@ export const processRecapPipeline = async (jobId) => {
                         const ch = Math.min(1920 - cy, h + pad * 2);
 
                         const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
-                        const eff = strength * 2;
+                        const eff = Math.min(50, strength * 2);
                         
                         // we need to crop the region, blur it, and overlay it.
                         // to do this without complex splitting, we can use the following approach:
@@ -1072,8 +1072,8 @@ export const processRecapPipeline = async (jobId) => {
                 const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
                 
                 // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
-                const xExpr = "abs(mod(t*90,2*(W-tw))-(W-tw))";
-                const yExpr = "abs(mod(t*70,2*(H-th))-(H-th))";
+                const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
+                const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
                 
                 const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
                 
@@ -1183,42 +1183,7 @@ export const processRecapPipeline = async (jobId) => {
                         const cx = Math.max(0, marginL);
                         const cy = Math.max(0, marginV);
                         
-                        let skipSubtitleBlur = false;
-                        if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
-                            try {
-                                let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
-                                for (let box of parsedBoxes) {
-                                    const bx = Math.round((box.xPct / 100) * 1080);
-                                    const by = Math.round((box.yPct / 100) * 1920);
-                                    const bw = Math.round((box.widthPct / 100) * 1080);
-                                    const bh = Math.round((box.heightPct / 100) * 1920);
-
-                                    const overlapX = Math.max(0, Math.min(cx + cw, bx + bw) - Math.max(cx, bx));
-                                    const overlapY = Math.max(0, Math.min(cy + ch, by + bh) - Math.max(cy, by));
-                                    const overlapArea = overlapX * overlapY;
-                                    const subArea = cw * ch;
-                                    
-                                    if (overlapArea / subArea > 0.4) {
-                                        skipSubtitleBlur = true;
-                                        console.log(`[SUBTITLE-BLUR] Skipping subtitle auto-blur because it overlaps ${(overlapArea / subArea * 100).toFixed(1)}% with a manual blur box.`);
-                                        break;
-                                    }
-                                }
-                            } catch (e) {
-                                console.error("[SUBTITLE-BLUR] Error parsing blur boxes for overlap check:", e);
-                            }
-                        }
-
                         let filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                        if (!skipSubtitleBlur) {
-                            const pad = 25;
-                            const expandedCx = Math.max(0, cx - pad);
-                            const expandedCy = Math.max(0, cy - pad);
-                            const expandedCw = Math.min(1080 - expandedCx, cw + pad * 2);
-                            const expandedCh = Math.min(1920 - expandedCy, ch + pad * 2);
-                            const strength = 35;
-                            filterComplex = `[0:v]split=2[main_sub][blur_sub];[blur_sub]crop=${expandedCw}:${expandedCh}:${expandedCx}:${expandedCy},boxblur=${strength}:${strength},boxblur=${strength}:${strength}[blurred_sub];[main_sub][blurred_sub]overlay=${expandedCx}:${expandedCy}[withbg];[withbg]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                        }
                         
                         const subArgs = [
                             '-i', finalOutPath,
@@ -1241,36 +1206,8 @@ export const processRecapPipeline = async (jobId) => {
                                 throw new Error("FFmpeg failed to produce output file");
                             }
                         } catch (e) {
-                            console.error("[SUBTITLE] Error burning subtitles (with blur):", e.message || e);
-                            if (!skipSubtitleBlur) {
-                                console.log("[SUBTITLE] Falling back to subtitle burn WITHOUT blur background...");
-                                const fallbackFilterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                                const fallbackArgs = [
-                                    '-i', finalOutPath,
-                                    '-filter_complex', fallbackFilterComplex,
-                                    '-map', '[v]',
-                                    '-map', '0:a?',
-                                    '-c:a', 'copy',
-                                    '-c:v', 'libx264',
-                                    '-preset', 'fast',
-                                    '-y', subTmpPath
-                                ];
-                                try {
-                                    await runFFmpeg(fallbackArgs, tmpDir);
-                                    if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                                        fs.unlinkSync(finalOutPath);
-                                        safeMoveFile(subTmpPath, finalOutPath);
-                                        state.warnings.push("⚠ Subtitle background blur failed, but subtitles were applied successfully.");
-                                    } else {
-                                        state.warnings.push("⚠ Subtitles could not be burned in: FFmpeg failed to produce output file");
-                                    }
-                                } catch(e2) {
-                                    console.error("[SUBTITLE] Fallback subtitle burn also failed:", e2.message || e2);
-                                    state.warnings.push("⚠ Subtitles could not be burned in: " + (e2.message || "FFmpeg error"));
-                                }
-                            } else {
-                                state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
-                            }
+                            console.error("[SUBTITLE] Error burning subtitles:", e.message || e);
+                            state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
                         }
                     }
                     } catch(e) {
