@@ -1000,6 +1000,8 @@ export const processRecapPipeline = async (jobId) => {
                         const ch = Math.min(1920 - cy, h + pad * 2);
 
                         const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
+                        const eff = strength * 2;
+                        const fw = 30; // feather width
                         
                         // we need to crop the region, blur it, and overlay it.
                         // to do this without complex splitting, we can use the following approach:
@@ -1013,7 +1015,7 @@ export const processRecapPipeline = async (jobId) => {
                         const blurred = `[blurred${i}]`;
                         
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${strength}:${strength}${blurred};`;
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${eff}:${eff},boxblur=${eff}:${eff},format=rgba,geq=a='255*min(1, min(min(X/${fw}, (W-X)/${fw}), min(Y/${fw}, (H-Y)/${fw})))'${blurred};`;
                         filterComplex += `${mainSplit}${blurred}overlay=${cx}:${cy}${nextMap};`;
                         
                         lastMap = nextMap;
@@ -1181,9 +1183,39 @@ export const processRecapPipeline = async (jobId) => {
                         const ch = Math.max(2, Math.round((pos.heightPct / 100) * 1920));
                         const cx = Math.max(0, marginL);
                         const cy = Math.max(0, marginV);
-                        const strength = 20;
+                        
+                        let skipSubtitleBlur = false;
+                        if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
+                            try {
+                                let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
+                                for (let box of parsedBoxes) {
+                                    const bx = Math.round((box.xPct / 100) * 1080);
+                                    const by = Math.round((box.yPct / 100) * 1920);
+                                    const bw = Math.round((box.widthPct / 100) * 1080);
+                                    const bh = Math.round((box.heightPct / 100) * 1920);
 
-                        const filterComplex = `[0:v]split=2[main_sub][blur_sub];[blur_sub]crop=${cw}:${ch}:${cx}:${cy},boxblur=${strength}:${strength}[blurred_sub];[main_sub][blurred_sub]overlay=${cx}:${cy}[withbg];[withbg]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                                    const overlapX = Math.max(0, Math.min(cx + cw, bx + bw) - Math.max(cx, bx));
+                                    const overlapY = Math.max(0, Math.min(cy + ch, by + bh) - Math.max(cy, by));
+                                    const overlapArea = overlapX * overlapY;
+                                    const subArea = cw * ch;
+                                    
+                                    if (overlapArea / subArea > 0.4) {
+                                        skipSubtitleBlur = true;
+                                        console.log(`[SUBTITLE-BLUR] Skipping subtitle auto-blur because it overlaps ${(overlapArea / subArea * 100).toFixed(1)}% with a manual blur box.`);
+                                        break;
+                                    }
+                                }
+                            } catch (e) {
+                                console.error("[SUBTITLE-BLUR] Error parsing blur boxes for overlap check:", e);
+                            }
+                        }
+
+                        let filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                        if (!skipSubtitleBlur) {
+                            const strength = 35;
+                            const fw = 30; // feather width
+                            filterComplex = `[0:v]split=2[main_sub][blur_sub];[blur_sub]crop=${cw}:${ch}:${cx}:${cy},boxblur=${strength}:${strength},boxblur=${strength}:${strength},format=rgba,geq=a='255*min(1, min(min(X/${fw}, (W-X)/${fw}), min(Y/${fw}, (H-Y)/${fw})))'[blurred_sub];[main_sub][blurred_sub]overlay=${cx}:${cy}[withbg];[withbg]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                        }
                         
                         const subArgs = [
                             '-i', finalOutPath,

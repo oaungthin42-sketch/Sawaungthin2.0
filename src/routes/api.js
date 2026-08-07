@@ -182,6 +182,7 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
     const jobId = uuidv4();
     const blurBoxes = req.body.blurBoxes || '[]';
     const watermarkText = req.body.watermarkText || '';
+    console.log(`[WATERMARK-DEBUG] Received watermarkText from client: "${watermarkText}" (length: ${watermarkText.length})`);
     const subtitlePosition = req.body.subtitlePosition || null;
     const selectedFontId = req.body.selectedFontId || null;
     const subtitleColor = req.body.subtitleColor || "white";
@@ -276,6 +277,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const jobId = uuidv4();
      const blurBoxes = req.body.blurBoxes || '[]';
      const watermarkText = req.body.watermarkText || '';
+     console.log(`[WATERMARK-DEBUG] Received watermarkText from client: "${watermarkText}" (length: ${watermarkText.length})`);
      const subtitlePosition = req.body.subtitlePosition || null;
      const selectedFontId = req.body.selectedFontId || null;
      const subtitleColor = req.body.subtitleColor || "white";
