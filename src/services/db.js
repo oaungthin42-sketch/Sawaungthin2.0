@@ -128,4 +128,5 @@ try {
 }
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN useVoiceClone INTEGER DEFAULT 0`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN watermarkText TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN referenceVoiceId TEXT`); } catch (e) {}

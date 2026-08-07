@@ -1053,6 +1053,51 @@ export const processRecapPipeline = async (jobId) => {
         advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
     }
 
+        // 11.6 WATERMARK
+        if (job.watermarkText && job.watermarkText.trim() !== '') {
+            try {
+                const watermarkText = job.watermarkText.trim();
+                console.log(`[WATERMARK] Applying watermark: ${watermarkText}`);
+                const wmTmpPath = path.join(tmpDir, `${jobId}_watermark.mp4`);
+                
+                // Escape rules for drawtext:
+                // text must escape backslashes, colons, single quotes
+                let escapedText = watermarkText
+                    .replace(/\\/g, "\\\\")
+                    .replace(/:/g, "\\:")
+                    .replace(/'/g, "\\'")
+                    .replace(/%/g, "\\%");
+                    
+                const fontfile = '/usr/share/fonts/truetype/freefont/FreeSans.ttf';
+                
+                // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
+                const xExpr = "abs(mod(t*90,2*(W-tw))-(W-tw))";
+                const yExpr = "abs(mod(t*70,2*(H-th))-(H-th))";
+                
+                const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+                
+                const wmArgs = [
+                    '-i', finalOutPath,
+                    '-vf', drawtextFilter,
+                    '-c:a', 'copy',
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-y', wmTmpPath
+                ];
+                
+                await runFFmpeg(wmArgs, tmpDir);
+                
+                if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
+                    fs.unlinkSync(finalOutPath);
+                    safeMoveFile(wmTmpPath, finalOutPath);
+                } else {
+                    console.error("[WATERMARK] Error: watermark adjustment failed to produce output file, skipping.");
+                }
+            } catch (e) {
+                console.error("[WATERMARK] Error applying watermark:", e);
+            }
+        }
+
         // 11.7 SUBTITLE BURN
         if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
             if (state.srtFile && fs.existsSync(state.srtFile)) {

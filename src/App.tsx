@@ -97,6 +97,7 @@ function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
+  const [watermarkText, setWatermarkText] = useState('');
   const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
@@ -568,6 +569,7 @@ function App() {
     const formData = new FormData();
     formData.append('video', videoFile);
     formData.append('blurBoxes', JSON.stringify(blurBoxes));
+    formData.append('watermarkText', watermarkText);
     formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
     formData.append('subtitleColor', subtitleColor);
     formData.append('speed', outputSpeed.toString());
@@ -1157,6 +1159,18 @@ function App() {
                                   <button onClick={() => { setBlurBoxes(prev => prev.filter(b => b.id !== selectedElement)); setSelectedElement(null); }} className="w-full mt-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold">ဖယ်ရှားမည်</button>
                                 </div>
                               ) : <p className="text-xs text-gray-500 text-center italic">ပြင်ဆင်ရန် Box တစ်ခုကို ရွေးပါ</p>}
+                              <div className="mt-4 pt-4 border-t border-gray-800">
+                                <label className="text-xs text-gray-400 block mb-2 font-bold uppercase tracking-wide">Watermark (ရေစာတန်း)</label>
+                                <input
+                                  type="text"
+                                  value={watermarkText}
+                                  onChange={(e) => setWatermarkText(e.target.value)}
+                                  placeholder="SuperClick"
+                                  maxLength={30}
+                                  className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                />
+                                <p className="text-[10px] text-gray-500 mt-2">ဗီဒီယိုပေါ်တွင် ရွေ့လျားနေမည့် စာသားထည့်ရန်</p>
+                              </div>
                             </div>
                           </div>
                         </div>

@@ -181,6 +181,7 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
 
     const jobId = uuidv4();
     const blurBoxes = req.body.blurBoxes || '[]';
+    const watermarkText = req.body.watermarkText || '';
     const subtitlePosition = req.body.subtitlePosition || null;
     const selectedFontId = req.body.selectedFontId || null;
     const subtitleColor = req.body.subtitleColor || "white";
@@ -205,6 +206,7 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
         audioPath: null,
         originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'),
         blurBoxes: blurBoxes,
+        watermarkText: watermarkText,
         subtitlePosition: subtitlePosition,
         selectedFontId: selectedFontId,
         subtitleColor: subtitleColor,
@@ -273,6 +275,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      
      const jobId = uuidv4();
      const blurBoxes = req.body.blurBoxes || '[]';
+     const watermarkText = req.body.watermarkText || '';
      const subtitlePosition = req.body.subtitlePosition || null;
      const selectedFontId = req.body.selectedFontId || null;
      const subtitleColor = req.body.subtitleColor || "white";
@@ -297,6 +300,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          audioPath: audioFile ? audioFile.path : null, 
          originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'), 
          blurBoxes: blurBoxes, 
+         watermarkText: watermarkText,
          subtitlePosition: subtitlePosition, 
          selectedFontId: selectedFontId,
          subtitleColor: subtitleColor,
