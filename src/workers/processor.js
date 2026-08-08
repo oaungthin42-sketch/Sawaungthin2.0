@@ -999,8 +999,22 @@ export const processRecapPipeline = async (jobId) => {
                         const cw = Math.min(1080 - cx, w + pad * 2);
                         const ch = Math.min(1920 - cy, h + pad * 2);
 
+                        // We keep TWO passes of boxblur. Mathematically, convolving a box filter with itself
+                        // produces a triangle filter, which is a much closer approximation to a true, smooth Gaussian blur.
+                        // A single boxblur pass creates ugly "blocky" artifacts and harsh edges (especially at high radii),
+                        // which ruins the "frosted glass" aesthetic.
+                        //
+                        // However, two passes compound the effective blur radius. Previously, eff=strength*2
+                        // meant strength=10 produced two passes of radius 20 (effective radius ~28), which is way too heavy.
+                        // To fix this, we map the 1-30 slider non-linearly (using a power curve) to a 1-50 radius range.
+                        // This ensures strength 1-10 remains gentle (radius 1-10), while 30 scales up to the max 50 radius
+                        // for complete obliteration, clamped below ffmpeg's 57 limit to prevent crashes.
                         const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
-                        const eff = Math.min(50, strength * 2);
+                        const radiusMap = Math.pow(strength / 30, 1.5) * 50;
+                        const eff = Math.min(50, Math.max(1, Math.round(radiusMap)));
+                        
+                        // Frosted glass overlay opacity (0.0 to 1.0)
+                        const frostOpacity = 0.35;
                         
                         // we need to crop the region, blur it, and overlay it.
                         // to do this without complex splitting, we can use the following approach:
@@ -1014,7 +1028,7 @@ export const processRecapPipeline = async (jobId) => {
                         const blurred = `[blurred${i}]`;
                         
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${eff}:${eff},boxblur=${eff}:${eff}${blurred};`;
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${eff}:${eff},boxblur=${eff}:${eff},drawbox=x=0:y=0:w=iw:h=ih:color=white@${frostOpacity}:t=fill${blurred};`;
                         filterComplex += `${mainSplit}${blurred}overlay=${cx}:${cy}${nextMap};`;
                         
                         lastMap = nextMap;
