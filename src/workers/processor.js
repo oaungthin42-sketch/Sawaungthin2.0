@@ -986,6 +986,8 @@ export const processRecapPipeline = async (jobId) => {
                     
                     for (let i = 0; i < parsedBoxes.length; i++) {
                         const box = parsedBoxes[i];
+                        // Note: The video has been hard-scaled/cropped to 1080x1920 in an earlier segment pass, 
+                        // so these hardcoded 1080x1920 dimensions perfectly match the current video canvas.
                         const x = Math.round((box.xPct / 100) * 1080);
                         const y = Math.round((box.yPct / 100) * 1920);
                         const x2 = Math.round(((box.xPct + box.widthPct) / 100) * 1080);
@@ -993,43 +995,59 @@ export const processRecapPipeline = async (jobId) => {
                         const w = Math.max(2, x2 - x);
                         const h = Math.max(2, y2 - y);
 
-                        const pad = 25;
+                        // The strength slider is 1-30.
+                        const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
+                        
+                        // Linear mapping: strength directly determines the boxblur radius.
+                        // Applying boxblur twice with the same radius approximates a very smooth Gaussian blur.
+                        // A value of 8-15 (radius 8 to 15 applied twice) makes text thoroughly illegible.
+                        // Max slider 30 gives a radius of 30, which is extremely strong but safe (ffmpeg max is 57).
+                        const eff = strength;
+                        
+                        // Dynamic padding: the mask blur needs room to feather, 
+                        // so we pad the crop box relative to the blur strength.
+                        // A flat pad of 25 was too large for small boxes/low strengths.
+                        const pad = Math.round(eff * 1.5) + 10;
+                        
                         const cx = Math.max(0, x - pad);
                         const cy = Math.max(0, y - pad);
                         const cw = Math.min(1080 - cx, w + pad * 2);
                         const ch = Math.min(1920 - cy, h + pad * 2);
-
-                        // We keep TWO passes of boxblur. Mathematically, convolving a box filter with itself
-                        // produces a triangle filter, which is a much closer approximation to a true, smooth Gaussian blur.
-                        // A single boxblur pass creates ugly "blocky" artifacts and harsh edges (especially at high radii),
-                        // which ruins the "frosted glass" aesthetic.
-                        //
-                        // However, two passes compound the effective blur radius. Previously, eff=strength*2
-                        // meant strength=10 produced two passes of radius 20 (effective radius ~28), which is way too heavy.
-                        // To fix this, we map the 1-30 slider non-linearly (using a power curve) to a 1-50 radius range.
-                        // This ensures strength 1-10 remains gentle (radius 1-10), while 30 scales up to the max 50 radius
-                        // for complete obliteration, clamped below ffmpeg's 57 limit to prevent crashes.
-                        const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
-                        const radiusMap = Math.pow(strength / 30, 1.5) * 50;
-                        const eff = Math.min(50, Math.max(1, Math.round(radiusMap)));
                         
-                        // Frosted glass overlay opacity (0.0 to 1.0)
-                        const frostOpacity = 0.35;
-                        
-                        // we need to crop the region, blur it, and overlay it.
-                        // to do this without complex splitting, we can use the following approach:
-                        // [lastMap] split=2 [split_main_i] [split_blur_i];
-                        // [split_blur_i] crop=cw:ch:cx:cy,boxblur=strength [blurred_i];
-                        // [split_main_i][blurred_i] overlay=cx:cy [out_i]
+                        // Calculate the true offset of the user's box within our padded crop
+                        const boxInCropX = x - cx;
+                        const boxInCropY = y - cy;
                         
                         const nextMap = `[v${i}]`;
                         const mainSplit = `[main${i}]`;
                         const blurSplit = `[blur${i}]`;
-                        const blurred = `[blurred${i}]`;
                         
+                        // We remove the white "frostOpacity" drawbox completely so real colors show through.
+                        // To avoid a hard edge, we generate a feathered alpha mask from the cropped region itself:
+                        // 1. [mask_base] draws the padded crop completely black, then draws the exact user box size in white.
+                        // 2. We blur this mask with `pad:pad` to soften the edges (creating the feather gradient).
+                        // 3. We use `alphamerge` to apply this mask to the heavily blurred crop [blur_done].
+                        // 4. Finally, overlay composites the soft-edged blurred region back onto the main video without a harsh seam.
+                        const maskBase = `[mask_base${i}]`;
+                        const mask = `[mask${i}]`;
+                        const blurCrop = `[blur_crop${i}]`;
+                        const blurDone = `[blur_done${i}]`;
+                        const alphaBlur = `[alpha_blur${i}]`;
+
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},boxblur=${eff}:${eff},boxblur=${eff}:${eff},drawbox=x=0:y=0:w=iw:h=ih:color=white@${frostOpacity}:t=fill${blurred};`;
-                        filterComplex += `${mainSplit}${blurred}overlay=${cx}:${cy}${nextMap};`;
+                        
+                        // Crop and split the region for both blurring and mask generation
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
+                        
+                        // Generate the feathered mask
+                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${boxInCropX}:y=${boxInCropY}:w=${w}:h=${h}:color=white:t=fill,boxblur=${pad}:${pad}${mask};`;
+                        
+                        // Blur the cropped video content
+                        filterComplex += `${blurCrop}boxblur=${eff}:${eff},boxblur=${eff}:${eff}${blurDone};`;
+                        
+                        // Merge the alpha mask and overlay
+                        filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
+                        filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
                         
                         lastMap = nextMap;
                     }
