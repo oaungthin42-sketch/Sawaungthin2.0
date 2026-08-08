@@ -1041,8 +1041,9 @@ export const processRecapPipeline = async (jobId) => {
                         const blurSplit = `[blur${i}]`;
                         
                         // 1. [mask_base] draws the padded crop completely black, then draws the EXPANDED white box.
-                        // 2. We blur this mask with `maskBlur:maskBlur`. Because the white box was expanded by `maskBlur`,
-                        //    the fading boundary exactly meets the user's original box, keeping it at 100% opacity.
+                        // 2. We blur this mask with `maskBlur:1`. Note that boxblur's second parameter is power (repeat count),
+                        //    not a second radius, and must stay a small fixed number (1), never scaled with strength. Because the 
+                        //    white box was expanded by `maskBlur`, the fading boundary exactly meets the user's original box.
                         // 3. We apply this mask to the blurred crop via alphamerge.
                         const maskBase = `[mask_base${i}]`;
                         const mask = `[mask${i}]`;
@@ -1056,10 +1057,13 @@ export const processRecapPipeline = async (jobId) => {
                         filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
                         
                         // Generate the feathered mask using the enlarged white box coordinates
-                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:${maskBlur}${mask};`;
+                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
                         
-                        // Blur the cropped video content
-                        filterComplex += `${blurCrop}boxblur=${eff}:${eff},boxblur=${eff}:${eff}${blurDone};`;
+                        // Blur the cropped video content.
+                        // We use TWO passes of power=1 (boxblur=eff:1,boxblur=eff:1) rather than one, because 
+                        // convolving a box filter with itself produces a triangle filter, which gives a smoother, 
+                        // more Gaussian-like blur without blocky artifacts at high strengths.
+                        filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
                         
                         // Merge the alpha mask and overlay
                         filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
