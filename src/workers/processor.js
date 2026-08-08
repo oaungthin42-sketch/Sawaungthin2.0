@@ -998,20 +998,27 @@ export const processRecapPipeline = async (jobId) => {
                         // The strength slider is 1-30.
                         const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
                         
-                        // Linear mapping: strength directly determines the boxblur radius.
-                        // Applying boxblur twice with the same radius approximates a very smooth Gaussian blur.
-                        const eff = strength;
+                        // New Strength Mapping:
+                        // To ensure typical subtitle text is fully illegible at strength 8-10, we make the curve start higher and scale faster.
+                        // A boxblur radius of ~15-20 applied twice completely wipes out fine detail.
+                        // Formula: eff = strength * 1.5 + 5
+                        // At strength=1: eff=7 (soft). At strength=10: eff=20 (very strong). At strength=30: eff=50 (ffmpeg limit safe).
+                        const eff = Math.min(50, Math.round(strength * 1.5) + 5);
                         
-                        // Mask Geometry Fix:
-                        // A boxblur of radius R transitions from 100% to 0% opacity over a distance of roughly 2R, 
-                        // centered on the shape's hard edge. To ensure the user's actual selected box remains 
-                        // at 100% opacity (no ghosting of text), we must expand the solid white mask outward by R 
-                        // before blurring it. We choose R (maskBlur) proportional to the blur strength.
-                        const expand = Math.round(eff * 0.8) + 5; 
-                        const maskBlur = expand; 
+                        // New Mask Geometry & Padding:
+                        // To avoid a visible rectangle shape, we need a very wide feather transition, so we increase maskBlur.
+                        // We set maskBlur significantly larger than eff to guarantee a smooth, natural fade.
+                        const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
                         
-                        // The total padding needed around the crop to fit the expanded box AND let the blur 
-                        // fade completely to 0% before the edge is expand + maskBlur. We add 2px as a safety buffer.
+                        // To prevent ghosting, the 100% opacity zone MUST cover the user's box.
+                        // A boxblur of radius R spreads inward by R pixels.
+                        // Thus, we must expand the solid white mask by AT LEAST maskBlur so the fading edge starts exactly AT the user's box boundary.
+                        // We set expand = maskBlur + 2 for a tiny safety margin of full opacity just outside the box.
+                        const expand = maskBlur + 2; 
+                        
+                        // The crop padding must hold the expanded mask PLUS the outward feather spread (which also equals maskBlur).
+                        // pad = expand (inward safety) + maskBlur (outward fade) + 2 (buffer)
+                        // At strength=10, eff=20, maskBlur=34, expand=36, pad=72. This is well within safe bounds for a 1080x1920 canvas.
                         const pad = expand + maskBlur + 2;
                         
                         const cx = Math.max(0, x - pad);
