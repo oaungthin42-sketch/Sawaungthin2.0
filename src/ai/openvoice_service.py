@@ -97,10 +97,19 @@ def get_se_synthetic(audio_path, converter):
         logging.info(f"[get_se_synthetic] Extracting embedding directly (no VAD/Whisper) for {audio_path}")
         se = converter.extract_se([audio_path])
         logging.info(f"[get_se_synthetic] Successfully extracted embedding with shape: {se.shape}")
+        label = f"source (synthetic) from {os.path.basename(audio_path)}"
+        logging.info(f"[VOICE-EMBED-DIAGNOSTIC] label={label} shape={list(se.shape)} "
+                     f"dtype={se.dtype} device={se.device} numel={se.numel()} "
+                     f"min={se.min().item():.4f} max={se.max().item():.4f} "
+                     f"mean={se.mean().item():.4f} l2_norm={se.norm().item():.4f} "
+                     f"finite={torch.isfinite(se).all().item()} "
+                     f"effectively_zero={(se.abs().max().item() < 1e-6)}")
         return se
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         logging.warning(f"[get_se_synthetic] Direct extraction failed: {e}. Falling back to get_se_safe...")
-        return get_se_safe(audio_path, converter)
+        return get_se_safe(audio_path, converter, label=f"source (synthetic) from {os.path.basename(audio_path)}")
 
 class ExtractRequest(BaseModel):
     audio_path: str
@@ -124,12 +133,21 @@ def get_se_target_direct(audio_path, converter):
         logging.info(f"[get_se_target_direct] Extracting reference embedding directly (no VAD/segmentation) for {audio_path}")
         se = converter.extract_se([audio_path])
         logging.info(f"[get_se_target_direct] Successfully extracted reference embedding with shape: {se.shape}")
+        label = f"target from {os.path.basename(audio_path)}"
+        logging.info(f"[VOICE-EMBED-DIAGNOSTIC] label={label} shape={list(se.shape)} "
+                     f"dtype={se.dtype} device={se.device} numel={se.numel()} "
+                     f"min={se.min().item():.4f} max={se.max().item():.4f} "
+                     f"mean={se.mean().item():.4f} l2_norm={se.norm().item():.4f} "
+                     f"finite={torch.isfinite(se).all().item()} "
+                     f"effectively_zero={(se.abs().max().item() < 1e-6)}")
         return se
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         logging.warning(f"[get_se_target_direct] Direct extraction failed: {e}. Falling back to get_se_safe...")
-        return get_se_safe(audio_path, converter)
+        return get_se_safe(audio_path, converter, label=f"target from {os.path.basename(audio_path)}")
 
-def get_se_safe(audio_path, converter):
+def get_se_safe(audio_path, converter, label="embedding"):
     """
     Robust speaker embedding extraction, attempting VAD first and falling back to non-VAD if needed.
     """
@@ -137,19 +155,32 @@ def get_se_safe(audio_path, converter):
         logging.info(f"[get_se_safe] Converter methods: {dir(converter)}")
         se, _ = se_extractor.get_se(audio_path, converter, vad=True)
         logging.info(f"[get_se_safe] Successfully extracted embedding with shape: {se.shape}")
+        logging.info(f"[VOICE-EMBED-DIAGNOSTIC] label={label} shape={list(se.shape)} "
+                     f"dtype={se.dtype} device={se.device} numel={se.numel()} "
+                     f"min={se.min().item():.4f} max={se.max().item():.4f} "
+                     f"mean={se.mean().item():.4f} l2_norm={se.norm().item():.4f} "
+                     f"finite={torch.isfinite(se).all().item()} "
+                     f"effectively_zero={(se.abs().max().item() < 1e-6)}")
         return se
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         logging.warning(f"Embedding extraction with VAD failed for {audio_path}: {e}. Retrying with vad=False...")
         try:
             se, _ = se_extractor.get_se(audio_path, converter, vad=False)
             logging.info(f"[get_se_safe] Successfully extracted embedding with shape: {se.shape}")
+            logging.info(f"[VOICE-EMBED-DIAGNOSTIC] label={label} shape={list(se.shape)} "
+                         f"dtype={se.dtype} device={se.device} numel={se.numel()} "
+                         f"min={se.min().item():.4f} max={se.max().item():.4f} "
+                         f"mean={se.mean().item():.4f} l2_norm={se.norm().item():.4f} "
+                         f"finite={torch.isfinite(se).all().item()} "
+                         f"effectively_zero={(se.abs().max().item() < 1e-6)}")
             return se
         except Exception as inner_e:
-            logging.warning(f"[get_se_safe] Using neutral fallback embedding for {audio_path} — no speech segments detected: {inner_e}")
-            # Fallback to neutral zero embedding (assuming 256d based on OpenVoice V2 standard)
-            fallback = torch.zeros(1, 256, 1, device=device)
-            logging.info(f"[get_se_safe] Using fallback embedding with shape: {fallback.shape}")
-            return fallback
+            if isinstance(inner_e, HTTPException):
+                raise inner_e
+            logging.error(f"[get_se_safe] Failed to extract embedding for {audio_path} — no speech segments detected: {inner_e}")
+            raise HTTPException(status_code=422, detail=f"Failed to extract {label}: {inner_e}")
 
 @app.post("/extract-embedding")
 def extract_embedding(req: ExtractRequest):
@@ -172,6 +203,16 @@ def extract_embedding(req: ExtractRequest):
         torch.save(se, req.cache_path)
         logging.info(f"Speaker embedding saved to: {req.cache_path}")
         
+        # Write metadata sidecar for staleness checking
+        try:
+            import json
+            stat = os.stat(req.audio_path)
+            meta_path = req.cache_path + ".meta.json"
+            with open(meta_path, "w") as f:
+                json.dump({"size": stat.st_size, "mtime": stat.st_mtime}, f)
+        except Exception as meta_e:
+            logging.warning(f"Failed to write meta sidecar for {req.cache_path}: {meta_e}")
+        
         return {"status": "success", "embedding_cache_path": req.cache_path}
     except Exception as e:
         logging.error(f"Error in extract-embedding: {e}")
@@ -190,17 +231,38 @@ def convert(req: ConvertRequest):
         
     try:
         # 1. Resolve target speaker embedding (tgt_se)
+        tgt_se = None
         if req.reference_embedding_path and os.path.exists(req.reference_embedding_path):
-            logging.info(f"Loading target embedding from cache: {req.reference_embedding_path}")
-            tgt_se = torch.load(req.reference_embedding_path, map_location=device)
-        elif req.reference_audio_path and os.path.exists(req.reference_audio_path):
-            logging.info(f"Extracting target embedding on-the-fly from: {req.reference_audio_path}")
-            tgt_se = get_se_target_direct(req.reference_audio_path, converter)
-        else:
-            raise HTTPException(
-                status_code=400, 
-                detail="Either a valid reference_embedding_path or reference_audio_path must be provided."
-            )
+            cache_valid = True
+            if req.reference_audio_path and os.path.exists(req.reference_audio_path):
+                meta_path = req.reference_embedding_path + ".meta.json"
+                if os.path.exists(meta_path):
+                    try:
+                        import json
+                        with open(meta_path, "r") as f:
+                            meta = json.load(f)
+                        stat = os.stat(req.reference_audio_path)
+                        if meta.get("size") != stat.st_size or meta.get("mtime") != stat.st_mtime:
+                            logging.warning(f"Stale cache detected for {req.reference_embedding_path}. Re-extracting.")
+                            cache_valid = False
+                    except Exception as meta_e:
+                        logging.warning(f"Failed to read meta sidecar: {meta_e}")
+                else:
+                    logging.warning(f"No meta sidecar found for {req.reference_embedding_path}. Proceeding with cached embedding.")
+            
+            if cache_valid:
+                logging.info(f"Loading target embedding from cache: {req.reference_embedding_path}")
+                tgt_se = torch.load(req.reference_embedding_path, map_location=device)
+
+        if tgt_se is None:
+            if req.reference_audio_path and os.path.exists(req.reference_audio_path):
+                logging.info(f"Extracting target embedding on-the-fly from: {req.reference_audio_path}")
+                tgt_se = get_se_target_direct(req.reference_audio_path, converter)
+            else:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Either a valid reference_embedding_path or reference_audio_path must be provided."
+                )
             
         # 2. Extract source speaker embedding (src_se) from the source audio file
         # Use cached if provided

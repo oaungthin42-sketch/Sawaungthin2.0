@@ -13,8 +13,9 @@ import { getDuration } from '../ffmpeg/index.js';
  * @param {string} referenceVoiceId - Database ID of the selected reference voice
  * @returns {Promise<string[]>} - Paths to the final chunk files (cloned or original)
  */
-export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
-    console.log(`[VoiceClone] Starting voice conversion for ${chunkWavPaths?.length || 0} chunks using referenceVoiceId: ${referenceVoiceId}`);
+export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options = {}) {
+    const sourceMode = options.sourceMode || 'shared';
+    console.log(`[VoiceClone] Starting voice conversion for ${chunkWavPaths?.length || 0} chunks using referenceVoiceId: ${referenceVoiceId} with sourceMode: ${sourceMode}`);
     
     if (!chunkWavPaths || chunkWavPaths.length === 0) {
         console.warn("[VoiceClone] No chunks provided for voice cloning.");
@@ -38,7 +39,7 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
         
         // Pre-compute shared source embedding
         let sharedSourceEmbeddingPath = null;
-        if (chunkWavPaths.length > 0) {
+        if (sourceMode === 'shared' && chunkWavPaths.length > 0) {
             // Get durations for all chunks to select the best candidate for embedding
             const durations = await Promise.all(chunkWavPaths.map(p => getDuration(p)));
             
@@ -92,12 +93,30 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId) {
 
                 const tauValue = parseFloat(process.env.VOICE_CLONE_TAU);
                 const tau = !isNaN(tauValue) && tauValue >= 0.0 && tauValue <= 1.0 ? tauValue : 0.3;
+                
+                let activeSourceEmbeddingPath = null;
+                if (sourceMode === 'shared') {
+                    activeSourceEmbeddingPath = sharedSourceEmbeddingPath;
+                } else if (sourceMode === 'per_chunk') {
+                    activeSourceEmbeddingPath = path.join(dir, `${base}_source_embedding.pt`);
+                    try {
+                        console.log(`[VoiceClone] Pre-computing per-chunk source embedding for ${chunkPath}`);
+                        await axios.post(extractUrl, {
+                            audio_path: path.resolve(chunkPath),
+                            cache_path: path.resolve(activeSourceEmbeddingPath),
+                            is_synthetic: true
+                        }, { timeout: 90000 });
+                    } catch (err) {
+                        console.error(`[VoiceClone] Failed to compute per-chunk source embedding: ${err.message}.`);
+                        activeSourceEmbeddingPath = null;
+                    }
+                }
 
                 console.log(`[VoiceClone] Sending chunk ${idx + 1}/${chunkWavPaths.length} to Python microservice: ${chunkPath} with tau=${tau}`);
 
                 const response = await axios.post(serviceUrl, {
                     source_audio_path: path.resolve(chunkPath),
-                    source_embedding_path: sharedSourceEmbeddingPath ? path.resolve(sharedSourceEmbeddingPath) : null,
+                    source_embedding_path: activeSourceEmbeddingPath ? path.resolve(activeSourceEmbeddingPath) : null,
                     reference_embedding_path: refVoice.embeddingCachePath ? path.resolve(refVoice.embeddingCachePath) : null,
                     reference_audio_path: refVoice.audioPath ? path.resolve(refVoice.audioPath) : null,
                     output_path: path.resolve(clonedChunkPath),

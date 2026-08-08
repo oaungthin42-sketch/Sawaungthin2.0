@@ -400,7 +400,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             try {
                 console.log(`[AI] Voice clone is active. Cloning ${processedChunks.length} chunks...`);
                 const { applyVoiceClone } = await import('./voiceClone.js');
-                const clonedChunks = await applyVoiceClone(processedChunks, options.referenceVoiceId);
+                const clonedChunks = await applyVoiceClone(processedChunks, options.referenceVoiceId, { sourceMode: options.sourceMode ?? 'shared' });
                 for (let i = 0; i < processedChunks.length; i++) {
                     if (clonedChunks[i] && clonedChunks[i] !== processedChunks[i]) {
                         processedChunks[i] = clonedChunks[i];
