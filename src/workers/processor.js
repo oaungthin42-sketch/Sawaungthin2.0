@@ -1000,14 +1000,19 @@ export const processRecapPipeline = async (jobId) => {
                         
                         // Linear mapping: strength directly determines the boxblur radius.
                         // Applying boxblur twice with the same radius approximates a very smooth Gaussian blur.
-                        // A value of 8-15 (radius 8 to 15 applied twice) makes text thoroughly illegible.
-                        // Max slider 30 gives a radius of 30, which is extremely strong but safe (ffmpeg max is 57).
                         const eff = strength;
                         
-                        // Dynamic padding: the mask blur needs room to feather, 
-                        // so we pad the crop box relative to the blur strength.
-                        // A flat pad of 25 was too large for small boxes/low strengths.
-                        const pad = Math.round(eff * 1.5) + 10;
+                        // Mask Geometry Fix:
+                        // A boxblur of radius R transitions from 100% to 0% opacity over a distance of roughly 2R, 
+                        // centered on the shape's hard edge. To ensure the user's actual selected box remains 
+                        // at 100% opacity (no ghosting of text), we must expand the solid white mask outward by R 
+                        // before blurring it. We choose R (maskBlur) proportional to the blur strength.
+                        const expand = Math.round(eff * 0.8) + 5; 
+                        const maskBlur = expand; 
+                        
+                        // The total padding needed around the crop to fit the expanded box AND let the blur 
+                        // fade completely to 0% before the edge is expand + maskBlur. We add 2px as a safety buffer.
+                        const pad = expand + maskBlur + 2;
                         
                         const cx = Math.max(0, x - pad);
                         const cy = Math.max(0, y - pad);
@@ -1018,16 +1023,20 @@ export const processRecapPipeline = async (jobId) => {
                         const boxInCropX = x - cx;
                         const boxInCropY = y - cy;
                         
+                        // Calculate the expanded mask coordinates, clamped to the crop boundaries
+                        const maskX = Math.max(0, boxInCropX - expand);
+                        const maskY = Math.max(0, boxInCropY - expand);
+                        const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
+                        const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
+                        
                         const nextMap = `[v${i}]`;
                         const mainSplit = `[main${i}]`;
                         const blurSplit = `[blur${i}]`;
                         
-                        // We remove the white "frostOpacity" drawbox completely so real colors show through.
-                        // To avoid a hard edge, we generate a feathered alpha mask from the cropped region itself:
-                        // 1. [mask_base] draws the padded crop completely black, then draws the exact user box size in white.
-                        // 2. We blur this mask with `pad:pad` to soften the edges (creating the feather gradient).
-                        // 3. We use `alphamerge` to apply this mask to the heavily blurred crop [blur_done].
-                        // 4. Finally, overlay composites the soft-edged blurred region back onto the main video without a harsh seam.
+                        // 1. [mask_base] draws the padded crop completely black, then draws the EXPANDED white box.
+                        // 2. We blur this mask with `maskBlur:maskBlur`. Because the white box was expanded by `maskBlur`,
+                        //    the fading boundary exactly meets the user's original box, keeping it at 100% opacity.
+                        // 3. We apply this mask to the blurred crop via alphamerge.
                         const maskBase = `[mask_base${i}]`;
                         const mask = `[mask${i}]`;
                         const blurCrop = `[blur_crop${i}]`;
@@ -1039,8 +1048,8 @@ export const processRecapPipeline = async (jobId) => {
                         // Crop and split the region for both blurring and mask generation
                         filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
                         
-                        // Generate the feathered mask
-                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${boxInCropX}:y=${boxInCropY}:w=${w}:h=${h}:color=white:t=fill,boxblur=${pad}:${pad}${mask};`;
+                        // Generate the feathered mask using the enlarged white box coordinates
+                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:${maskBlur}${mask};`;
                         
                         // Blur the cropped video content
                         filterComplex += `${blurCrop}boxblur=${eff}:${eff},boxblur=${eff}:${eff}${blurDone};`;
