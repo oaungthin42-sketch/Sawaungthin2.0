@@ -1,4 +1,4 @@
-import os
+content = """import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import logging
 
@@ -39,5 +39,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-# Import OpenVoice API
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')"""
+
+with open('src/ai/openvoice_service.py', 'r') as f:
+    text = f.read()
+
+index = text.find("# Import OpenVoice API")
+rest = text[index:]
+
+with open('src/ai/openvoice_service.py', 'w') as f:
+    f.write(content + "\n" + rest)
