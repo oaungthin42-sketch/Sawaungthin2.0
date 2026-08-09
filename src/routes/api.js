@@ -15,6 +15,15 @@ import { decrypt } from '../services/settings.js';
 import { getDuration } from '../ffmpeg/index.js';
 import { computeCreditsForDuration } from '../utils/index.js';
 
+function assessReferenceAudioDuration(seconds) {
+    if (!seconds) return { status: 'warn', message: 'Could not read audio duration — quality could not be fully checked.' };
+    if (seconds < 3) return { status: 'block', message: 'Reference is too short for stable cloning. Use at least 6-15 seconds of clean speech.' };
+    if (seconds < 6) return { status: 'warn', message: 'Reference is usable but short. 6-15 seconds usually gives a better match.' };
+    if (seconds <= 30) return { status: 'pass', message: 'Reference length is good.' };
+    if (seconds <= 60) return { status: 'warn', message: 'Reference is long. Trim silence, music, or other speakers if present.' };
+    return { status: 'block', message: 'Reference is too long. Trim it to roughly 6-30 seconds of clean speech.' };
+}
+
 
 const router = express.Router();
 
@@ -403,6 +412,13 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
         fs.copyFileSync(req.file.path, finalAudioPath);
         fs.unlinkSync(req.file.path);
 
+        const durationSeconds = await getDuration(finalAudioPath);
+        const quality = assessReferenceAudioDuration(durationSeconds);
+        if (quality.status === 'block') {
+            fs.unlinkSync(finalAudioPath);
+            return res.status(400).json({ error: quality.message });
+        }
+
         // Call python microservice to extract embedding
         const port = process.env.VOICE_CLONE_PORT || '5001';
         const serviceUrl = `http://127.0.0.1:${port}/extract-embedding`;
@@ -426,7 +442,8 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
                 id: refVoiceId,
                 name: name.trim(),
                 audioPath: finalAudioPath,
-                embeddingCachePath: embeddingPath
+                embeddingCachePath: embeddingPath,
+                ...(quality.status === 'warn' ? { qualityWarning: quality.message } : {})
             });
         } else {
             throw new Error("Python microservice did not return success status.");
