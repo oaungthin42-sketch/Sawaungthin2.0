@@ -228,6 +228,7 @@ function App() {
 
   const logout = () => {
       axios.post('/api/auth/logout').then(() => {
+          localStorage.removeItem('superclick_recent_jobs');
           setUser(null);
       });
   };
@@ -614,10 +615,13 @@ function App() {
           localStorage.removeItem('superclick_active_job');
           
           try {
-             let recentJobs = JSON.parse(localStorage.getItem('superclick_recent_jobs') || '[]');
-             if (!recentJobs.includes(id)) {
-                 recentJobs = [id, ...recentJobs].slice(0, 20);
-                 localStorage.setItem('superclick_recent_jobs', JSON.stringify(recentJobs));
+             if (user && user.id) {
+                 const storageKey = `superclick_recent_jobs_${user.id}`;
+                 let recentJobs = JSON.parse(localStorage.getItem(storageKey) || '[]');
+                 if (!recentJobs.includes(id)) {
+                     recentJobs = [id, ...recentJobs].slice(0, 20);
+                     localStorage.setItem(storageKey, JSON.stringify(recentJobs));
+                 }
              }
           } catch(e) {}
         } else if (job.status === 'error') {

@@ -352,17 +352,17 @@ router.get('/play/:jobId', (req, res) => {
 });
 
 
-router.get('/completed-jobs', (req, res) => {
+router.get('/completed-jobs', authMiddleware, (req, res) => {
     const idsParam = req.query.ids;
     if (!idsParam) return res.json([]);
     const ids = idsParam.split(',').slice(0, 200).filter(id => typeof id === 'string' && id.trim().length > 0);
     if (ids.length === 0) return res.json([]);
     
     const placeholders = ids.map(() => '?').join(',');
-    const stmt = db.prepare(`SELECT id, originalFilename, completed_at, coverText FROM jobs WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at > ? AND id IN (${placeholders})`);
+    const stmt = db.prepare(`SELECT id, originalFilename, completed_at, coverText FROM jobs WHERE userId = ? AND status = 'complete' AND completed_at IS NOT NULL AND completed_at > ? AND id IN (${placeholders})`);
     
     const timeLimit = Date.now() - 24 * 60 * 60 * 1000;
-    const rows = stmt.all(timeLimit, ...ids);
+    const rows = stmt.all(req.user.id, timeLimit, ...ids);
     
     const validJobs = [];
     for (const row of rows) {
