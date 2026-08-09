@@ -753,7 +753,7 @@ function App() {
       }
       
       if (activeView === 'recent') {
-          return <RecentDownloads />;
+          return <RecentDownloads userId={user?.id} />;
       }
 
       if (activeView === 'feedback') {

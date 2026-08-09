@@ -11,15 +11,21 @@ interface Job {
     coverText?: string;
 }
 
-export const RecentDownloads: React.FC = () => {
+export const RecentDownloads: React.FC<{ userId?: string }> = ({ userId }) => {
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchRecent = async () => {
+            if (!userId) {
+                setJobs([]);
+                setLoading(false);
+                return;
+            }
             try {
-                const storedIds = JSON.parse(localStorage.getItem('superclick_recent_jobs') || '[]');
+                const storageKey = `superclick_recent_jobs_${userId}`;
+                const storedIds = JSON.parse(localStorage.getItem(storageKey) || '[]');
                 if (storedIds.length === 0) {
                     setJobs([]);
                     setLoading(false);
@@ -31,7 +37,7 @@ export const RecentDownloads: React.FC = () => {
                 
                 // Prune localStorage to keep only valid IDs (e.g. ones returned by the server)
                 const validIds = res.data.map((j: Job) => j.jobId);
-                localStorage.setItem('superclick_recent_jobs', JSON.stringify(validIds));
+                localStorage.setItem(storageKey, JSON.stringify(validIds));
                 
             } catch (err) {
                 console.error('Failed to fetch recent jobs:', err);
@@ -42,7 +48,7 @@ export const RecentDownloads: React.FC = () => {
         };
 
         fetchRecent();
-    }, []);
+    }, [userId]);
 
     if (loading) {
         return (
