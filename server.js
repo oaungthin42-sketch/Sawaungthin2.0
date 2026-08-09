@@ -87,6 +87,11 @@ async function startServer() {
         openvoiceProcess.on('close', (code, signal) => {
           console.log(`[OpenVoice Service] Process exited with code ${code} and signal ${signal}`);
           
+          if (code === 0) {
+            console.log(`[OpenVoice] Service gracefully disabled or exited cleanly. Not restarting.`);
+            return;
+          }
+          
           if (!signal || signal !== 'SIGTERM') {
             const now = Date.now();
             if (now - lastRestart > 5 * 60 * 1000) {

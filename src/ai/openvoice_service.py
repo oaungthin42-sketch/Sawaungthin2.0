@@ -28,7 +28,11 @@ except ImportError:
 
 import sys
 logging.info(f"sys.path: {sys.path}")
-import torch
+try:
+    import torch
+except ImportError:
+    print("ModuleNotFoundError: No module named torch. Disabling Voice Clone.")
+    sys.exit(0)
 
 # Ensure src/ai is in the python path to load openvoice dependencies if needed
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
