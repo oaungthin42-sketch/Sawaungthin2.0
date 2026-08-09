@@ -60,29 +60,53 @@ async function startServer() {
     console.log(`Server running on port ${PORT}`);
 
     if (process.env.VOICE_CLONE_ENABLED === 'true') {
-      const { spawn } = await import('child_process');
-      const pythonBin = process.env.PYTHON_BIN || (process.env.NODE_ENV === 'production' ? '/opt/venv/bin/python3' : 'python3');
-      const pyScript = path.join(process.cwd(), 'src', 'ai', 'openvoice_service.py');
-      console.log(`[OpenVoice] Starting persistent background service on port ${process.env.VOICE_CLONE_PORT || '5001'} using ${pythonBin}`);
-      
-      const openvoiceProcess = spawn(pythonBin, [pyScript], {
-        env: {
-          ...process.env,
-          VOICE_CLONE_PORT: process.env.VOICE_CLONE_PORT || '5001'
-        }
-      });
+      let restartCount = 0;
+      let lastRestart = Date.now();
 
-      openvoiceProcess.stdout.on('data', (data) => {
-        console.log(`[OpenVoice Service STDOUT] ${data.toString().trim()}`);
-      });
+      const startOpenVoiceService = async () => {
+        const { spawn } = await import('child_process');
+        const pythonBin = process.env.PYTHON_BIN || (process.env.NODE_ENV === 'production' ? '/opt/venv/bin/python3' : 'python3');
+        const pyScript = path.join(process.cwd(), 'src', 'ai', 'openvoice_service.py');
+        console.log(`[OpenVoice] Starting persistent background service on port ${process.env.VOICE_CLONE_PORT || '5001'} using ${pythonBin}`);
+        
+        const openvoiceProcess = spawn(pythonBin, [pyScript], {
+          env: {
+            ...process.env,
+            VOICE_CLONE_PORT: process.env.VOICE_CLONE_PORT || '5001'
+          }
+        });
 
-      openvoiceProcess.stderr.on('data', (data) => {
-        console.error(`[OpenVoice Service STDERR] ${data.toString().trim()}`);
-      });
+        openvoiceProcess.stdout.on('data', (data) => {
+          console.log(`[OpenVoice Service STDOUT] ${data.toString().trim()}`);
+        });
 
-      openvoiceProcess.on('close', (code) => {
-        console.log(`[OpenVoice Service] Process exited with code ${code}`);
-      });
+        openvoiceProcess.stderr.on('data', (data) => {
+          console.error(`[OpenVoice Service STDERR] ${data.toString().trim()}`);
+        });
+
+        openvoiceProcess.on('close', (code, signal) => {
+          console.log(`[OpenVoice Service] Process exited with code ${code} and signal ${signal}`);
+          
+          if (!signal || signal !== 'SIGTERM') {
+            const now = Date.now();
+            if (now - lastRestart > 5 * 60 * 1000) {
+              restartCount = 0;
+              lastRestart = now;
+            }
+            
+            if (restartCount >= 5) {
+              console.error(`[OpenVoice] CRITICAL: service crash-looping, giving up auto-restart`);
+              return;
+            }
+            
+            restartCount++;
+            console.log(`[OpenVoice] Scheduling restart (${restartCount}/5) in 3000ms...`);
+            setTimeout(startOpenVoiceService, 3000);
+          }
+        });
+      };
+
+      startOpenVoiceService();
     }
   });
 }

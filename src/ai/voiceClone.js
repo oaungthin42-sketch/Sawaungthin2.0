@@ -19,14 +19,14 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
     
     if (!chunkWavPaths || chunkWavPaths.length === 0) {
         console.warn("[VoiceClone] No chunks provided for voice cloning.");
-        return chunkWavPaths || [];
+        return { chunks: chunkWavPaths || [], fallbackCount: 0, totalChunks: 0 };
     }
 
     try {
         const refVoice = db.prepare('SELECT * FROM reference_voices WHERE id = ?').get(referenceVoiceId);
         if (!refVoice) {
             console.error(`[VoiceClone] Reference voice not found in database for ID: ${referenceVoiceId}. Falling back to original EdgeTTS.`);
-            return chunkWavPaths;
+            return { chunks: chunkWavPaths, fallbackCount: chunkWavPaths.length, totalChunks: chunkWavPaths.length };
         }
 
         const port = process.env.VOICE_CLONE_PORT || '5001';
@@ -36,6 +36,7 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
         // Sequential queue with concurrency 1
         const queue = new PQueue({ concurrency: 1 });
         const results = [];
+        let fallbackCount = 0;
         
         // Pre-compute shared source embedding
         let sharedSourceEmbeddingPath = null;
@@ -74,6 +75,7 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
             try {
                 if (!fs.existsSync(chunkPath)) {
                     console.warn(`[VoiceClone] Chunk file does not exist at path: ${chunkPath}. Using original path anyway.`);
+                    fallbackCount++;
                     results.push(chunkPath);
                     return;
                 }
@@ -82,6 +84,7 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
                 const originalDuration = await getDuration(chunkPath);
                 if (!Number.isFinite(originalDuration) || originalDuration <= 0) {
                     console.warn(`[VoiceClone] Could not get valid duration for chunk ${idx + 1}: ${chunkPath}. Falling back.`);
+                    fallbackCount++;
                     results.push(chunkPath);
                     return;
                 }
@@ -131,6 +134,7 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
                     if (drift > 0.05) {
                         console.warn(`[VoiceClone] WARNING: Drift of ${(drift * 100).toFixed(2)}% on chunk ${idx + 1} exceeds 5% limit! Falling back to original chunk.`);
                         try { fs.unlinkSync(clonedChunkPath); } catch (unlinkErr) {}
+                        fallbackCount++;
                         results.push(chunkPath);
                     } else {
                         console.log(`[VoiceClone] Successfully cloned chunk ${idx + 1} with drift: ${(drift * 100).toFixed(2)}%`);
@@ -138,18 +142,20 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
                     }
                 } else {
                     console.warn(`[VoiceClone] Microservice did not return success for chunk ${idx + 1}. Falling back to original chunk.`);
+                    fallbackCount++;
                     results.push(chunkPath);
                 }
             } catch (err) {
                 console.error(`[VoiceClone] Error converting chunk ${idx + 1}: ${err.message}. Falling back to original chunk.`);
+                fallbackCount++;
                 results.push(chunkPath);
             }
         }));
 
         console.log("[VoiceClone] Finished voice cloning process.");
-        return results;
+        return { chunks: results, fallbackCount, totalChunks: chunkWavPaths.length };
     } catch (e) {
         console.error("[VoiceClone] Unexpected error in applyVoiceClone module:", e);
-        return chunkWavPaths;
+        return { chunks: chunkWavPaths, fallbackCount: chunkWavPaths.length, totalChunks: chunkWavPaths.length };
     }
 }

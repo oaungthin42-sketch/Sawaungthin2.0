@@ -401,10 +401,20 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 console.log(`[AI] Voice clone is active. Cloning ${processedChunks.length} chunks...`);
                 const { applyVoiceClone } = await import('./voiceClone.js');
                 const oldProcessedChunks = [...processedChunks];
-                const clonedChunks = await applyVoiceClone(processedChunks, options.referenceVoiceId, { sourceMode: options.sourceMode ?? 'shared' });
+                const { chunks: clonedChunks, fallbackCount, totalChunks } = await applyVoiceClone(processedChunks, options.referenceVoiceId, { sourceMode: options.sourceMode ?? 'shared' });
                 for (let i = 0; i < processedChunks.length; i++) {
                     if (clonedChunks[i] && clonedChunks[i] !== processedChunks[i]) {
                         processedChunks[i] = clonedChunks[i];
+                    }
+                }
+                
+                if (fallbackCount > 0) {
+                    const jobId = path.basename(path.dirname(cachePath));
+                    try {
+                        const { updateJob } = await import('../services/jobManager.js');
+                        updateJob(jobId, { voiceCloneDegraded: 1, voiceCloneFallbackCount: fallbackCount });
+                    } catch(e) {
+                        console.warn(`[AI] Failed to update job with degraded status: ${e.message}`);
                     }
                 }
 
