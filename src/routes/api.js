@@ -15,6 +15,8 @@ import { decrypt } from '../services/settings.js';
 import { getDuration } from '../ffmpeg/index.js';
 import { computeCreditsForDuration } from '../utils/index.js';
 
+import ffmpeg from 'fluent-ffmpeg';
+
 function assessReferenceAudioDuration(seconds) {
     if (!seconds) return { status: 'warn', message: 'Could not read audio duration — quality could not be fully checked.' };
     if (seconds < 3) return { status: 'block', message: 'Reference is too short for stable cloning. Use at least 6-15 seconds of clean speech.' };
@@ -22,6 +24,16 @@ function assessReferenceAudioDuration(seconds) {
     if (seconds <= 30) return { status: 'pass', message: 'Reference length is good.' };
     if (seconds <= 60) return { status: 'warn', message: 'Reference is long. Trim silence, music, or other speakers if present.' };
     return { status: 'block', message: 'Reference is too long. Trim it to roughly 6-30 seconds of clean speech.' };
+}
+
+async function denoiseReferenceAudio(inputPath, outputPath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+            .audioFilters('afftdn=nr=10:nf=-35:nt=w')
+            .on('end', () => resolve(outputPath))
+            .on('error', (err) => reject(err))
+            .save(outputPath);
+    });
 }
 
 
@@ -411,6 +423,16 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
         // Move the uploaded file from tmp to dataDir
         fs.copyFileSync(req.file.path, finalAudioPath);
         fs.unlinkSync(req.file.path);
+
+        const denoisedPath = finalAudioPath.replace(/(\.[^.]+)$/, '_denoised$1');
+        try {
+            await denoiseReferenceAudio(finalAudioPath, denoisedPath);
+            fs.unlinkSync(finalAudioPath);
+            fs.renameSync(denoisedPath, finalAudioPath);
+        } catch (denoiseErr) {
+            console.warn('[API] Denoise step failed, continuing with original audio:', denoiseErr.message);
+            if (fs.existsSync(denoisedPath)) { try { fs.unlinkSync(denoisedPath); } catch (e) {} }
+        }
 
         const durationSeconds = await getDuration(finalAudioPath);
         const quality = assessReferenceAudioDuration(durationSeconds);
