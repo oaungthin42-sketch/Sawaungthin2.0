@@ -400,12 +400,49 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             try {
                 console.log(`[AI] Voice clone is active. Cloning ${processedChunks.length} chunks...`);
                 const { applyVoiceClone } = await import('./voiceClone.js');
+                const oldProcessedChunks = [...processedChunks];
                 const clonedChunks = await applyVoiceClone(processedChunks, options.referenceVoiceId, { sourceMode: options.sourceMode ?? 'shared' });
                 for (let i = 0; i < processedChunks.length; i++) {
                     if (clonedChunks[i] && clonedChunks[i] !== processedChunks[i]) {
                         processedChunks[i] = clonedChunks[i];
                     }
                 }
+
+                // POST-CLONE CORRECTION PASS
+                console.log("[AI] Running post-clone timeline correction pass...");
+                let currentStartTime = 0;
+                for (let i = 0; i < processedChunks.length; i++) {
+                    const blockSceneIndices = mergedBlocks[i].scenes;
+                    const blockTimelineEntries = authoritativeTimeline.filter(entry => blockSceneIndices.includes(entry.chunk_index));
+                    
+                    let oldDur = 0;
+                    for (const entry of blockTimelineEntries) {
+                        oldDur += entry.final_dur;
+                    }
+                    
+                    let newDur = oldDur;
+                    if (processedChunks[i] !== oldProcessedChunks[i]) {
+                        try {
+                            const actualDur = parseFloat(await getDuration(processedChunks[i]));
+                            if (Number.isFinite(actualDur) && actualDur > 0) {
+                                newDur = actualDur;
+                            }
+                        } catch (e) {
+                            console.warn(`[AI] Failed to get cloned duration for chunk ${i}:`, e);
+                        }
+                    }
+                    
+                    const ratio = oldDur > 0 ? newDur / oldDur : 1;
+                    
+                    for (const entry of blockTimelineEntries) {
+                        const newSceneDur = entry.final_dur * ratio;
+                        entry.final_audio_start = currentStartTime;
+                        entry.final_audio_end = currentStartTime + newSceneDur;
+                        entry.final_dur = newSceneDur;
+                        currentStartTime += newSceneDur;
+                    }
+                }
+                runningAudioTime = currentStartTime;
             } catch (cloneErr) {
                 console.error("[AI] Error during voice cloning. Falling back to original TTS audio:", cloneErr);
             }
