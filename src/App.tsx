@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { RecentDownloads } from './components/RecentDownloads';
 import { FeedbackForm } from './components/FeedbackForm';
 import { CreditGauge } from './components/CreditGauge';
+import { AIRecapTool } from './components/AIRecapTool';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Play, Menu, 
@@ -947,6 +948,10 @@ function App() {
           );
       }
 
+      if (activeView === 'ai-recap-beta') {
+          return <AIRecapTool />;
+      }
+
       // Default: Video Tool
       return (
           <div className="space-y-6">
@@ -1341,6 +1346,7 @@ function App() {
     { id: 'tool', label: 'Video Tool', icon: Play },
     { id: 'recent', label: 'Recent Downloads', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
+    { id: 'ai-recap-beta', label: 'AI Movie Recap (Beta)', icon: Play },
   ];
 
   return (
@@ -1364,6 +1370,12 @@ function App() {
                 <h1 className="text-lg font-bold font-display tracking-tight text-white">{NAV_ITEMS.find(i => i.id === activeView)?.label || 'SuperClick'}</h1>
               </div>
               <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setActiveView('ai-recap-beta')}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg shadow-indigo-900/20 transition-all border border-indigo-500 hidden sm:block"
+                >
+                  AI Movie Recap (Beta)
+                </button>
                 <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 bg-gray-900 border border-gray-800 rounded-full">
                   {user?.role === 'admin'
                     ? <span className="text-amber-400 font-bold flex items-center gap-1">∞ Unlimited</span>

@@ -127,6 +127,21 @@ try {
     console.error("Error creating reference_voices table", e);
 }
 
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_recap_jobs (
+            id TEXT PRIMARY KEY,
+            userId TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'processing',
+            resultJson TEXT,
+            error TEXT,
+            createdAt INTEGER NOT NULL
+        )
+    `);
+} catch (e) {
+    console.error("Error creating ai_recap_jobs table", e);
+}
+
 try { db.exec(`ALTER TABLE jobs ADD COLUMN useVoiceClone INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN watermarkText TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN referenceVoiceId TEXT`); } catch (e) {}
