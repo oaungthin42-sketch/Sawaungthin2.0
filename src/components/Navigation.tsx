@@ -11,7 +11,8 @@ import {
     Settings,
     X,
     Download,
-    Send
+    Send,
+    Sparkles
 } from 'lucide-react';
 
 interface NavItem {
@@ -24,6 +25,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
     { id: 'dashboard', label: 'ပင်မစာမျက်နှာ', icon: LayoutDashboard },
     { id: 'tool', label: 'ဗီဒီယို ကိရိယာ', icon: Video },
+    { id: 'ai-recap-beta', label: 'AI Movie Recap (Beta)', icon: Sparkles },
     { id: 'recent', label: 'မကြာသေးမီက ဒေါင်းလုဒ်များ', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
     { id: 'feedback', label: 'မှတ်ချက်', icon: MessageSquare },
