@@ -825,6 +825,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 <h2 className="text-xl font-bold text-white">စနစ် ဆက်တင်များ</h2>
 
                                 <div className="space-y-4 pb-8 border-b border-gray-800">
+                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Gemini API Key</h3>
+                                    <input
+                                        type="password"
+                                        value={settingsValues['GEMINI_API_KEY'] || ''}
+                                        onChange={(e) => setSettingsValues({ ...settingsValues, GEMINI_API_KEY: e.target.value })}
+                                        placeholder="AIzaSy..."
+                                        className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
+                                    />
+                                    <p className="text-xs text-gray-500 font-bold">
+                                        ဒီနေရာမှာ key တစ်ခုခု ရှိနေရင် Railway environment variable ထက် ဦးစားပေး အသုံးပြုပါမယ်။ Clear လုပ်ချင်ရင် input ကို ဗလာထားပြီး Save နှိပ်ပါ
+                                    </p>
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await axios.post('/api/settings', { key: 'GEMINI_API_KEY', value: settingsValues['GEMINI_API_KEY'] || '' });
+                                                alert('Gemini API Key Save လုပ်ပြီးပါပြီ');
+                                                fetchData();
+                                            } catch (err: any) {
+                                                alert(err.response?.data?.error || 'Save မလုပ်နိုင်ပါ');
+                                            }
+                                        }}
+                                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
+                                    >
+                                        Gemini API Key Save
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4 pb-8 border-b border-gray-800">
                                     <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">ဘဏ်အချက်အလက်</h3>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-500 mb-2">ဘဏ်အမျိုးအစား</label>
