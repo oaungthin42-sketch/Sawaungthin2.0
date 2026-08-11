@@ -189,7 +189,8 @@ export const AIRecapTool: React.FC = () => {
                                                 {(scene.end - scene.start).toFixed(1)}s
                                             </span>
                                         </div>
-                                        <p className="text-gray-300 text-sm">{scene.reason}</p>
+                                        <p className="text-gray-400 text-xs mb-2">{scene.reason}</p>
+                                        <p className="text-indigo-200 text-sm italic border-l-2 border-indigo-500/50 pl-3">"{scene.narration_text}"</p>
                                     </div>
                                 )) : (
                                     <p className="text-gray-500">No scenes found in the expected format.</p>
@@ -198,9 +199,11 @@ export const AIRecapTool: React.FC = () => {
                         </div>
 
                         <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 flex flex-col">
-                            <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2 mb-4">Burmese Narration Script</h4>
+                            <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2 mb-4">Full Script Preview</h4>
                             <div className="flex-1 bg-gray-950 border border-gray-800 rounded-xl p-4 overflow-y-auto custom-scrollbar whitespace-pre-wrap text-gray-300 text-sm leading-relaxed max-h-[500px]">
-                                {result.narration || "No narration found in the expected format."}
+                                {result.scenes && Array.isArray(result.scenes)
+                                    ? result.scenes.map((s: any) => s.narration_text).join(' ')
+                                    : "No narration found in the expected format."}
                             </div>
                         </div>
                     </div>

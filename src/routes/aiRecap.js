@@ -76,8 +76,7 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
                 throw new Error("Gemini file processing failed");
             }
 
-            const prompt = "You are analyzing a C-Drama / movie video to prepare a Burmese movie recap short. Watch the entire video and: (1) Identify only the scenes that matter for the story — plot-relevant dialogue, key reactions, turning points. (2) Exclude filler: long silent walking, repeated shots, redundant establishing shots, scenes that don't move the story forward. (3) Order the selected scenes for a fast-paced, engaging recap — you may reorder non-chronologically for a strong opening hook if that serves the story better. (4) Write a natural, high-energy Burmese narration script to be read over the selected scenes, written 100% in Burmese, no markdown, no labels. Return the exact start/end timestamps (in seconds, matching the source video) for every scene you selected, in the order they should play.";
-
+            const prompt = "You are analyzing a C-Drama / movie video to prepare a Burmese movie recap short. Watch the entire video and: (1) Identify only the scenes that matter for the story — plot-relevant dialogue, key reactions, turning points. (2) Exclude filler: long silent walking, repeated shots, redundant establishing shots, scenes that don't move the story forward. (3) Order the selected scenes for a fast-paced, engaging recap — you may reorder non-chronologically for a strong opening hook if that serves the story better. (4) For EACH selected scene, write a short natural Burmese narration line (1-2 sentences) to be read aloud while that specific scene plays — written 100% in Burmese, no markdown, no labels. The narration lines should flow naturally into each other when read in the order the scenes will play, forming a cohesive recap story overall, but each line must specifically correspond to and make sense timed against its own scene.";
             console.log(`[AI Recap] Calling generateContent...`);
             const response = await ai.models.generateContent({
                 model: "gemini-3.6-flash",
@@ -102,14 +101,14 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
                                     properties: {
                                         start: { type: "NUMBER" },
                                         end: { type: "NUMBER" },
-                                        reason: { type: "STRING" }
+                                        reason: { type: "STRING" },
+                                        narration_text: { type: "STRING" }
                                     },
-                                    required: ["start", "end", "reason"]
+                                    required: ["start", "end", "reason", "narration_text"]
                                 }
-                            },
-                            narration: { type: "STRING" }
+                            }
                         },
-                        required: ["scenes", "narration"]
+                        required: ["scenes"]
                     }
                 }
             });
