@@ -6,10 +6,14 @@ import { getSetting } from '../services/settings.js';
 import db from '../services/db.js';
 import { authMiddleware } from './auth.js';
 import { GoogleGenAI } from '@google/genai';
+import { generateNarrationTTS } from '../ai/index.js';
+import { runFFmpeg } from '../ffmpeg/index.js';
 
 const router = express.Router();
 
 const uploadDir = path.join(process.cwd(), 'data', 'temp_recap');
+const sourcesDir = path.join(process.cwd(), 'data', 'ai_recap_sources');
+if (!fs.existsSync(sourcesDir)) { fs.mkdirSync(sourcesDir, { recursive: true }); }
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -31,12 +35,15 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
     }
 
     const jobId = 'recap_' + Date.now();
-    const videoPath = req.file.path;
-
+    const tempVideoPath = req.file.path;
+    const sourceVideoPath = path.join(sourcesDir, jobId + path.extname(req.file.originalname));
+    fs.renameSync(tempVideoPath, sourceVideoPath);
+    const videoPath = sourceVideoPath;
+    
     // Create job row
     try {
-        const stmt = db.prepare(`INSERT INTO ai_recap_jobs (id, userId, status, createdAt) VALUES (?, ?, ?, ?)`);
-        stmt.run(jobId, req.user.id, 'processing', Date.now());
+        const stmt = db.prepare(`INSERT INTO ai_recap_jobs (id, userId, status, createdAt, sourceVideoPath) VALUES (?, ?, ?, ?, ?)`);
+        stmt.run(jobId, req.user.id, 'processing', Date.now(), sourceVideoPath);
     } catch (e) {
         console.error("Error creating recap job", e);
         if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath);
@@ -132,9 +139,7 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
             const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'error', error = ? WHERE id = ?`);
             stmt.run(e.message || "Unknown error", jobId);
         } finally {
-            if (fs.existsSync(videoPath)) {
-                fs.unlinkSync(videoPath);
-            }
+            // Video is kept for generation phase
         }
     })();
 });
@@ -152,4 +157,121 @@ router.get('/status/:jobId', authMiddleware, (req, res) => {
     }
 });
 
+
+router.post('/generate/:jobId', authMiddleware, async (req, res) => {
+    try {
+        const jobId = req.params.jobId;
+        const row = db.prepare(`SELECT * FROM ai_recap_jobs WHERE id = ? AND userId = ?`).get(jobId, req.user.id);
+        
+        if (!row || row.status !== 'done' || !row.resultJson || !row.sourceVideoPath) {
+            return res.status(400).json({ error: 'Job not ready for generation' });
+        }
+
+        db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'generating' WHERE id = ?`).run(jobId);
+        res.json({ started: true });
+
+        (async () => {
+            let finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
+            try {
+                const result = JSON.parse(row.resultJson);
+                const scenes = result.scenes || [];
+                
+                const sceneNarration = scenes.map(s => ({
+                    narration_text: s.narration_text,
+                    scene_start: s.start,
+                    scene_end: s.end
+                }));
+
+                const cachePath = path.join(sourcesDir, jobId + '_narration.wav');
+                // The generateNarrationTTS uses voiceId string which is looked up.
+                const voiceId = 'male-young-adult'; 
+                
+                await generateNarrationTTS(sceneNarration, cachePath, voiceId, []);
+                
+                // Cut scenes and concat
+                const concatListPath = path.join(sourcesDir, jobId + '_concat.txt');
+                let concatContent = '';
+                const tempVideoFiles = [];
+                
+                for (let i = 0; i < scenes.length; i++) {
+                    const s = scenes[i];
+                    const outPath = path.join(sourcesDir, jobId + '_scene_' + i + '.mp4');
+                    tempVideoFiles.push(outPath);
+                    // run ffmpeg to cut
+                    await runFFmpeg([
+                        '-y',
+                        '-i', row.sourceVideoPath,
+                        '-ss', String(s.start),
+                        '-to', String(s.end),
+                        '-c:v', 'libx264',
+                        '-preset', 'veryfast',
+                        '-crf', '23',
+                        '-an',
+                        outPath
+                    ], sourcesDir, () => {});
+                    
+                    concatContent += `file '${outPath}'\n`;
+                }
+                
+                fs.writeFileSync(concatListPath, concatContent);
+                
+                const concatVideoPath = path.join(sourcesDir, jobId + '_concat.mp4');
+                await runFFmpeg([
+                    '-y',
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', concatListPath,
+                    '-c', 'copy',
+                    concatVideoPath
+                ], sourcesDir, () => {});
+                
+                // Mux with audio
+                await runFFmpeg([
+                    '-y',
+                    '-i', concatVideoPath,
+                    '-i', cachePath,
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-shortest',
+                    finalVideoPath
+                ], sourcesDir, () => {});
+                
+                // Cleanup temps
+                for (const tempFile of tempVideoFiles) {
+                    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+                }
+                if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
+                if (fs.existsSync(concatVideoPath)) fs.unlinkSync(concatVideoPath);
+                
+                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ? WHERE id = ?`).run(finalVideoPath, jobId);
+                
+                // Now delete the source video
+                if (fs.existsSync(row.sourceVideoPath)) {
+                    fs.unlinkSync(row.sourceVideoPath);
+                }
+
+            } catch (err) {
+                console.error("[AI Recap] Generation failed", err);
+                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ? WHERE id = ?`).run(err.message || "Generation error", jobId);
+            }
+        })();
+    } catch (e) {
+        console.error("Error starting generation", e);
+        res.status(500).json({ error: 'Failed to start generation' });
+    }
+});
+
+router.get('/download/:jobId', authMiddleware, (req, res) => {
+    try {
+        const row = db.prepare(`SELECT * FROM ai_recap_jobs WHERE id = ? AND userId = ?`).get(req.params.jobId, req.user.id);
+        if (!row || row.generationStatus !== 'video_done' || !row.finalVideoPath || !fs.existsSync(row.finalVideoPath)) {
+            return res.status(404).json({ error: 'Video not found or not ready' });
+        }
+        res.download(row.finalVideoPath, `recap_${req.params.jobId}.mp4`);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to download video' });
+    }
+});
+
 export default router;
+

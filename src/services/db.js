@@ -142,6 +142,10 @@ try {
     console.error("Error creating ai_recap_jobs table", e);
 }
 
+try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN sourceVideoPath TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN finalVideoPath TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN generationStatus TEXT`); } catch (e) {}
+
 try { db.exec(`ALTER TABLE jobs ADD COLUMN useVoiceClone INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN watermarkText TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN referenceVoiceId TEXT`); } catch (e) {}

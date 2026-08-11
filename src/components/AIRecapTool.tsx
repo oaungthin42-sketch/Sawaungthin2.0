@@ -4,9 +4,10 @@ import axios from 'axios';
 
 export const AIRecapTool: React.FC = () => {
     const [videoFile, setVideoFile] = useState<File | null>(null);
-    const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'>('idle');
+    const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error' | 'generating_video' | 'video_done' | 'video_error'>('idle');
     const [errorMsg, setErrorMsg] = useState('');
     const [result, setResult] = useState<any>(null);
+    const [jobId, setJobId] = useState<string | null>(null);
     const videoInputRef = useRef<HTMLInputElement>(null);
     const [pollTimer, setPollTimer] = useState<any>(null);
 
@@ -31,6 +32,7 @@ export const AIRecapTool: React.FC = () => {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
             const newJobId = response.data.jobId;
+            setJobId(newJobId);
             setStatus('analyzing');
             startPolling(newJobId);
         } catch (err: any) {
@@ -68,12 +70,49 @@ export const AIRecapTool: React.FC = () => {
         setPollTimer(interval);
     };
 
+    
+    const generateVideo = async () => {
+        if (!jobId) return;
+        setStatus('generating_video');
+        setErrorMsg('');
+        try {
+            await axios.post(`/api/ai-recap/generate/${jobId}`);
+            startGenerationPolling(jobId);
+        } catch (err: any) {
+            setStatus('video_error');
+            setErrorMsg(err.response?.data?.error || err.message || 'Generation failed');
+        }
+    };
+
+    const startGenerationPolling = (id: string) => {
+        if (pollTimer) clearInterval(pollTimer);
+        const interval = setInterval(async () => {
+            try {
+                const statusRes = await axios.get(`/api/ai-recap/status/${id}`);
+                const job = statusRes.data;
+                
+                if (job.generationStatus === 'video_done') {
+                    clearInterval(interval);
+                    setStatus('video_done');
+                } else if (job.generationStatus === 'video_error') {
+                    clearInterval(interval);
+                    setStatus('video_error');
+                    setErrorMsg(job.error || 'Video generation failed');
+                }
+            } catch (e) {
+                // Ignore temp network errors
+            }
+        }, 3000);
+        setPollTimer(interval);
+    };
+
     const reset = () => {
         if (pollTimer) clearInterval(pollTimer);
         setVideoFile(null);
         setStatus('idle');
         setResult(null);
         setErrorMsg('');
+        setJobId(null);
     };
 
     return (
@@ -167,12 +206,20 @@ export const AIRecapTool: React.FC = () => {
                 <div className="max-w-4xl mx-auto space-y-6">
                     <div className="flex items-center justify-between">
                         <h3 className="text-xl font-bold text-white">Analysis Complete</h3>
-                        <button
-                            onClick={reset}
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={generateVideo}
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-indigo-900/20"
+                            >
+                                Generate Video
+                            </button>
+                            <button
+                                onClick={reset}
                             className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
                         >
                             Start New
                         </button>
+                        </div>
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-6">
@@ -209,6 +256,74 @@ export const AIRecapTool: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {status === 'generating_video' && (
+                <div className="max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-12 text-center space-y-6">
+                    <div className="relative w-24 h-24 mx-auto">
+                        <div className="absolute inset-0 border-4 border-indigo-500/20 rounded-full"></div>
+                        <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-indigo-400 font-bold text-sm">VID</span>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold text-white mb-2">Generating Video...</h3>
+                        <p className="text-gray-400">Cutting scenes and generating narration</p>
+                    </div>
+                </div>
+            )}
+            
+            {status === 'video_error' && (
+                <div className="max-w-2xl mx-auto bg-red-950/20 border border-red-900/50 rounded-3xl p-8 text-center space-y-6">
+                    <AlertCircle className="w-16 h-16 text-red-500 mx-auto" />
+                    <h3 className="text-xl font-bold text-red-400">Video Generation Error</h3>
+                    <p className="text-red-300">{errorMsg}</p>
+                    <button
+                        onClick={generateVideo}
+                        className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
+                    >
+                        Retry Generation
+                    </button>
+                    <button
+                        onClick={reset}
+                        className="text-gray-400 hover:text-white mt-4 block mx-auto text-sm"
+                    >
+                        Start Over
+                    </button>
+                </div>
+            )}
+            
+            {status === 'video_done' && (
+                <div className="max-w-4xl mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-8 space-y-6 text-center">
+                    <h3 className="text-2xl font-bold text-white">Video Ready!</h3>
+                    <p className="text-gray-400">Your recap video with AI narration has been generated successfully.</p>
+                    
+                    <div className="aspect-video bg-black rounded-xl overflow-hidden border border-gray-800 relative max-w-2xl mx-auto">
+                        <video 
+                            controls 
+                            src={`/api/ai-recap/download/${jobId}`} 
+                            className="w-full h-full object-contain"
+                        />
+                    </div>
+                    
+                    <div className="flex items-center justify-center gap-4">
+                        <a
+                            href={`/api/ai-recap/download/${jobId}`}
+                            download
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/20 inline-flex items-center gap-2"
+                        >
+                            Download Video
+                        </a>
+                        <button
+                            onClick={reset}
+                            className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-3 rounded-xl font-bold transition-all"
+                        >
+                            Start New
+                        </button>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };
