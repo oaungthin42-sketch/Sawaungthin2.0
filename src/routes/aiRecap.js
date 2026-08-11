@@ -80,7 +80,7 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
 
             console.log(`[AI Recap] Calling generateContent...`);
             const response = await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: "gemini-3.6-flash",
                 contents: [
                     {
                         role: "user",
