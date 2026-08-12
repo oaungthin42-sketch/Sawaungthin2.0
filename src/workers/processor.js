@@ -153,7 +153,7 @@ export const processRecapPipeline = async (jobId) => {
                 // Retry on transient API errors or validation errors
                 let response;
                 let attempts = 0;
-                const maxAttempts = 2;
+                const maxAttempts = 3;
                 let lastError = null;
 
                 while (attempts < maxAttempts) {
@@ -199,7 +199,12 @@ export const processRecapPipeline = async (jobId) => {
                         lastError = err;
                         console.warn(`[TRANSLATION] Gemini translation/validation attempt ${attempts} failed:`, err);
                         if (attempts < maxAttempts) {
-                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            const errStr = err ? (err.message ? err.message.toLowerCase() : String(err).toLowerCase()) : '';
+                            if (errStr.includes('503') || errStr.includes('unavailable')) {
+                                await new Promise(resolve => setTimeout(resolve, 3000));
+                            } else {
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            }
                         }
                     }
                 }
