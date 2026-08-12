@@ -165,7 +165,7 @@ export const processRecapPipeline = async (jobId) => {
                             config: {
                                 systemInstruction: systemInstruction,
                                 responseMimeType: 'application/json',
-                                thinkingConfig: { thinkingBudget: 0 },
+                                thinkingConfig: { thinkingLevel: 'minimal' },
                                 maxOutputTokens: 65536
                             }
                         });
