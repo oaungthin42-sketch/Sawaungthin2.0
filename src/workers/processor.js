@@ -164,7 +164,9 @@ export const processRecapPipeline = async (jobId) => {
                             contents: JSON.stringify(translationInput),
                             config: {
                                 systemInstruction: systemInstruction,
-                                responseMimeType: 'application/json'
+                                responseMimeType: 'application/json',
+                                thinkingConfig: { thinkingBudget: 0 },
+                                maxOutputTokens: 65536
                             }
                         });
                         
