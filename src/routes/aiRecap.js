@@ -188,6 +188,12 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 
                 await generateNarrationTTS(sceneNarration, cachePath, voiceId, []);
                 
+                const authoritativeTimelinePath = cachePath + '.timeline.json';
+                let timeline = [];
+                if (fs.existsSync(authoritativeTimelinePath)) {
+                    timeline = JSON.parse(fs.readFileSync(authoritativeTimelinePath, 'utf8'));
+                }
+                
                 // Cut scenes and concat
                 const concatListPath = path.join(sourcesDir, jobId + '_concat.txt');
                 let concatContent = '';
@@ -197,12 +203,30 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                     const s = scenes[i];
                     const outPath = path.join(sourcesDir, jobId + '_scene_' + i + '.mp4');
                     tempVideoFiles.push(outPath);
+                    
+                    let target_dur = s.end - s.start;
+                    if (timeline[i] && timeline[i].final_dur) {
+                        target_dur = timeline[i].final_dur;
+                    }
+                    
+                    const desired_orig_dur = s.end - s.start;
+                    let speed = 1.0;
+                    if (desired_orig_dur > 0.1 && target_dur > 0.1) {
+                        speed = desired_orig_dur / target_dur;
+                        if (speed < 0.35) speed = 0.35;
+                        if (speed > 100.0) speed = 100.0;
+                    }
+                    
+                    const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur.toFixed(3)},fps=30,setsar=1,format=yuv420p[v]`;
+
                     // run ffmpeg to cut
                     await runFFmpeg([
                         '-y',
-                        '-i', row.sourceVideoPath,
                         '-ss', String(s.start),
-                        '-to', String(s.end),
+                        '-t', String(desired_orig_dur),
+                        '-i', row.sourceVideoPath,
+                        '-filter_complex', filter,
+                        '-map', '[v]',
                         '-c:v', 'libx264',
                         '-preset', 'veryfast',
                         '-crf', '23',
