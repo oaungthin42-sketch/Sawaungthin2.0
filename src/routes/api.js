@@ -437,6 +437,41 @@ router.get('/temp-video/:token', authMiddleware, (req, res) => {
     }
 });
 
+router.post('/process-recap-from-token', authMiddleware, express.json(), async (req, res) => {
+    const { token } = req.body;
+    
+    if (!token) {
+        return res.status(400).json({ error: 'Token is required' });
+    }
+
+    const downloadData = pendingUrlDownloads.get(token);
+    if (!downloadData) {
+        return res.status(404).json({ error: 'Video not found or expired' });
+    }
+    
+    if (downloadData.userId !== req.user.id) {
+        return res.status(404).json({ error: 'Video not found or expired' });
+    }
+    
+    const filePath = downloadData.filePath;
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'Video file no longer exists' });
+    }
+    
+    try {
+        const jobId = await createRecapJobFromLocalFile(filePath, 'url_video.mp4', req.user, req.body);
+        pendingUrlDownloads.delete(token);
+        res.json({ jobId });
+    } catch (err) {
+        console.error('[API] Process from token failed:', err);
+        pendingUrlDownloads.delete(token);
+        if (err.message.includes('Failed to read video duration') || err.message.includes('Insufficient credits')) {
+            return res.status(400).json({ error: err.message });
+        }
+        res.status(400).json({ error: 'Could not process video from this token' });
+    }
+});
+
 router.post('/retry/:jobId', (req, res) => {
     const job = getJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Job not found' });
