@@ -4,6 +4,7 @@ import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import { createJob, getJob, updateJob } from '../services/jobManager.js';
 import { addJobToQueue } from '../services/queue.js';
 import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../services/settings.js';
@@ -169,49 +170,39 @@ router.post('/settings', authMiddleware, adminOnly, (req, res) => {
 });
 
 
-router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => {
-    const videoFile = req.file;
-
-    if (!videoFile) {
-        return res.status(400).json({ error: 'Video file is required' });
-    }
-
-    const user = req.user;
-    
+async function createRecapJobFromLocalFile(localVideoPath, originalFilename, user, body) {
     let durationSeconds = 0;
     try {
-        durationSeconds = await getDuration(videoFile.path);
+        durationSeconds = await getDuration(localVideoPath);
     } catch (err) {
         console.error("[API] Failed to get video duration:", err);
-        if (videoFile.path && fs.existsSync(videoFile.path)) {
-            fs.unlinkSync(videoFile.path);
+        if (localVideoPath && fs.existsSync(localVideoPath)) {
+            fs.unlinkSync(localVideoPath);
         }
-        return res.status(400).json({ error: 'Failed to read video duration. The uploaded file might be corrupt or an invalid video format.' });
+        throw new Error('Failed to read video duration. The uploaded file might be corrupt or an invalid video format.');
     }
 
     const requiredCredits = computeCreditsForDuration(durationSeconds);
 
     if (user.role !== 'admin' && user.credits < requiredCredits) {
-        if (videoFile.path && fs.existsSync(videoFile.path)) {
-            fs.unlinkSync(videoFile.path);
+        if (localVideoPath && fs.existsSync(localVideoPath)) {
+            fs.unlinkSync(localVideoPath);
         }
-        return res.status(400).json({
-            error: `Insufficient credits. This ${Math.round(durationSeconds)}-second video needs ${requiredCredits} credit(s), you have ${user.credits}.`
-        });
+        throw new Error(`Insufficient credits. This ${Math.round(durationSeconds)}-second video needs ${requiredCredits} credit(s), you have ${user.credits}.`);
     }
 
     const jobId = uuidv4();
-    const blurBoxes = req.body.blurBoxes || '[]';
-    const watermarkText = req.body.watermarkText || '';
+    const blurBoxes = body.blurBoxes || '[]';
+    const watermarkText = body.watermarkText || '';
     console.log(`[WATERMARK-DEBUG] Received watermarkText from client: "${watermarkText}" (length: ${watermarkText.length})`);
-    const subtitlePosition = req.body.subtitlePosition || null;
-    const selectedFontId = req.body.selectedFontId || null;
-    const subtitleColor = req.body.subtitleColor || "white";
-    const speed = parseFloat(req.body.speed) || 1.0;
-    const flipped = req.body.flipped === 'true' ? 1 : 0;
-    const useVoiceCloneRaw = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1';
+    const subtitlePosition = body.subtitlePosition || null;
+    const selectedFontId = body.selectedFontId || null;
+    const subtitleColor = body.subtitleColor || "white";
+    const speed = parseFloat(body.speed) || 1.0;
+    const flipped = body.flipped === 'true' ? 1 : 0;
+    const useVoiceCloneRaw = body.useVoiceClone === 'true' || body.useVoiceClone === true || body.useVoiceClone === 1 || body.useVoiceClone === '1';
     let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
-    let referenceVoiceId = req.body.referenceVoiceId || null;
+    let referenceVoiceId = body.referenceVoiceId || null;
 
     if (useVoiceClone && user.role !== 'admin') {
         useVoiceClone = 0;
@@ -224,9 +215,9 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
     }
 
     createJob(jobId, {
-        videoPath: videoFile.path,
+        videoPath: localVideoPath,
         audioPath: null,
-        originalFilename: Buffer.from(videoFile.originalname, 'latin1').toString('utf8'),
+        originalFilename: originalFilename,
         blurBoxes: blurBoxes,
         watermarkText: watermarkText,
         subtitlePosition: subtitlePosition,
@@ -243,9 +234,87 @@ router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => 
         referenceVoiceId: referenceVoiceId
     });
     
-    res.json({ jobId });
-
     addJobToQueue(jobId);
+    return jobId;
+}
+
+
+router.post('/process-recap', authMiddleware, handleUpload, async (req, res) => {
+    const videoFile = req.file;
+
+    if (!videoFile) {
+        return res.status(400).json({ error: 'Video file is required' });
+    }
+
+    try {
+        const originalFilename = Buffer.from(videoFile.originalname, 'latin1').toString('utf8');
+        const jobId = await createRecapJobFromLocalFile(videoFile.path, originalFilename, req.user, req.body);
+        res.json({ jobId });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+router.post('/process-recap-url', authMiddleware, express.json(), async (req, res) => {
+    const { url } = req.body;
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+    
+    try {
+        const parsedUrl = new URL(url);
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            throw new Error('Invalid protocol');
+        }
+    } catch (err) {
+        return res.status(400).json({ error: 'Invalid URL format' });
+    }
+    
+    const tempFileName = uuidv4() + '.mp4';
+    const tempFilePath = path.join(tmpDir, tempFileName);
+    
+    try {
+        await new Promise((resolve, reject) => {
+            const ytDlp = spawn('yt-dlp', [
+                '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '-o', tempFilePath,
+                '--no-playlist',
+                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`,
+                url
+            ]);
+            
+            const timeout = setTimeout(() => {
+                ytDlp.kill('SIGKILL');
+                reject(new Error('Download timed out'));
+            }, 600000); // 10 mins
+            
+            ytDlp.on('close', (code) => {
+                clearTimeout(timeout);
+                if (code !== 0) {
+                    reject(new Error(`yt-dlp exited with code ${code}`));
+                } else {
+                    resolve();
+                }
+            });
+            
+            ytDlp.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+            });
+        });
+        
+        const jobId = await createRecapJobFromLocalFile(tempFilePath, 'url_video.mp4', req.user, req.body);
+        res.json({ jobId });
+    } catch (err) {
+        console.error('[API] Download from URL failed:', err);
+        if (fs.existsSync(tempFilePath)) {
+            try { fs.unlinkSync(tempFilePath); } catch (e) {}
+        }
+        if (err.message.includes('Failed to read video duration') || err.message.includes('Insufficient credits')) {
+            return res.status(400).json({ error: err.message });
+        }
+        res.status(400).json({ error: 'Could not download video from this URL' });
+    }
 });
 
 router.post('/retry/:jobId', (req, res) => {
