@@ -96,6 +96,18 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [urlVideoToken, setUrlVideoToken] = useState<string | null>(null);
+  const [urlVideoMeta, setUrlVideoMeta] = useState<{ name: string; size: number } | null>(null);
+  const [videoUrlInput, setVideoUrlInput] = useState('');
+  const [isDownloadingUrl, setIsDownloadingUrl] = useState(false);
+  const [urlDownloadError, setUrlDownloadError] = useState('');
+
+  const hasVideo = !!(videoFile || urlVideoToken);
+  const videoDisplayName = videoFile ? videoFile.name : (urlVideoMeta?.name || 'video.mp4');
+  const videoDisplaySizeMB = videoFile
+    ? (videoFile.size / (1024 * 1024)).toFixed(2)
+    : (urlVideoMeta ? (urlVideoMeta.size / (1024 * 1024)).toFixed(2) : '0.00');
+
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
   const [watermarkText, setWatermarkText] = useState('');
@@ -394,13 +406,13 @@ function App() {
     if (videoFile) {
       const url = URL.createObjectURL(videoFile);
       setVideoPreviewUrl(url);
-      return () => {
-        URL.revokeObjectURL(url);
-      };
+      return () => { URL.revokeObjectURL(url); };
+    } else if (urlVideoToken) {
+      setVideoPreviewUrl(`/api/temp-video/${urlVideoToken}`);
     } else {
       setVideoPreviewUrl(null);
     }
-  }, [videoFile]);
+  }, [videoFile, urlVideoToken]);
 
   const addBlurBox = () => {
     if (blurBoxes.length >= 3) return;
@@ -556,8 +568,24 @@ function App() {
     });
   };
 
+  const handleUrlDownload = async () => {
+    if (!videoUrlInput.trim()) return;
+    setIsDownloadingUrl(true);
+    setUrlDownloadError('');
+    try {
+      const res = await axios.post('/api/download-video-url-only', { url: videoUrlInput.trim() });
+      setUrlVideoToken(res.data.token);
+      setUrlVideoMeta({ name: res.data.filename, size: res.data.size });
+      setVideoFile(null);
+    } catch (err: any) {
+      setUrlDownloadError(err.response?.data?.error || 'Video download failed');
+    } finally {
+      setIsDownloadingUrl(false);
+    }
+  };
+
   const startAnalysis = async () => {
-    if (!videoFile) return;
+    if (!hasVideo) return;
 
     if (user?.role !== 'admin' && (credits === null || credits <= 0)) {
         setActiveView('credits');
@@ -568,23 +596,41 @@ function App() {
     setProgressPct(5);
     setAnalysisStartTime(Date.now());
 
-    const formData = new FormData();
-    formData.append('video', videoFile);
-    formData.append('blurBoxes', JSON.stringify(blurBoxes));
-    formData.append('watermarkText', watermarkText);
-    formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
-    formData.append('subtitleColor', subtitleColor);
-    formData.append('speed', outputSpeed.toString());
-    formData.append('flipped', isFlipped.toString());
-    
-    if (user?.role === 'admin' && voiceCloneEnabled) {
-      formData.append('useVoiceClone', useVoiceClone ? 'true' : 'false');
-      formData.append('referenceVoiceId', selectedReferenceVoiceId || '');
-    }
     try {
-      const response = await axios.post('/api/process-recap', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      let response;
+      if (videoFile) {
+        const formData = new FormData();
+        formData.append('video', videoFile);
+        formData.append('blurBoxes', JSON.stringify(blurBoxes));
+        formData.append('watermarkText', watermarkText);
+        formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
+        formData.append('subtitleColor', subtitleColor);
+        formData.append('speed', outputSpeed.toString());
+        formData.append('flipped', isFlipped.toString());
+        
+        if (user?.role === 'admin' && voiceCloneEnabled) {
+          formData.append('useVoiceClone', useVoiceClone ? 'true' : 'false');
+          formData.append('referenceVoiceId', selectedReferenceVoiceId || '');
+        }
+        
+        response = await axios.post('/api/process-recap', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      } else {
+        response = await axios.post('/api/process-recap-from-token', {
+          token: urlVideoToken,
+          blurBoxes: JSON.stringify(blurBoxes),
+          watermarkText: watermarkText,
+          subtitlePosition: JSON.stringify(subtitlePosition),
+          subtitleColor: subtitleColor,
+          speed: outputSpeed.toString(),
+          flipped: isFlipped.toString(),
+          ...(user?.role === 'admin' && voiceCloneEnabled ? {
+            useVoiceClone: useVoiceClone ? 'true' : 'false',
+            referenceVoiceId: selectedReferenceVoiceId || ''
+          } : {})
+        });
+      }
 
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
 
@@ -967,7 +1013,7 @@ function App() {
                     const stepNum = i + 1;
                     const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 4);
                     const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 4);
-                    const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 4 && videoFile));
+                    const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 4 && hasVideo));
 
                     return (
                       <div key={stepNum} className="flex items-center flex-1 last:flex-none">
@@ -1004,16 +1050,16 @@ function App() {
                                 </div>
                                 <p className="text-xs text-gray-500 mb-5">သင်လုပ်ဆောင်လိုသော မူရင်းဗီဒီယိုကို တင်ပါ။</p>
                                 
-                                <div className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${videoFile ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setVideoFile(e.dataTransfer.files[0]); }} onClick={() => videoInputRef.current?.click()}>
-                                    <input type="file" ref={videoInputRef} className="hidden" accept="video/*" onChange={(e) => e.target.files && setVideoFile(e.target.files[0])} />
-                                    {videoFile && videoPreviewUrl ? (
+                                <div className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${hasVideo ? 'p-2 border-indigo-500 bg-indigo-500/5 shadow-inner' : 'p-10 border-gray-800 hover:border-gray-700 bg-gray-950/40 hover:bg-gray-950/80'}`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) { setVideoFile(e.dataTransfer.files[0]); setUrlVideoToken(null); setUrlVideoMeta(null); } }} onClick={() => videoInputRef.current?.click()}>
+                                    <input type="file" ref={videoInputRef} className="hidden" accept="video/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { setVideoFile(e.target.files[0]); setUrlVideoToken(null); setUrlVideoMeta(null); } }} />
+                                    {hasVideo && videoPreviewUrl ? (
                                         <div className="flex flex-col w-full">
                                             <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
                                                 <video ref={videoRef} src={videoPreviewUrl} muted playsInline preload="metadata" style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} className="w-full h-full object-contain" />
                                                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                                     <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
-                                                        <div><span className="text-sm font-semibold text-white block truncate">{videoFile.name}</span><span className="text-xs text-gray-300">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</span></div>
-                                                        <button onClick={(e) => { e.stopPropagation(); setVideoFile(null); }} className="p-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition-all"><X size={16} /></button>
+                                                        <div><span className="text-sm font-semibold text-white block truncate">{videoDisplayName}</span><span className="text-xs text-gray-300">{videoDisplaySizeMB} MB</span></div>
+                                                        <button onClick={(e) => { e.stopPropagation(); setVideoFile(null); setUrlVideoToken(null); setUrlVideoMeta(null); setVideoUrlInput(''); }} className="p-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition-all"><X size={16} /></button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1026,9 +1072,35 @@ function App() {
                                         </div>
                                     )}
                                 </div>
+                                {!hasVideo && (
+                                  <div className="mt-3 max-w-3xl mx-auto">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex-1 h-px bg-gray-800" />
+                                      <span className="text-[10px] text-gray-600 font-bold uppercase">သို့မဟုတ်</span>
+                                      <div className="flex-1 h-px bg-gray-800" />
+                                    </div>
+                                    <div className="flex gap-2 mt-3">
+                                      <input
+                                        type="text"
+                                        value={videoUrlInput}
+                                        onChange={(e) => setVideoUrlInput(e.target.value)}
+                                        placeholder="YouTube / TikTok URL ကို ဒီမှာ ကူးထည့်ပါ"
+                                        className="flex-1 bg-gray-950 border border-gray-800 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-500"
+                                      />
+                                      <button
+                                        onClick={handleUrlDownload}
+                                        disabled={isDownloadingUrl || !videoUrlInput.trim()}
+                                        className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl"
+                                      >
+                                        {isDownloadingUrl ? 'ဒေါင်းလုတ်ဆွဲနေသည်...' : 'အသုံးပြုမည်'}
+                                      </button>
+                                    </div>
+                                    {urlDownloadError && <p className="text-[10px] text-red-400 mt-2">{urlDownloadError}</p>}
+                                  </div>
+                                )}
                             </div>
                             
-                            {videoFile && (
+                            {hasVideo && (
                               <div className="flex flex-row justify-center gap-6 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
                                   <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">အမြန်နှုန်း</span>
@@ -1126,7 +1198,7 @@ function App() {
                           
                           <div className="flex flex-col md:flex-row gap-6">
                             <div className="w-full md:w-2/3">
-                              {videoFile && videoPreviewUrl ? (
+                              {hasVideo && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                 <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
                                   <video ref={videoRef} src={videoPreviewUrl} muted playsInline onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-contain" />
@@ -1160,7 +1232,7 @@ function App() {
                               ) : null}
                             </div>
                             <div className="w-full md:w-1/3 flex flex-col gap-4">
-                              <button onClick={addBlurBox} disabled={blurBoxes.length >= 3 || !videoFile} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all">+ Blur Box ထည့်ရန်</button>
+                              <button onClick={addBlurBox} disabled={blurBoxes.length >= 3 || !hasVideo} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all">+ Blur Box ထည့်ရန်</button>
                               {selectedElement && blurBoxes.find(b => b.id === selectedElement) ? (
                                 <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
                                   <label className="text-xs text-gray-400 block mb-2">Blur ပြင်းအား: {blurBoxes.find(b => b.id === selectedElement)?.strength}</label>
@@ -1193,7 +1265,7 @@ function App() {
                           </div>
                           <div className="flex flex-col md:flex-row gap-6">
                             <div className="w-full md:w-2/3">
-                              {videoFile && videoPreviewUrl ? (
+                              {hasVideo && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                   <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
                                     <video ref={videoRef} src={videoPreviewUrl} muted playsInline onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-contain" />
@@ -1242,7 +1314,7 @@ function App() {
                                <p className="text-amber-400 text-sm font-bold">Credits မလုံလောက်ပါ</p>
                              </div>
                            ) : (
-                             <button onClick={startAnalysis} disabled={!videoFile} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">AI ဖြင့် လုပ်ဆောင်မည်</button>
+                             <button onClick={startAnalysis} disabled={!hasVideo} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">AI ဖြင့် လုပ်ဆောင်မည်</button>
                            )}
                         </div>
                       )}
@@ -1254,7 +1326,7 @@ function App() {
                 <div className="flex items-center justify-between max-w-3xl mx-auto mt-8 pt-4 border-t border-gray-900">
                   <button onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))} disabled={currentStep === 1} className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm disabled:opacity-30">နောက်သို့</button>
                   {currentStep < 4 && (
-                    <button onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))} disabled={currentStep === 1 && !videoFile} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">ရှေ့သို့ <ArrowRight size={16} /></button>
+                    <button onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))} disabled={currentStep === 1 && !hasVideo} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">ရှေ့သို့ <ArrowRight size={16} /></button>
                   )}
                 </div>
               )}
