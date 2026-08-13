@@ -317,6 +317,126 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
     }
 });
 
+const pendingUrlDownloads = new Map();
+
+router.post('/download-video-url-only', authMiddleware, express.json(), async (req, res) => {
+    const { url } = req.body;
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+    
+    try {
+        const parsedUrl = new URL(url);
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            throw new Error('Invalid protocol');
+        }
+    } catch (err) {
+        return res.status(400).json({ error: 'Invalid URL format' });
+    }
+    
+    const now = Date.now();
+    for (const [token, data] of pendingUrlDownloads.entries()) {
+        if (now - data.createdAt > 30 * 60 * 1000) {
+            if (fs.existsSync(data.filePath)) {
+                try { fs.unlinkSync(data.filePath); } catch (e) {}
+            }
+            pendingUrlDownloads.delete(token);
+        }
+    }
+    
+    const tempFileName = uuidv4() + '.mp4';
+    const tempFilePath = path.join(tmpDir, tempFileName);
+    
+    try {
+        await new Promise((resolve, reject) => {
+            const ytDlp = spawn('yt-dlp', [
+                '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '-o', tempFilePath,
+                '--no-playlist',
+                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`,
+                url
+            ]);
+            
+            const timeout = setTimeout(() => {
+                ytDlp.kill('SIGKILL');
+                reject(new Error('Download timed out'));
+            }, 600000); // 10 mins
+            
+            ytDlp.on('close', (code) => {
+                clearTimeout(timeout);
+                if (code !== 0) {
+                    reject(new Error(`yt-dlp exited with code ${code}`));
+                } else {
+                    resolve();
+                }
+            });
+            
+            ytDlp.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+            });
+        });
+        
+        const stat = fs.statSync(tempFilePath);
+        const token = uuidv4();
+        
+        pendingUrlDownloads.set(token, {
+            filePath: tempFilePath,
+            userId: req.user.id,
+            createdAt: Date.now()
+        });
+
+        res.json({ token, filename: 'url_video.mp4', size: stat.size });
+    } catch (err) {
+        console.error('[API] Download URL only failed:', err);
+        if (fs.existsSync(tempFilePath)) {
+            try { fs.unlinkSync(tempFilePath); } catch (e) {}
+        }
+        res.status(400).json({ error: 'Could not download video from this URL' });
+    }
+});
+
+router.get('/temp-video/:token', authMiddleware, (req, res) => {
+    const { token } = req.params;
+    const downloadData = pendingUrlDownloads.get(token);
+    
+    if (!downloadData || downloadData.userId !== req.user.id) {
+        return res.status(404).json({ error: 'Video not found or unauthorized' });
+    }
+    
+    const filePath = downloadData.filePath;
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'File no longer exists' });
+    }
+    
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+    
+    if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = (end - start) + 1;
+        const file = fs.createReadStream(filePath, {start, end});
+        const head = {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunksize,
+            'Content-Type': 'video/mp4',
+        };
+        res.writeHead(206, head);
+        file.pipe(res);
+    } else {
+        const head = {
+            'Content-Length': fileSize,
+            'Content-Type': 'video/mp4',
+        };
+        res.writeHead(200, head);
+        fs.createReadStream(filePath).pipe(res);
+    }
+});
+
 router.post('/retry/:jobId', (req, res) => {
     const job = getJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Job not found' });
