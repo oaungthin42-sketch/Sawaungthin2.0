@@ -34,6 +34,8 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
     && /opt/venv/bin/pip install --no-cache-dir --no-deps git+https://github.com/myshell-ai/OpenVoice.git
 
+RUN /opt/venv/bin/yt-dlp --list-impersonate-targets || true
+
 # Copy package configurations
 COPY package*.json ./
 
