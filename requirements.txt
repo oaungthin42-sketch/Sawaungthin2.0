@@ -17,5 +17,4 @@ pypinyin==0.50.0
 cn2an==0.5.22
 jieba==0.42.1
 langid==1.1.6
-yt-dlp
-curl_cffi
+yt-dlp[default,curl-cffi]
