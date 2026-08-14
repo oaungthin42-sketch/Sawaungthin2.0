@@ -95,7 +95,22 @@ export const getStreamsDuration = (file) => new Promise((resolve, reject) => {
     });
 });
 
-export const extractWav = (inputPath, outputPath) => {
+export const extractWav = async (inputPath, outputPath) => {
+  const streams = await getStreamsDuration(inputPath);
+  if (!streams.hasAudio) {
+      console.warn(`[FFmpeg] No audio stream found in ${inputPath}. Generating silent audio track.`);
+      return new Promise((resolve, reject) => {
+          const duration = streams.effectiveVideoDuration || 5;
+          ffmpeg('anullsrc=r=16000:cl=mono')
+            .inputFormat('lavfi')
+            .duration(duration)
+            .audioCodec('pcm_s16le')
+            .on('end', () => resolve(outputPath))
+            .on('error', err => reject(err))
+            .save(outputPath);
+      });
+  }
+
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .noVideo()

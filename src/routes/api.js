@@ -15,7 +15,7 @@ import { authMiddleware, adminOnly } from './auth.js';
 import { decrypt } from '../services/settings.js';
 import { getDuration } from '../ffmpeg/index.js';
 import { computeCreditsForDuration } from '../utils/index.js';
-
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import ffmpeg from 'fluent-ffmpeg';
 
 function assessReferenceAudioDuration(seconds) {
@@ -39,23 +39,47 @@ async function denoiseReferenceAudio(inputPath, outputPath) {
 
 
 async function tryDownloadViaTikwm(url, destPath) {
-    if (!/tiktok\.com/i.test(url)) return false; // only handle TikTok links
+    if (!/tiktok\.com/i.test(url)) return { success: false, error: "Not a TikTok URL" };
     try {
-        const apiRes = await axios.get('https://www.tikwm.com/api/', {
-            params: { url, hd: 1 },
-            timeout: 15000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Referer': 'https://www.tikwm.com/'
+        const proxyUrl = process.env.DOWNLOAD_PROXY_URL;
+        const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+        
+        let attempts = 0;
+        let lastError = null;
+        let playUrl = null;
+        
+        while (attempts < 2) {
+            try {
+                const apiRes = await axios.get('https://www.tikwm.com/api/', {
+                    params: { url, hd: 1 },
+                    timeout: 15000,
+                    httpsAgent: proxyAgent,
+                    httpAgent: proxyAgent,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                        'Referer': 'https://www.tikwm.com/'
+                    }
+                });
+                const data = apiRes.data?.data;
+                playUrl = data?.hdplay || data?.play;
+                if (playUrl) break;
+                if (!playUrl) throw new Error(apiRes.data?.msg || "No play URL in response");
+            } catch (err) {
+                lastError = err;
+                attempts++;
+                if (attempts < 2) await new Promise(r => setTimeout(r, 2000));
             }
-        });
-        const data = apiRes.data?.data;
-        const playUrl = data?.hdplay || data?.play;
-        if (!playUrl) return false;
+        }
+        
+        if (!playUrl) {
+            throw lastError || new Error("TikWM API returned no play URL");
+        }
 
         const videoRes = await axios.get(playUrl, {
             responseType: 'stream',
             timeout: 60000,
+            httpsAgent: proxyAgent,
+            httpAgent: proxyAgent,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Referer': 'https://www.tikwm.com/'
@@ -69,10 +93,85 @@ async function tryDownloadViaTikwm(url, destPath) {
             writer.on('error', reject);
         });
 
-        return fs.existsSync(destPath) && fs.statSync(destPath).size > 0;
+        if (!fs.existsSync(destPath) || fs.statSync(destPath).size === 0) {
+            throw new Error("Downloaded file is empty");
+        }
+        return { success: true };
     } catch (e) {
-        console.error('[TikWM] Fallback download failed:', e.response?.status, e.response?.data || e.message);
-        return false;
+        let errStr = e.message;
+        if (e.response && e.response.data) {
+            let dataStr = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
+            errStr = `HTTP ${e.response.status} - ${dataStr.substring(0, 500)}`;
+        }
+        console.error('[TikWM] Fallback download failed:', errStr);
+        return { success: false, error: errStr };
+    }
+}
+
+async function tryDownloadViaCobalt(url, destPath) {
+    if (!/tiktok\.com/i.test(url)) return { success: false, error: "Not a TikTok URL" };
+    
+    const cobaltUrl = process.env.COBALT_API_URL;
+    if (!cobaltUrl) {
+        return { success: false, error: "Cobalt not configured" };
+    }
+
+    try {
+        const proxyUrl = process.env.DOWNLOAD_PROXY_URL;
+        const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+        
+        const apiRes = await axios.post(cobaltUrl, {
+            url: url,
+            vQuality: "1080",
+            filenamePattern: "basic"
+        }, {
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            },
+            httpsAgent: proxyAgent,
+            httpAgent: proxyAgent,
+            timeout: 15000
+        });
+        
+        const data = apiRes.data;
+        if (data && data.status === 'error') {
+            throw new Error(data.text || "Unknown cobalt error");
+        }
+        
+        const playUrl = data?.url;
+        if (!playUrl) throw new Error("No play URL in cobalt response");
+        
+        const videoRes = await axios.get(playUrl, {
+            responseType: 'stream',
+            timeout: 60000,
+            httpsAgent: proxyAgent,
+            httpAgent: proxyAgent,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+        });
+        
+        await new Promise((resolve, reject) => {
+            const writer = fs.createWriteStream(destPath);
+            videoRes.data.pipe(writer);
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+        
+        if (!fs.existsSync(destPath) || fs.statSync(destPath).size === 0) {
+            throw new Error("Downloaded file is empty");
+        }
+        return { success: true };
+    } catch (e) {
+        let errStr = e.message;
+        if (e.response && e.response.data) {
+            let dataStr = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
+            errStr = `HTTP ${e.response.status} - ${dataStr.substring(0, 500)}`;
+        }
+        console.error('[Cobalt] Fallback download failed:', errStr);
+        return { success: false, error: errStr };
     }
 }
 
@@ -343,28 +442,58 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
     const tempFileName = uuidv4() + '.mp4';
     const tempFilePath = path.join(tmpDir, tempFileName);
     
+    let downloadErrors = [];
+    let downloaded = false;
+
     try {
-        const tikwmSuccess = await tryDownloadViaTikwm(url, tempFilePath);
-        if (!tikwmSuccess) {
-            const ytDlpArgs = [
-                '-f', 'bestvideo*+bestaudio/best',
-                '-o', tempFilePath,
-                '--no-playlist',
-                '--merge-output-format', 'mp4',
-                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
-            ];
-            
-            try {
-                await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
-            } catch (err) {
-                const stderr = err.stderr || '';
-                if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
-                    console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
-                    await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
-                } else {
-                    throw err;
+        const tikwmRes = await tryDownloadViaTikwm(url, tempFilePath);
+        if (tikwmRes.success) {
+            downloaded = true;
+        } else {
+            downloadErrors.push(`tikwm: ${tikwmRes.error}`);
+            const cobaltRes = await tryDownloadViaCobalt(url, tempFilePath);
+            if (cobaltRes.success) {
+                downloaded = true;
+            } else {
+                downloadErrors.push(`cobalt: ${cobaltRes.error}`);
+                
+                const ytDlpArgs = [
+                    '-f', 'bestvideo*+bestaudio/best',
+                    '-o', tempFilePath,
+                    '--no-playlist',
+                    '--merge-output-format', 'mp4',
+                    '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
+                ];
+                if (process.env.DOWNLOAD_PROXY_URL) {
+                    ytDlpArgs.push('--proxy', process.env.DOWNLOAD_PROXY_URL);
+                }
+                
+                try {
+                    await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+                    downloaded = true;
+                } catch (err) {
+                    const stderr = err.stderr || '';
+                    if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
+                        console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
+                        try {
+                            await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
+                            downloaded = true;
+                        } catch (err2) {
+                            downloadErrors.push(`yt-dlp: ${(err2.stderr || err2.message).replace(/\n/g, ' ').substring(0, 500)}`);
+                        }
+                    } else {
+                        downloadErrors.push(`yt-dlp: ${(err.stderr || err.message).replace(/\n/g, ' ').substring(0, 500)}`);
+                    }
                 }
             }
+        }
+        
+        if (!downloaded) {
+            console.error(`[Download] ${downloadErrors.join(' | ')}`);
+            if (fs.existsSync(tempFilePath)) {
+                try { fs.unlinkSync(tempFilePath); } catch (e) {}
+            }
+            return res.status(400).json({ error: 'Could not download video from this URL' });
         }
         
         const jobId = await createRecapJobFromLocalFile(tempFilePath, 'url_video.mp4', req.user, req.body);
@@ -411,28 +540,58 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
     const tempFileName = uuidv4() + '.mp4';
     const tempFilePath = path.join(tmpDir, tempFileName);
     
+    let downloadErrors = [];
+    let downloaded = false;
+
     try {
-        const tikwmSuccess = await tryDownloadViaTikwm(url, tempFilePath);
-        if (!tikwmSuccess) {
-            const ytDlpArgs = [
-                '-f', 'bestvideo*+bestaudio/best',
-                '-o', tempFilePath,
-                '--no-playlist',
-                '--merge-output-format', 'mp4',
-                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
-            ];
-            
-            try {
-                await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
-            } catch (err) {
-                const stderr = err.stderr || '';
-                if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
-                    console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
-                    await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
-                } else {
-                    throw err;
+        const tikwmRes = await tryDownloadViaTikwm(url, tempFilePath);
+        if (tikwmRes.success) {
+            downloaded = true;
+        } else {
+            downloadErrors.push(`tikwm: ${tikwmRes.error}`);
+            const cobaltRes = await tryDownloadViaCobalt(url, tempFilePath);
+            if (cobaltRes.success) {
+                downloaded = true;
+            } else {
+                downloadErrors.push(`cobalt: ${cobaltRes.error}`);
+                
+                const ytDlpArgs = [
+                    '-f', 'bestvideo*+bestaudio/best',
+                    '-o', tempFilePath,
+                    '--no-playlist',
+                    '--merge-output-format', 'mp4',
+                    '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
+                ];
+                if (process.env.DOWNLOAD_PROXY_URL) {
+                    ytDlpArgs.push('--proxy', process.env.DOWNLOAD_PROXY_URL);
+                }
+                
+                try {
+                    await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+                    downloaded = true;
+                } catch (err) {
+                    const stderr = err.stderr || '';
+                    if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
+                        console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
+                        try {
+                            await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
+                            downloaded = true;
+                        } catch (err2) {
+                            downloadErrors.push(`yt-dlp: ${(err2.stderr || err2.message).replace(/\n/g, ' ').substring(0, 500)}`);
+                        }
+                    } else {
+                        downloadErrors.push(`yt-dlp: ${(err.stderr || err.message).replace(/\n/g, ' ').substring(0, 500)}`);
+                    }
                 }
             }
+        }
+        
+        if (!downloaded) {
+            console.error(`[Download] ${downloadErrors.join(' | ')}`);
+            if (fs.existsSync(tempFilePath)) {
+                try { fs.unlinkSync(tempFilePath); } catch (e) {}
+            }
+            return res.status(400).json({ error: 'Could not download video from this URL' });
         }
         
         const stat = fs.statSync(tempFilePath);
