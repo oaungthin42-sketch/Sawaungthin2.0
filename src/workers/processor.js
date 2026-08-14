@@ -1257,8 +1257,8 @@ export const processRecapPipeline = async (jobId) => {
                 } catch(e) {}
             }
             
-            if (currentJob && currentJob.audioPath) filesToRemove.push(currentJob.audioPath);
-            if (currentJob && currentJob.videoPath) filesToRemove.push(currentJob.videoPath);
+            if (currentJob && currentJob.status === 'complete' && currentJob.audioPath) filesToRemove.push(currentJob.audioPath);
+            if (currentJob && currentJob.status === 'complete' && currentJob.videoPath) filesToRemove.push(currentJob.videoPath);
 
             for (const f of filesToRemove) {
                 if (fs.existsSync(f)) {

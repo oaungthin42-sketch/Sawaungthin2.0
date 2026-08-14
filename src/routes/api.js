@@ -275,6 +275,7 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
     
     try {
         await new Promise((resolve, reject) => {
+            let ytDlpStderr = '';
             const ytDlp = spawn('yt-dlp', [
                 '-f', 'bestvideo*+bestaudio/best',
                 '-o', tempFilePath,
@@ -284,6 +285,8 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
                 url
             ]);
             
+            ytDlp.stderr.on('data', (d) => { ytDlpStderr += d.toString(); });
+            
             const timeout = setTimeout(() => {
                 ytDlp.kill('SIGKILL');
                 reject(new Error('Download timed out'));
@@ -291,6 +294,7 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
             
             ytDlp.on('close', (code) => {
                 clearTimeout(timeout);
+                console.log(`[yt-dlp] Exit code ${code}. Last stderr output:\n${ytDlpStderr.slice(-2000)}`);
                 if (code !== 0) {
                     reject(new Error(`yt-dlp exited with code ${code}`));
                 } else {
@@ -350,6 +354,7 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
     
     try {
         await new Promise((resolve, reject) => {
+            let ytDlpStderr = '';
             const ytDlp = spawn('yt-dlp', [
                 '-f', 'bestvideo*+bestaudio/best',
                 '-o', tempFilePath,
@@ -359,6 +364,8 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
                 url
             ]);
             
+            ytDlp.stderr.on('data', (d) => { ytDlpStderr += d.toString(); });
+            
             const timeout = setTimeout(() => {
                 ytDlp.kill('SIGKILL');
                 reject(new Error('Download timed out'));
@@ -366,6 +373,7 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
             
             ytDlp.on('close', (code) => {
                 clearTimeout(timeout);
+                console.log(`[yt-dlp] Exit code ${code}. Last stderr output:\n${ytDlpStderr.slice(-2000)}`);
                 if (code !== 0) {
                     reject(new Error(`yt-dlp exited with code ${code}`));
                 } else {
