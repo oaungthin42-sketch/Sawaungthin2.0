@@ -34,6 +34,7 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
     && /opt/venv/bin/pip install --no-cache-dir --no-deps git+https://github.com/myshell-ai/OpenVoice.git
 
+RUN /opt/venv/bin/python3 -c "import curl_cffi; print('curl_cffi OK, version:', curl_cffi.__version__)" || true
 RUN /opt/venv/bin/yt-dlp --list-impersonate-targets || true
 
 # Copy package configurations
