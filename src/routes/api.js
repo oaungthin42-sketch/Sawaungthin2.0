@@ -43,7 +43,11 @@ async function tryDownloadViaTikwm(url, destPath) {
     try {
         const apiRes = await axios.get('https://www.tikwm.com/api/', {
             params: { url, hd: 1 },
-            timeout: 15000
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Referer': 'https://www.tikwm.com/'
+            }
         });
         const data = apiRes.data?.data;
         const playUrl = data?.hdplay || data?.play;
@@ -52,7 +56,10 @@ async function tryDownloadViaTikwm(url, destPath) {
         const videoRes = await axios.get(playUrl, {
             responseType: 'stream',
             timeout: 60000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Referer': 'https://www.tikwm.com/'
+            }
         });
 
         await new Promise((resolve, reject) => {
@@ -64,9 +71,41 @@ async function tryDownloadViaTikwm(url, destPath) {
 
         return fs.existsSync(destPath) && fs.statSync(destPath).size > 0;
     } catch (e) {
-        console.error('[TikWM] Fallback download failed:', e.message);
+        console.error('[TikWM] Fallback download failed:', e.response?.status, e.response?.data || e.message);
         return false;
     }
+}
+
+async function runYtDlp(args) {
+    return new Promise((resolve, reject) => {
+        let ytDlpStderr = '';
+        const ytDlp = spawn('yt-dlp', args);
+        
+        ytDlp.stderr.on('data', (d) => { ytDlpStderr += d.toString(); });
+        
+        const timeout = setTimeout(() => {
+            ytDlp.kill('SIGKILL');
+            reject(new Error('Download timed out'));
+        }, 600000); // 10 mins
+        
+        ytDlp.on('close', (code) => {
+            clearTimeout(timeout);
+            console.log(`[yt-dlp] Exit code ${code}. Last stderr output:\n${ytDlpStderr.slice(-2000)}`);
+            if (code !== 0) {
+                const err = new Error(`yt-dlp exited with code ${code}`);
+                err.stderr = ytDlpStderr;
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+        
+        ytDlp.on('error', (err) => {
+            clearTimeout(timeout);
+            err.stderr = ytDlpStderr;
+            reject(err);
+        });
+    });
 }
 
 const router = express.Router();
@@ -307,39 +346,25 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
     try {
         const tikwmSuccess = await tryDownloadViaTikwm(url, tempFilePath);
         if (!tikwmSuccess) {
-            await new Promise((resolve, reject) => {
-                let ytDlpStderr = '';
-                const ytDlp = spawn('yt-dlp', [
-                    '-f', 'bestvideo*+bestaudio/best',
-                    '-o', tempFilePath,
-                    '--no-playlist',
-                    '--merge-output-format', 'mp4',
-                    '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`,
-                    url
-                ]);
-                
-                ytDlp.stderr.on('data', (d) => { ytDlpStderr += d.toString(); });
-                
-                const timeout = setTimeout(() => {
-                    ytDlp.kill('SIGKILL');
-                    reject(new Error('Download timed out'));
-                }, 600000); // 10 mins
-                
-                ytDlp.on('close', (code) => {
-                    clearTimeout(timeout);
-                    console.log(`[yt-dlp] Exit code ${code}. Last stderr output:\n${ytDlpStderr.slice(-2000)}`);
-                    if (code !== 0) {
-                        reject(new Error(`yt-dlp exited with code ${code}`));
-                    } else {
-                        resolve();
-                    }
-                });
-                
-                ytDlp.on('error', (err) => {
-                    clearTimeout(timeout);
-                    reject(err);
-                });
-            });
+            const ytDlpArgs = [
+                '-f', 'bestvideo*+bestaudio/best',
+                '-o', tempFilePath,
+                '--no-playlist',
+                '--merge-output-format', 'mp4',
+                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
+            ];
+            
+            try {
+                await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+            } catch (err) {
+                const stderr = err.stderr || '';
+                if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
+                    console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
+                    await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
+                } else {
+                    throw err;
+                }
+            }
         }
         
         const jobId = await createRecapJobFromLocalFile(tempFilePath, 'url_video.mp4', req.user, req.body);
@@ -389,39 +414,25 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
     try {
         const tikwmSuccess = await tryDownloadViaTikwm(url, tempFilePath);
         if (!tikwmSuccess) {
-            await new Promise((resolve, reject) => {
-                let ytDlpStderr = '';
-                const ytDlp = spawn('yt-dlp', [
-                    '-f', 'bestvideo*+bestaudio/best',
-                    '-o', tempFilePath,
-                    '--no-playlist',
-                    '--merge-output-format', 'mp4',
-                    '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`,
-                    url
-                ]);
-                
-                ytDlp.stderr.on('data', (d) => { ytDlpStderr += d.toString(); });
-                
-                const timeout = setTimeout(() => {
-                    ytDlp.kill('SIGKILL');
-                    reject(new Error('Download timed out'));
-                }, 600000); // 10 mins
-                
-                ytDlp.on('close', (code) => {
-                    clearTimeout(timeout);
-                    console.log(`[yt-dlp] Exit code ${code}. Last stderr output:\n${ytDlpStderr.slice(-2000)}`);
-                    if (code !== 0) {
-                        reject(new Error(`yt-dlp exited with code ${code}`));
-                    } else {
-                        resolve();
-                    }
-                });
-                
-                ytDlp.on('error', (err) => {
-                    clearTimeout(timeout);
-                    reject(err);
-                });
-            });
+            const ytDlpArgs = [
+                '-f', 'bestvideo*+bestaudio/best',
+                '-o', tempFilePath,
+                '--no-playlist',
+                '--merge-output-format', 'mp4',
+                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
+            ];
+            
+            try {
+                await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+            } catch (err) {
+                const stderr = err.stderr || '';
+                if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
+                    console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
+                    await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
+                } else {
+                    throw err;
+                }
+            }
         }
         
         const stat = fs.statSync(tempFilePath);
