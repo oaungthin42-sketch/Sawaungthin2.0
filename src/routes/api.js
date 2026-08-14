@@ -276,9 +276,10 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
     try {
         await new Promise((resolve, reject) => {
             const ytDlp = spawn('yt-dlp', [
-                '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '-f', 'bestvideo*+bestaudio/best',
                 '-o', tempFilePath,
                 '--no-playlist',
+                '--merge-output-format', 'mp4',
                 '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`,
                 url
             ]);
@@ -350,9 +351,10 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
     try {
         await new Promise((resolve, reject) => {
             const ytDlp = spawn('yt-dlp', [
-                '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '-f', 'bestvideo*+bestaudio/best',
                 '-o', tempFilePath,
                 '--no-playlist',
+                '--merge-output-format', 'mp4',
                 '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`,
                 url
             ]);
