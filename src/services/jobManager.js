@@ -52,8 +52,7 @@ export const recoverStuckJobs = () => {
     const stmt = db.prepare(`
         UPDATE jobs 
         SET status = 'error', error = 'Job interrupted due to server restart.' 
-        WHERE status IN ('processing', 'pending', 'uploading')
+        WHERE status NOT IN ('complete', 'error')
     `);
     stmt.run();
-    if(false){}
 };

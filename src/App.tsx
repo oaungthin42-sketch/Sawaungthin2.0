@@ -1357,6 +1357,11 @@ function App() {
                         <div className="flex justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest px-1"><span>Global Progress</span><span>{Math.round(progressPct)}%</span></div>
                         <div className="w-full bg-gray-950 h-3 rounded-full overflow-hidden p-0.5 border border-gray-900"><div className="h-full bg-indigo-500 rounded-full transition-all duration-700" style={{ width: `${progressPct}%` }} /></div>
                       </div>
+                      <div className="pt-2">
+                        <button onClick={reset} className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-gray-400 text-sm font-bold rounded-xl border border-gray-800">
+                          ပယ်ဖျက်ပြီး အစသို့ ပြန်သွားမည်
+                        </button>
+                      </div>
                   </div>
               )}
 
