@@ -18,6 +18,196 @@ export const AIRecapTool: React.FC = () => {
     const [burnSubtitles, setBurnSubtitles] = useState<boolean>(false);
     const [subtitleColor, setSubtitleColor] = useState<string>('white');
     const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
+    const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
+    const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (videoFile) {
+            const url = URL.createObjectURL(videoFile);
+            setVideoPreviewUrl(url);
+            return () => { URL.revokeObjectURL(url); };
+        } else {
+            setVideoPreviewUrl(null);
+        }
+    }, [videoFile]);
+    
+    const previewContainerRef = useRef<HTMLDivElement>(null);
+    const videoRectRef = useRef<any>({ left: 0, top: 0, width: 0, height: 0 });
+    const [videoRect, setVideoRect] = useState<any>({ left: 0, top: 0, width: 0, height: 0 });
+    const [selectedElement, setSelectedElement] = useState<string | null>(null);
+    const videoPreviewRef = useRef<HTMLVideoElement>(null);
+
+    const updateVideoRect = () => {
+        if (!previewContainerRef.current || !videoPreviewRef.current) return;
+        const container = previewContainerRef.current.getBoundingClientRect();
+        const videoW = videoPreviewRef.current.videoWidth;
+        const videoH = videoPreviewRef.current.videoHeight;
+        if (!videoW || !videoH) return;
+        const containerRatio = container.width / container.height;
+        const videoRatio = videoW / videoH;
+        let displayWidth, displayHeight;
+        if (videoRatio > containerRatio) {
+            displayWidth = container.width;
+            displayHeight = container.width / videoRatio;
+        } else {
+            displayHeight = container.height;
+            displayWidth = container.height * videoRatio;
+        }
+        const rect = {
+            left: (container.width - displayWidth) / 2,
+            top: (container.height - displayHeight) / 2,
+            width: displayWidth,
+            height: displayHeight
+        };
+        videoRectRef.current = rect;
+        setVideoRect(rect);
+    };
+
+    useEffect(() => {
+        window.addEventListener('resize', updateVideoRect);
+        return () => window.removeEventListener('resize', updateVideoRect);
+    }, []);
+
+    const handlePointerDown = (e: React.PointerEvent, boxId: string, action: 'move' | 'tl' | 'tr' | 'bl' | 'br') => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.target instanceof HTMLElement) {
+            e.target.setPointerCapture(e.pointerId);
+        }
+        setSelectedElement(boxId);
+        if (!previewContainerRef.current) return;
+        const rect = previewContainerRef.current.getBoundingClientRect();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        
+        let isDragging = true;
+        let latestDx = 0;
+        let latestDy = 0;
+        let rafId: number | null = null;
+        
+        const applyMovement = (current: any, startXPct: number, startYPct: number, startWPct: number, startHPct: number, dxPct: number, dyPct: number) => {
+            if (action === 'move') {
+                return {
+                    ...current,
+                    xPct: Math.max(0, Math.min(100 - current.widthPct, startXPct + dxPct)),
+                    yPct: Math.max(0, Math.min(100 - current.heightPct, startYPct + dyPct))
+                };
+            } else if (action === 'tl') {
+                const newW = startWPct - dxPct;
+                const newH = startHPct - dyPct;
+                const canW = newW >= 5 && startXPct + dxPct >= 0;
+                const canH = newH >= 5 && startYPct + dyPct >= 0;
+                return {
+                    ...current,
+                    xPct: canW ? startXPct + dxPct : current.xPct,
+                    yPct: canH ? startYPct + dyPct : current.yPct,
+                    widthPct: canW ? newW : current.widthPct,
+                    heightPct: canH ? newH : current.heightPct
+                };
+            } else if (action === 'tr') {
+                const newW = startWPct + dxPct;
+                const newH = startHPct - dyPct;
+                const canW = newW >= 5 && startXPct + newW <= 100;
+                const canH = newH >= 5 && startYPct + dyPct >= 0;
+                return {
+                    ...current,
+                    yPct: canH ? startYPct + dyPct : current.yPct,
+                    widthPct: canW ? newW : current.widthPct,
+                    heightPct: canH ? newH : current.heightPct
+                };
+            } else if (action === 'bl') {
+                const newW = startWPct - dxPct;
+                const newH = startHPct + dyPct;
+                const canW = newW >= 5 && startXPct + dxPct >= 0;
+                const canH = newH >= 5 && startYPct + newH <= 100;
+                return {
+                    ...current,
+                    xPct: canW ? startXPct + dxPct : current.xPct,
+                    widthPct: canW ? newW : current.widthPct,
+                    heightPct: canH ? newH : current.heightPct
+                };
+            } else if (action === 'br') {
+                const newW = startWPct + dxPct;
+                const newH = startHPct + dyPct;
+                const canW = newW >= 5 && startXPct + newW <= 100;
+                const canH = newH >= 5 && startYPct + newH <= 100;
+                return {
+                    ...current,
+                    widthPct: canW ? newW : current.widthPct,
+                    heightPct: canH ? newH : current.heightPct
+                };
+            }
+            return current;
+        };
+
+        if (boxId === 'subtitle') {
+            setSubtitlePosition((prev: any) => {
+                const startXPct = prev.xPct;
+                const startYPct = prev.yPct;
+                const startWPct = prev.widthPct;
+                const startHPct = prev.heightPct;
+                const onPointerMove = (moveEv: PointerEvent) => {
+                    if (moveEv.cancelable) moveEv.preventDefault();
+                    latestDx = moveEv.clientX - startX;
+                    latestDy = moveEv.clientY - startY;
+                    if (!rafId) {
+                        rafId = requestAnimationFrame(() => {
+                            rafId = null;
+                            if (!isDragging) return;
+                            const dxPct = (latestDx / (videoRectRef.current.width || rect.width)) * 100;
+                            const dyPct = (latestDy / (videoRectRef.current.height || rect.height)) * 100;
+                            setSubtitlePosition((current: any) => applyMovement(current, startXPct, startYPct, startWPct, startHPct, dxPct, dyPct));
+                        });
+                    }
+                };
+                const onPointerUp = () => {
+                    isDragging = false;
+                    if (rafId) cancelAnimationFrame(rafId);
+                    window.removeEventListener('pointermove', onPointerMove);
+                    window.removeEventListener('pointerup', onPointerUp);
+                };
+                window.addEventListener('pointermove', onPointerMove, { passive: false });
+                window.addEventListener('pointerup', onPointerUp);
+                return prev;
+            });
+            return;
+        }
+
+        setBlurBoxes(prev => {
+            const box = prev.find(b => b.id === boxId);
+            if (!box) return prev;
+            const startXPct = box.xPct;
+            const startYPct = box.yPct;
+            const startWPct = box.widthPct;
+            const startHPct = box.heightPct;
+            const onPointerMove = (moveEv: PointerEvent) => {
+                if (moveEv.cancelable) moveEv.preventDefault();
+                latestDx = moveEv.clientX - startX;
+                latestDy = moveEv.clientY - startY;
+                if (!rafId) {
+                    rafId = requestAnimationFrame(() => {
+                        rafId = null;
+                        if (!isDragging) return;
+                        const dxPct = (latestDx / (videoRectRef.current.width || rect.width)) * 100;
+                        const dyPct = (latestDy / (videoRectRef.current.height || rect.height)) * 100;
+                        setBlurBoxes(current => current.map(b => {
+                            if (b.id !== boxId) return b;
+                            return applyMovement(b, startXPct, startYPct, startWPct, startHPct, dxPct, dyPct);
+                        }));
+                    });
+                }
+            };
+            const onPointerUp = () => {
+                isDragging = false;
+                if (rafId) cancelAnimationFrame(rafId);
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+            };
+            window.addEventListener('pointermove', onPointerMove, { passive: false });
+            window.addEventListener('pointerup', onPointerUp);
+            return prev;
+        });
+    };
 
     useEffect(() => {
         const fetchVoices = async () => {
@@ -118,7 +308,8 @@ export const AIRecapTool: React.FC = () => {
                 referenceVoiceId,
                 burnSubtitles,
                 subtitleColor,
-                blurBoxes: JSON.stringify(blurBoxes)
+                blurBoxes: JSON.stringify(blurBoxes),
+                subtitlePosition: JSON.stringify(subtitlePosition)
             });
             startGenerationPolling(jobId);
         } catch (err: any) {
@@ -295,7 +486,7 @@ export const AIRecapTool: React.FC = () => {
                     <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-6">
                         <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2">Generation Settings</h4>
                         
-                        <div className="grid md:grid-cols-2 gap-6">
+                        <div className="grid md:grid-cols-2 gap-6 mb-6">
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-white font-bold text-sm mb-2">အသံရွေးချယ်ရန်</label>
@@ -350,26 +541,109 @@ export const AIRecapTool: React.FC = () => {
                                         </div>
                                     </div>
                                 )}
-                                
-                                <div className="pt-2">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-white font-bold text-sm">Blur Boxes</label>
-                                        <button onClick={() => setBlurBoxes([...blurBoxes, { xPct: 0, yPct: 0, widthPct: 20, heightPct: 20, strength: 15 }])} className="text-xs bg-gray-800 hover:bg-gray-700 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-colors">Add blur box</button>
-                                    </div>
-                                    <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar">
-                                        {blurBoxes.map((box, idx) => (
-                                            <div key={idx} className="flex items-center gap-2 bg-gray-950 p-2 rounded-xl border border-gray-800">
-                                                <input type="number" value={box.xPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].xPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="X%" />
-                                                <input type="number" value={box.yPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].yPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="Y%" />
-                                                <input type="number" value={box.widthPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].widthPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="W%" />
-                                                <input type="number" value={box.heightPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].heightPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="H%" />
-                                                <input type="number" value={box.strength} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].strength = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="Str" min="1" max="30" />
-                                                <button onClick={() => { const newBoxes = [...blurBoxes]; newBoxes.splice(idx, 1); setBlurBoxes(newBoxes); }} className="text-gray-500 hover:text-red-400 ml-auto p-1">✕</button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
                             </div>
+                        </div>
+                        
+                        <div className="pt-4 border-t border-gray-800">
+                            <div className="flex justify-between items-center mb-4">
+                                <label className="text-white font-bold text-sm">Preview & Adjustments</label>
+                                <button 
+                                    onClick={() => {
+                                        if (blurBoxes.length >= 3) return;
+                                        setBlurBoxes([...blurBoxes, { id: 'box_' + Date.now(), xPct: 35, yPct: 45, widthPct: 30, heightPct: 10, strength: 15 }]);
+                                        setSelectedElement('box_' + Date.now());
+                                    }} 
+                                    disabled={blurBoxes.length >= 3} 
+                                    className="text-xs bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-colors"
+                                >
+                                    Add blur box
+                                </button>
+                            </div>
+                            
+                            <div 
+                                ref={previewContainerRef}
+                                className="relative w-full bg-black rounded-xl overflow-hidden shadow-inner select-none touch-none"
+                                style={{ aspectRatio: '16/9' }}
+                                onClick={() => setSelectedElement(null)}
+                            >
+                                <video 
+                                    ref={videoPreviewRef}
+                                    src={videoPreviewUrl || undefined}
+                                    className="w-full h-full object-contain pointer-events-none"
+                                    muted playsInline controls={false}
+                                    onLoadedMetadata={updateVideoRect}
+                                />
+                                
+                                {blurBoxes.map(box => (
+                                    <div
+                                        key={box.id}
+                                        onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
+                                        onClick={(e) => { e.stopPropagation(); setSelectedElement(box.id); }}
+                                        className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-indigo-500 bg-indigo-500/10 z-20' : 'border-gray-500 border-dashed bg-gray-500/10 z-10'}`}
+                                        style={{
+                                            left: `${videoRect.left + (box.xPct / 100) * videoRect.width}px`,
+                                            top: `${videoRect.top + (box.yPct / 100) * videoRect.height}px`,
+                                            width: `${(box.widthPct / 100) * videoRect.width}px`,
+                                            height: `${(box.heightPct / 100) * videoRect.height}px`,
+                                        }}
+                                    >
+                                        <div className="absolute top-1 left-1 bg-black/50 text-white text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none">Blur</div>
+                                        {selectedElement === box.id && (
+                                            <>
+                                                <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
+                                                <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
+                                            </>
+                                        )}
+                                    </div>
+                                ))}
+                                
+                                {burnSubtitles && (
+                                    <div
+                                        onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
+                                        onClick={(e) => { e.stopPropagation(); setSelectedElement('subtitle'); }}
+                                        className={`absolute border-2 cursor-move flex items-center justify-center overflow-hidden ${selectedElement === 'subtitle' ? 'border-indigo-500 bg-indigo-500/20 z-20' : 'border-gray-500 border-dashed bg-gray-500/10 z-10'}`}
+                                        style={{
+                                            left: `${videoRect.left + (subtitlePosition.xPct / 100) * videoRect.width}px`,
+                                            top: `${videoRect.top + (subtitlePosition.yPct / 100) * videoRect.height}px`,
+                                            width: `${(subtitlePosition.widthPct / 100) * videoRect.width}px`,
+                                            height: `${(subtitlePosition.heightPct / 100) * videoRect.height}px`,
+                                        }}
+                                    >
+                                        <div className="text-center font-bold px-2 pointer-events-none w-full" style={{ color: subtitleColor, fontSize: `${Math.max(10, (subtitlePosition.heightPct / 100) * videoRect.height * 0.5)}px`, textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}>
+                                            စာတန်းထိုး နေရာ
+                                        </div>
+                                        {selectedElement === 'subtitle' && (
+                                            <>
+                                                <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} />
+                                                <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} />
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {selectedElement && selectedElement.startsWith('box_') && (
+                                <div className="mt-4 p-4 bg-gray-950 rounded-xl border border-gray-800 flex items-center justify-between">
+                                    <div className="flex-1 max-w-xs space-y-2">
+                                        <div className="flex justify-between text-xs text-gray-400 font-bold">
+                                            <span>Blur Strength</span>
+                                            <span>{blurBoxes.find(b => b.id === selectedElement)?.strength || 15}</span>
+                                        </div>
+                                        <input 
+                                            type="range" min="1" max="30" 
+                                            value={blurBoxes.find(b => b.id === selectedElement)?.strength || 15}
+                                            onChange={(e) => setBlurBoxes(blurBoxes.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
+                                            className="w-full accent-indigo-500"
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={() => { setBlurBoxes(blurBoxes.filter(b => b.id !== selectedElement)); setSelectedElement(null); }}
+                                        className="bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-300 px-4 py-2 rounded-lg text-sm font-bold transition-colors border border-red-900/50"
+                                    >
+                                        Remove Box
+                                    </button>
+                                </div>
+                            )}
                         </div>
                         
                         <div className="pt-4 border-t border-gray-800 flex justify-end">

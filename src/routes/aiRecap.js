@@ -168,8 +168,11 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
         const blurBoxesRaw = req.body.blurBoxes || '[]';
         const burnSubtitles = req.body.burnSubtitles === true || req.body.burnSubtitles === 'true';
         const subtitleColor = req.body.subtitleColor || 'white';
+        const subtitlePositionRaw = req.body.subtitlePosition || '{"xPct":10,"yPct":78,"widthPct":80,"heightPct":12}';
         let blurBoxes = [];
         try { blurBoxes = JSON.parse(blurBoxesRaw); } catch(e) {}
+        let subtitlePosition = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+        try { subtitlePosition = JSON.parse(subtitlePositionRaw); } catch(e) {}
 
         const row = db.prepare(`SELECT * FROM ai_recap_jobs WHERE id = ? AND userId = ?`).get(jobId, req.user.id);
         
@@ -363,7 +366,7 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 if (burnSubtitles && timeline.length > 0) {
                     try {
                         const subTmpPath = path.join(sourcesDir, `${jobId}_subburn.mp4`);
-                        const pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+                        const pos = subtitlePosition;
                         
                         const marginL = Math.round((pos.xPct / 100) * vidW);
                         const marginR = Math.round(vidW - ((pos.xPct + pos.widthPct) / 100) * vidW);
