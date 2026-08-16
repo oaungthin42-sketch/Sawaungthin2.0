@@ -10,6 +10,42 @@ export const AIRecapTool: React.FC = () => {
     const [jobId, setJobId] = useState<string | null>(null);
     const videoInputRef = useRef<HTMLInputElement>(null);
     const [pollTimer, setPollTimer] = useState<any>(null);
+    const [voices, setVoices] = useState<any[]>([]);
+    const [voiceId, setVoiceId] = useState<string>('');
+    const [useVoiceClone, setUseVoiceClone] = useState<number>(0);
+    const [refVoices, setRefVoices] = useState<any[]>([]);
+    const [referenceVoiceId, setReferenceVoiceId] = useState<string>('');
+    const [burnSubtitles, setBurnSubtitles] = useState<boolean>(false);
+    const [subtitleColor, setSubtitleColor] = useState<string>('white');
+    const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
+
+    useEffect(() => {
+        const fetchVoices = async () => {
+            try {
+                const res = await axios.get('/api/voices');
+                setVoices(res.data);
+                if (res.data.length > 0) {
+                    setVoiceId(res.data[0].id);
+                }
+            } catch (e) {}
+        };
+        fetchVoices();
+    }, []);
+
+    useEffect(() => {
+        if (useVoiceClone === 1) {
+            const fetchRefVoices = async () => {
+                try {
+                    const res = await axios.get('/api/voice-clones/reference-voices');
+                    setRefVoices(res.data);
+                    if (res.data.length > 0) {
+                        setReferenceVoiceId(res.data[0].id);
+                    }
+                } catch (e) {}
+            };
+            fetchRefVoices();
+        }
+    }, [useVoiceClone]);
 
     useEffect(() => {
         return () => {
@@ -76,7 +112,14 @@ export const AIRecapTool: React.FC = () => {
         setStatus('generating_video');
         setErrorMsg('');
         try {
-            await axios.post(`/api/ai-recap/generate/${jobId}`);
+            await axios.post(`/api/ai-recap/generate/${jobId}`, {
+                voiceId,
+                useVoiceClone,
+                referenceVoiceId,
+                burnSubtitles,
+                subtitleColor,
+                blurBoxes: JSON.stringify(blurBoxes)
+            });
             startGenerationPolling(jobId);
         } catch (err: any) {
             setStatus('video_error');
@@ -208,17 +251,11 @@ export const AIRecapTool: React.FC = () => {
                         <h3 className="text-xl font-bold text-white">Analysis Complete</h3>
                         <div className="flex items-center gap-3">
                             <button
-                                onClick={generateVideo}
-                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-indigo-900/20"
-                            >
-                                Generate Video
-                            </button>
-                            <button
                                 onClick={reset}
-                            className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                        >
-                            Start New
-                        </button>
+                                className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
+                            >
+                                Start New
+                            </button>
                         </div>
                     </div>
 
@@ -252,6 +289,96 @@ export const AIRecapTool: React.FC = () => {
                                     ? result.scenes.map((s: any) => s.narration_text).join(' ')
                                     : "No narration found in the expected format."}
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-6">
+                        <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2">Generation Settings</h4>
+                        
+                        <div className="grid md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-white font-bold text-sm mb-2">အသံရွေးချယ်ရန်</label>
+                                    <select 
+                                        value={voiceId} 
+                                        onChange={(e) => setVoiceId(e.target.value)}
+                                        className="w-full bg-gray-950 border border-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors"
+                                    >
+                                        {voices.map(v => (
+                                            <option key={v.id} value={v.id}>{v.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input type="checkbox" id="voiceCloneCheck" checked={useVoiceClone === 1} onChange={e => setUseVoiceClone(e.target.checked ? 1 : 0)} className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500" />
+                                    <label htmlFor="voiceCloneCheck" className="text-sm font-bold text-gray-300">Clone အသံ သုံးမည်</label>
+                                </div>
+                                {useVoiceClone === 1 && (
+                                    <div>
+                                        <label className="block text-white font-bold text-sm mb-2">Reference Voice</label>
+                                        <select 
+                                            value={referenceVoiceId} 
+                                            onChange={(e) => setReferenceVoiceId(e.target.value)}
+                                            className="w-full bg-gray-950 border border-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors"
+                                        >
+                                            {refVoices.map(v => (
+                                                <option key={v.id} value={v.id}>{v.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <input type="checkbox" id="subtitleCheck" checked={burnSubtitles} onChange={e => setBurnSubtitles(e.target.checked)} className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500" />
+                                    <label htmlFor="subtitleCheck" className="text-sm font-bold text-gray-300">စာတန်းထိုးမည်</label>
+                                </div>
+                                {burnSubtitles && (
+                                    <div>
+                                        <label className="block text-white font-bold text-sm mb-2">Subtitle Color</label>
+                                        <div className="flex gap-2">
+                                            {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(color => (
+                                                <button
+                                                    key={color}
+                                                    onClick={() => setSubtitleColor(color)}
+                                                    className={`w-8 h-8 rounded-full border-2 ${subtitleColor === color ? 'border-indigo-500' : 'border-transparent'}`}
+                                                    style={{ backgroundColor: color }}
+                                                    title={color}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                <div className="pt-2">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-white font-bold text-sm">Blur Boxes</label>
+                                        <button onClick={() => setBlurBoxes([...blurBoxes, { xPct: 0, yPct: 0, widthPct: 20, heightPct: 20, strength: 15 }])} className="text-xs bg-gray-800 hover:bg-gray-700 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-colors">Add blur box</button>
+                                    </div>
+                                    <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar">
+                                        {blurBoxes.map((box, idx) => (
+                                            <div key={idx} className="flex items-center gap-2 bg-gray-950 p-2 rounded-xl border border-gray-800">
+                                                <input type="number" value={box.xPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].xPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="X%" />
+                                                <input type="number" value={box.yPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].yPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="Y%" />
+                                                <input type="number" value={box.widthPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].widthPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="W%" />
+                                                <input type="number" value={box.heightPct} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].heightPct = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="H%" />
+                                                <input type="number" value={box.strength} onChange={e => { const newBoxes = [...blurBoxes]; newBoxes[idx].strength = parseFloat(e.target.value); setBlurBoxes(newBoxes); }} className="w-14 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs p-1.5 text-center" placeholder="Str" min="1" max="30" />
+                                                <button onClick={() => { const newBoxes = [...blurBoxes]; newBoxes.splice(idx, 1); setBlurBoxes(newBoxes); }} className="text-gray-500 hover:text-red-400 ml-auto p-1">✕</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="pt-4 border-t border-gray-800 flex justify-end">
+                            <button
+                                onClick={generateVideo}
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/20"
+                            >
+                                Generate Video
+                            </button>
                         </div>
                     </div>
                 </div>
