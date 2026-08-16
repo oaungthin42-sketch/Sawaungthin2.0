@@ -5,7 +5,7 @@ export const VOICES = [
         gender: 'male',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '+0Hz',
-        rate: '+30%'
+        rate: '+34%'
     },
     {
         id: 'male-young-adult',
