@@ -173,6 +173,7 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
         try { blurBoxes = JSON.parse(blurBoxesRaw); } catch(e) {}
         let subtitlePosition = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
         try { subtitlePosition = JSON.parse(subtitlePositionRaw); } catch(e) {}
+        const watermarkText = (req.body.watermarkText || '').trim();
 
         const row = db.prepare(`SELECT * FROM ai_recap_jobs WHERE id = ? AND userId = ?`).get(jobId, req.user.id);
         
@@ -359,6 +360,38 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                         }
                     } catch (e) {
                         console.error("[AI Recap] Blur pass failed", e);
+                    }
+                }
+
+                // WATERMARK PASS
+                if (watermarkText) {
+                    try {
+                        const wmTmpPath = path.join(sourcesDir, `${jobId}_watermark.mp4`);
+                        let escapedText = watermarkText
+                            .replace(/\\/g, "\\\\")
+                            .replace(/:/g, "\\:")
+                            .replace(/'/g, "\\'")
+                            .replace(/%/g, "\\%");
+                        const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                        const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
+                        const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
+                        const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+                        const wmArgs = [
+                            '-y',
+                            '-i', finalVideoPath,
+                            '-vf', drawtextFilter,
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            wmTmpPath
+                        ];
+                        await runFFmpeg(wmArgs, sourcesDir, () => {});
+                        if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
+                            fs.unlinkSync(finalVideoPath);
+                            fs.renameSync(wmTmpPath, finalVideoPath);
+                        }
+                    } catch (e) {
+                        console.error("[AI Recap] Watermark pass failed", e);
                     }
                 }
 

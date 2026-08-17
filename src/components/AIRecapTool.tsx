@@ -2,6 +2,46 @@ import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, Play, AlertCircle } from 'lucide-react';
 import axios from 'axios';
 
+const RecapVideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement | null> }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const updateProgress = () => { if (video.duration) setProgress((video.currentTime / video.duration) * 100); };
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    video.addEventListener('timeupdate', updateProgress);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+    return () => {
+      video.removeEventListener('timeupdate', updateProgress);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+    };
+  }, [videoRef]);
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (video) { if (video.paused) video.play(); else video.pause(); }
+  };
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (video && video.duration) {
+      video.currentTime = (Number(e.target.value) / 100) * video.duration;
+      setProgress(Number(e.target.value));
+    }
+  };
+  return (
+    <div className="w-full mt-3 flex items-center gap-3 bg-gray-900/60 p-2 rounded-xl border border-gray-800">
+      <button onClick={togglePlay} className="text-white hover:text-indigo-400 focus:outline-none transition-colors">
+        {isPlaying ? <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <Play size={20} className="fill-current" />}
+      </button>
+      <input type="range" min="0" max="100" step="0.1" value={progress || 0} onChange={handleSeek} className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+    </div>
+  );
+};
+
 export const AIRecapTool: React.FC = () => {
     const [videoFile, setVideoFile] = useState<File | null>(null);
     const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error' | 'generating_video' | 'video_done' | 'video_error'>('idle');
@@ -19,6 +59,7 @@ export const AIRecapTool: React.FC = () => {
     const [subtitleColor, setSubtitleColor] = useState<string>('white');
     const [blurBoxes, setBlurBoxes] = useState<any[]>([]);
     const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
+    const [watermarkText, setWatermarkText] = useState<string>('');
     const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
 
     useEffect(() => {
@@ -309,7 +350,8 @@ export const AIRecapTool: React.FC = () => {
                 burnSubtitles,
                 subtitleColor,
                 blurBoxes: JSON.stringify(blurBoxes),
-                subtitlePosition: JSON.stringify(subtitlePosition)
+                subtitlePosition: JSON.stringify(subtitlePosition),
+                watermarkText
             });
             startGenerationPolling(jobId);
         } catch (err: any) {
@@ -450,39 +492,6 @@ export const AIRecapTool: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="grid md:grid-cols-2 gap-6">
-                        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
-                            <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2">Selected Scenes</h4>
-                            <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
-                                {result.scenes && Array.isArray(result.scenes) ? result.scenes.map((scene: any, i: number) => (
-                                    <div key={i} className="bg-gray-950 border border-gray-800 p-3 rounded-xl">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="bg-indigo-500/20 text-indigo-400 text-xs font-bold px-2 py-0.5 rounded">
-                                                {scene.start}s - {scene.end}s
-                                            </span>
-                                            <span className="text-gray-500 text-xs font-mono">
-                                                {(scene.end - scene.start).toFixed(1)}s
-                                            </span>
-                                        </div>
-                                        <p className="text-gray-400 text-xs mb-2">{scene.reason}</p>
-                                        <p className="text-indigo-200 text-sm italic border-l-2 border-indigo-500/50 pl-3">"{scene.narration_text}"</p>
-                                    </div>
-                                )) : (
-                                    <p className="text-gray-500">No scenes found in the expected format.</p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 flex flex-col">
-                            <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2 mb-4">Full Script Preview</h4>
-                            <div className="flex-1 bg-gray-950 border border-gray-800 rounded-xl p-4 overflow-y-auto custom-scrollbar whitespace-pre-wrap text-gray-300 text-sm leading-relaxed max-h-[500px]">
-                                {result.scenes && Array.isArray(result.scenes)
-                                    ? result.scenes.map((s: any) => s.narration_text).join(' ')
-                                    : "No narration found in the expected format."}
-                            </div>
-                        </div>
-                    </div>
-
                     <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-6">
                         <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2">Generation Settings</h4>
                         
@@ -570,7 +579,7 @@ export const AIRecapTool: React.FC = () => {
                                     ref={videoPreviewRef}
                                     src={videoPreviewUrl || undefined}
                                     className="w-full h-full object-contain pointer-events-none"
-                                    muted playsInline controls={false}
+                                    muted playsInline
                                     onLoadedMetadata={updateVideoRect}
                                 />
                                 
@@ -622,6 +631,8 @@ export const AIRecapTool: React.FC = () => {
                                 )}
                             </div>
                             
+                            <RecapVideoSeekBar videoRef={videoPreviewRef} />
+                            
                             {selectedElement && selectedElement.startsWith('box_') && (
                                 <div className="mt-4 p-4 bg-gray-950 rounded-xl border border-gray-800 flex items-center justify-between">
                                     <div className="flex-1 max-w-xs space-y-2">
@@ -644,6 +655,17 @@ export const AIRecapTool: React.FC = () => {
                                     </button>
                                 </div>
                             )}
+                            
+                            <div className="mt-6">
+                                <label className="block text-white font-bold text-sm mb-2">Watermark (ရေစတန်း)</label>
+                                <input 
+                                    type="text" 
+                                    value={watermarkText} 
+                                    onChange={(e) => setWatermarkText(e.target.value)} 
+                                    className="w-full bg-gray-950 border border-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors"
+                                />
+                                <p className="text-gray-500 text-xs mt-2">ဗီဒီယိုပေါ်တွင် ရွေ့လျားနေမည့် စာသားထည့်ရန်</p>
+                            </div>
                         </div>
                         
                         <div className="pt-4 border-t border-gray-800 flex justify-end">
