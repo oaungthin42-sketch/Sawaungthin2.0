@@ -341,10 +341,15 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                             lastMap = nextMap;
                         }
                         
+                        let combinedBlurFilter = (splitInputs + filterComplex).trim();
+                        if (combinedBlurFilter.endsWith(';')) {
+                            combinedBlurFilter = combinedBlurFilter.slice(0, -1);
+                        }
+
                         const blurArgs = [
                             '-y',
                             '-i', finalVideoPath,
-                            '-filter_complex', splitInputs + filterComplex,
+                            '-filter_complex', combinedBlurFilter,
                             '-map', lastMap,
                             '-map', '0:a?',
                             '-c:a', 'copy',
