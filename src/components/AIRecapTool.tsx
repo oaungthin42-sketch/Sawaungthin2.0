@@ -493,7 +493,12 @@ export const AIRecapTool: React.FC = () => {
                     </div>
 
                     <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-6">
-                        <h4 className="text-lg font-bold text-indigo-400 border-b border-gray-800 pb-2">Generation Settings</h4>
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                                <span className="text-white text-lg leading-none mt-[-2px]">✦</span>
+                            </div>
+                            <h4 className="text-xl font-bold text-white tracking-tight">Generation Settings</h4>
+                        </div>
                         
                         <div className="grid md:grid-cols-2 gap-6 mb-6">
                             <div className="space-y-4">
@@ -509,9 +514,9 @@ export const AIRecapTool: React.FC = () => {
                                         ))}
                                     </select>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <input type="checkbox" id="voiceCloneCheck" checked={useVoiceClone === 1} onChange={e => setUseVoiceClone(e.target.checked ? 1 : 0)} className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500" />
-                                    <label htmlFor="voiceCloneCheck" className="text-sm font-bold text-gray-300">Clone အသံ သုံးမည်</label>
+                                <div className="flex items-center justify-between bg-gray-950/60 border border-gray-800 rounded-2xl px-4 py-3">
+                                    <label htmlFor="voiceCloneCheck" className="text-sm font-bold text-gray-300 cursor-pointer">Clone အသံ သုံးမည်</label>
+                                    <input type="checkbox" id="voiceCloneCheck" checked={useVoiceClone === 1} onChange={e => setUseVoiceClone(e.target.checked ? 1 : 0)} className="w-5 h-5 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500 cursor-pointer" />
                                 </div>
                                 {useVoiceClone === 1 && (
                                     <div>
@@ -530,9 +535,9 @@ export const AIRecapTool: React.FC = () => {
                             </div>
                             
                             <div className="space-y-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <input type="checkbox" id="subtitleCheck" checked={burnSubtitles} onChange={e => setBurnSubtitles(e.target.checked)} className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500" />
-                                    <label htmlFor="subtitleCheck" className="text-sm font-bold text-gray-300">စာတန်းထိုးမည်</label>
+                                <div className="flex items-center justify-between bg-gray-950/60 border border-gray-800 rounded-2xl px-4 py-3 mb-2">
+                                    <label htmlFor="subtitleCheck" className="text-sm font-bold text-gray-300 cursor-pointer">စာတန်းထိုးမည်</label>
+                                    <input type="checkbox" id="subtitleCheck" checked={burnSubtitles} onChange={e => setBurnSubtitles(e.target.checked)} className="w-5 h-5 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500 cursor-pointer" />
                                 </div>
                                 {burnSubtitles && (
                                     <div>
@@ -542,7 +547,7 @@ export const AIRecapTool: React.FC = () => {
                                                 <button
                                                     key={color}
                                                     onClick={() => setSubtitleColor(color)}
-                                                    className={`w-8 h-8 rounded-full border-2 ${subtitleColor === color ? 'border-indigo-500' : 'border-transparent'}`}
+                                                    className={`w-9 h-9 rounded-full transition-transform duration-200 ${subtitleColor === color ? 'scale-110 ring-2 ring-offset-2 ring-offset-gray-900 ring-indigo-500' : 'hover:scale-105'}`}
                                                     style={{ backgroundColor: color }}
                                                     title={color}
                                                 />
@@ -559,7 +564,7 @@ export const AIRecapTool: React.FC = () => {
                                 <button 
                                     onClick={() => {
                                         if (blurBoxes.length >= 3) return;
-                                        setBlurBoxes([...blurBoxes, { id: 'box_' + Date.now(), xPct: 35, yPct: 45, widthPct: 30, heightPct: 10, strength: 15 }]);
+                                        setBlurBoxes([...blurBoxes, { id: 'box_' + Date.now(), xPct: 25, yPct: 15, widthPct: 50, heightPct: 15, strength: 15 }]);
                                         setSelectedElement('box_' + Date.now());
                                     }} 
                                     disabled={blurBoxes.length >= 3} 
@@ -571,10 +576,13 @@ export const AIRecapTool: React.FC = () => {
                             
                             <div 
                                 ref={previewContainerRef}
-                                className="relative w-full bg-black rounded-xl overflow-hidden shadow-inner select-none touch-none"
+                                className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none"
                                 style={{ aspectRatio: '16/9' }}
                                 onClick={() => setSelectedElement(null)}
                             >
+                                <div className="absolute top-2 left-2 z-30 bg-black/40 backdrop-blur-sm rounded-lg px-2 py-1 pointer-events-none">
+                                    <span className="text-[10px] uppercase font-bold text-gray-300 tracking-wider">Preview</span>
+                                </div>
                                 <video 
                                     ref={videoPreviewRef}
                                     src={videoPreviewUrl || undefined}
@@ -583,12 +591,12 @@ export const AIRecapTool: React.FC = () => {
                                     onLoadedMetadata={updateVideoRect}
                                 />
                                 
-                                {blurBoxes.map(box => (
+                                {blurBoxes.map((box, index) => (
                                     <div
                                         key={box.id}
                                         onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
                                         onClick={(e) => { e.stopPropagation(); setSelectedElement(box.id); }}
-                                        className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-indigo-500 bg-indigo-500/10 z-20' : 'border-gray-500 border-dashed bg-gray-500/10 z-10'}`}
+                                        className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-amber-500 bg-amber-500/10 z-20' : 'border-amber-600/60 border-dashed bg-amber-500/5 z-10'}`}
                                         style={{
                                             left: `${videoRect.left + (box.xPct / 100) * videoRect.width}px`,
                                             top: `${videoRect.top + (box.yPct / 100) * videoRect.height}px`,
@@ -596,11 +604,11 @@ export const AIRecapTool: React.FC = () => {
                                             height: `${(box.heightPct / 100) * videoRect.height}px`,
                                         }}
                                     >
-                                        <div className="absolute top-1 left-1 bg-black/50 text-white text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none">Blur</div>
+                                        <div className="absolute top-1 left-1 bg-amber-500/80 text-black text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none">Blur #{index + 1}</div>
                                         {selectedElement === box.id && (
                                             <>
-                                                <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
-                                                <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
+                                                <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
+                                                <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
                                             </>
                                         )}
                                     </div>
@@ -671,7 +679,7 @@ export const AIRecapTool: React.FC = () => {
                         <div className="pt-4 border-t border-gray-800 flex justify-end">
                             <button
                                 onClick={generateVideo}
-                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/20"
+                                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-600 text-white px-8 py-3 rounded-xl font-bold transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-indigo-900/20"
                             >
                                 Generate Video
                             </button>
