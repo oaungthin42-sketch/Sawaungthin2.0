@@ -55,4 +55,18 @@ export const recoverStuckJobs = () => {
         WHERE status NOT IN ('complete', 'error')
     `);
     stmt.run();
+
+    const stmt2 = db.prepare(`
+        UPDATE ai_recap_jobs 
+        SET status = 'error', error = 'Job interrupted due to server restart.' 
+        WHERE status NOT IN ('done', 'error')
+    `);
+    stmt2.run();
+
+    const stmt3 = db.prepare(`
+        UPDATE ai_recap_jobs 
+        SET generationStatus = 'video_error', error = 'Video generation interrupted due to server restart.' 
+        WHERE generationStatus = 'generating'
+    `);
+    stmt3.run();
 };

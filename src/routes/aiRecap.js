@@ -30,6 +30,114 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+function detectSilenceIntervals(videoPath) {
+    const cmd = `ffmpeg -i "${videoPath}" -af silencedetect=noise=-30dB:d=1.0 -f null - 2>&1`;
+    let output = '';
+    try {
+        output = execSync(cmd, { maxBuffer: 1024 * 1024 * 50 }).toString();
+    } catch (e) {
+        output = (e.stdout ? e.stdout.toString() : '') + (e.stderr ? e.stderr.toString() : '');
+    }
+    const intervals = [];
+    const startRegex = /silence_start:\s*([\d.]+)/g;
+    const endRegex = /silence_end:\s*([\d.]+)/g;
+    let starts = [];
+    let ends = [];
+    let m;
+    while ((m = startRegex.exec(output)) !== null) starts.push(parseFloat(m[1]));
+    while ((m = endRegex.exec(output)) !== null) ends.push(parseFloat(m[1]));
+    for (let i = 0; i < Math.min(starts.length, ends.length); i++) {
+        intervals.push({ start: starts[i], end: ends[i] });
+    }
+    return intervals;
+}
+
+async function trimSilence(sourceVideoPath, outputPath, workDir) {
+    const SILENCE_THRESHOLD = 3.0;
+    const KEEP_BUFFER = 1.2;
+
+    let totalDuration = 0;
+    try {
+        const durCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${sourceVideoPath}"`;
+        totalDuration = parseFloat(execSync(durCmd).toString().trim());
+    } catch (e) {
+        console.error("[AI Recap] Failed to get source duration, skipping silence trim", e);
+        fs.copyFileSync(sourceVideoPath, outputPath);
+        return;
+    }
+
+    let rawIntervals = [];
+    try {
+        rawIntervals = detectSilenceIntervals(sourceVideoPath);
+    } catch (e) {
+        console.error("[AI Recap] Silence detection failed, skipping trim", e);
+    }
+
+    const longSilences = rawIntervals.filter(iv => (iv.end - iv.start) > SILENCE_THRESHOLD);
+
+    let cuts = [];
+    for (const iv of longSilences) {
+        const cutStart = iv.start + KEEP_BUFFER;
+        const cutEnd = iv.end;
+        if (cutEnd > cutStart) {
+            cuts.push({ cutStart, cutEnd });
+        }
+    }
+
+    let keepSegments = [];
+    let cursor = 0;
+    for (const cut of cuts) {
+        if (cut.cutStart > cursor) {
+            keepSegments.push({ start: cursor, end: cut.cutStart });
+        }
+        cursor = Math.max(cursor, cut.cutEnd);
+    }
+    if (cursor < totalDuration) {
+        keepSegments.push({ start: cursor, end: totalDuration });
+    }
+    keepSegments = keepSegments.filter(s => (s.end - s.start) > 0.1);
+
+    if (keepSegments.length === 0) {
+        fs.copyFileSync(sourceVideoPath, outputPath);
+        return;
+    }
+
+    console.log(`[AI Recap] Silence trim: ${longSilences.length} long silences found, ${keepSegments.length} segments kept.`);
+
+    const segmentFiles = [];
+    for (let i = 0; i < keepSegments.length; i++) {
+        const seg = keepSegments[i];
+        const segPath = path.join(workDir, `trimseg_${Date.now()}_${i}.mp4`);
+        segmentFiles.push(segPath);
+        await runFFmpeg([
+            '-y',
+            '-ss', String(seg.start),
+            '-to', String(seg.end),
+            '-i', sourceVideoPath,
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            segPath
+        ], workDir, () => {});
+    }
+
+    const concatListPath = path.join(workDir, `trimconcat_${Date.now()}.txt`);
+    fs.writeFileSync(concatListPath, segmentFiles.map(f => `file '${f}'`).join('\n'));
+
+    await runFFmpeg([
+        '-y',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', concatListPath,
+        '-c', 'copy',
+        outputPath
+    ], workDir, () => {});
+
+    for (const f of segmentFiles) { if (fs.existsSync(f)) fs.unlinkSync(f); }
+    if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
+}
+
 router.post('/analyze', authMiddleware, upload.single('video'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No video file provided' });
@@ -39,108 +147,31 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
     const tempVideoPath = req.file.path;
     const sourceVideoPath = path.join(sourcesDir, jobId + path.extname(req.file.originalname));
     fs.renameSync(tempVideoPath, sourceVideoPath);
-    const videoPath = sourceVideoPath;
-    
-    // Create job row
+
     try {
         const stmt = db.prepare(`INSERT INTO ai_recap_jobs (id, userId, status, createdAt, sourceVideoPath) VALUES (?, ?, ?, ?, ?)`);
         stmt.run(jobId, req.user.id, 'processing', Date.now(), sourceVideoPath);
     } catch (e) {
         console.error("Error creating recap job", e);
-        if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath);
+        if (fs.existsSync(sourceVideoPath)) fs.unlinkSync(sourceVideoPath);
         return res.status(500).json({ error: 'Failed to create job' });
     }
 
     res.json({ jobId });
 
-    // Background processing
     (async () => {
         try {
-            const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
-            if (!apiKey) {
-                throw new Error("GEMINI_API_KEY is missing");
-            }
-            
-            const ai = new GoogleGenAI({ apiKey });
+            const cleanedVideoPath = path.join(sourcesDir, jobId + '_cleaned.mp4');
+            console.log(`[AI Recap] Trimming silence for job ${jobId}...`);
+            await trimSilence(sourceVideoPath, cleanedVideoPath, sourcesDir);
+            console.log(`[AI Recap] Silence trim complete for job ${jobId}.`);
 
-            console.log(`[AI Recap] Uploading ${videoPath} to Gemini...`);
-            let fileUpload = await ai.files.upload({
-                file: videoPath,
-                config: { mimeType: req.file.mimetype },
-            });
-
-            console.log(`[AI Recap] File uploaded. URI: ${fileUpload.uri}, Name: ${fileUpload.name}`);
-
-            // Poll until active
-            let state = fileUpload.state;
-            while (state === 'PROCESSING') {
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                fileUpload = await ai.files.get({ name: fileUpload.name });
-                state = fileUpload.state;
-                console.log(`[AI Recap] File state: ${state}`);
-            }
-
-            if (state === 'FAILED') {
-                throw new Error("Gemini file processing failed");
-            }
-
-            const prompt = "You are analyzing a C-Drama / movie video to prepare a Burmese movie recap short. Watch the entire video and: (1) Identify only the scenes that matter for the story — plot-relevant dialogue, key reactions, turning points. (2) Exclude filler: long silent walking, repeated shots, redundant establishing shots, scenes that don't move the story forward. (3) Order the selected scenes for a fast-paced, engaging recap — you may reorder non-chronologically for a strong opening hook if that serves the story better. (4) For EACH selected scene, write a short natural Burmese narration line (1-2 sentences) to be read aloud while that specific scene plays — written 100% in Burmese, no markdown, no labels. The narration lines should flow naturally into each other when read in the order the scenes will play, forming a cohesive recap story overall, but each line must specifically correspond to and make sense timed against its own scene.";
-            console.log(`[AI Recap] Calling generateContent...`);
-            const response = await ai.models.generateContent({
-                model: "gemini-3.6-flash",
-                contents: [
-                    {
-                        role: "user",
-                        parts: [
-                            { fileData: { fileUri: fileUpload.uri, mimeType: fileUpload.mimeType } },
-                            { text: prompt }
-                        ]
-                    }
-                ],
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "OBJECT",
-                        properties: {
-                            scenes: {
-                                type: "ARRAY",
-                                items: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        start: { type: "NUMBER" },
-                                        end: { type: "NUMBER" },
-                                        reason: { type: "STRING" },
-                                        narration_text: { type: "STRING" }
-                                    },
-                                    required: ["start", "end", "reason", "narration_text"]
-                                }
-                            }
-                        },
-                        required: ["scenes"]
-                    }
-                }
-            });
-
-            const responseText = response.text;
-            
-            // Delete from Gemini
-            try {
-                await ai.files.delete({ name: fileUpload.name });
-                console.log(`[AI Recap] Deleted file ${fileUpload.name} from Gemini`);
-            } catch (e) {
-                console.error("[AI Recap] Failed to delete file from Gemini:", e);
-            }
-
-            // Save result
-            const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ? WHERE id = ?`);
-            stmt.run(responseText, jobId);
-
+            const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`);
+            stmt.run(JSON.stringify({ trimmed: true }), cleanedVideoPath, jobId);
         } catch (e) {
             console.error("[AI Recap] Job failed", e);
             const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'error', error = ? WHERE id = ?`);
             stmt.run(e.message || "Unknown error", jobId);
-        } finally {
-            // Video is kept for generation phase
         }
     })();
 });
