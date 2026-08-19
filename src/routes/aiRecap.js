@@ -173,7 +173,9 @@ REQUIREMENTS:
 2. Each segment must have: "start" (number, seconds), "end" (number, seconds), and "narration_text" (string, Burmese).
 3. The segments must be sequential, cover the video from 0s to the end without overlapping, and be in ascending chronological order.
 4. The narration_text MUST be entirely in natural-sounding Burmese.
-5. The start and end values are strictly for subtitle timing and narration synchronization. You are narrating the exact video provided. Do NOT write instructions to skip, re-cut, or re-order scenes.`;
+5. The start and end values are strictly for subtitle timing and narration synchronization. You are narrating the exact video provided. Do NOT write instructions to skip, re-cut, or re-order scenes.
+6. Character names and proper nouns: identify any character names or proper nouns and render them as natural Burmese phonetic transliteration (e.g. "John" -> "ဂျွန်", "Maria" -> "မာရီယာ") rather than leaving them in Latin script. Use the SAME transliteration consistently for the same character every time they are mentioned across the entire script.
+7. ZERO ENGLISH CHARACTERS: narration_text must be written 100% in Burmese script — no English letters, Latin acronyms, or digits. Numbers must ALWAYS be fully spelled out as Burmese words, NEVER as Arabic numerals (0-9) or Burmese numerals (၀-၉), no matter how large: 500 -> "ငါးရာ", 1000 -> "တစ်ထောင်", 10000 -> "တစ်သောင်း", 1500 -> "တစ်ထောင့်ငါးရာ". This applies to ages, dates, times, counts, and any other number mentioned in the narration.`;
 
     console.log(`[AI Recap] Calling generateContent for narration script...`);
     const response = await ai.models.generateContent({
@@ -294,6 +296,7 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
         const burnSubtitles = req.body.burnSubtitles === true || req.body.burnSubtitles === 'true';
         const subtitleColor = req.body.subtitleColor || 'white';
         const subtitlePositionRaw = req.body.subtitlePosition || '{"xPct":10,"yPct":78,"widthPct":80,"heightPct":12}';
+        const flipped = req.body.flipped === '1' || req.body.flipped === 1 || req.body.flipped === 'true' || req.body.flipped === true;
         let blurBoxes = [];
         try { blurBoxes = JSON.parse(blurBoxesRaw); } catch(e) {}
         let subtitlePosition = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
@@ -386,6 +389,10 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 const totalInputs = scenes.length + 1;
                 filterGraph += `${mixInputs}amix=inputs=${totalInputs}:duration=first:dropout_transition=0[aout]`;
                 
+                if (flipped) {
+                    filterGraph += `;[0:v]hflip[vout]`;
+                }
+                
                 // Run single ffmpeg command for audio overlay
                 const overlayArgs = ['-y', '-i', row.cleanedVideoPath];
                 for (const p of narrationClipPaths) {
@@ -393,13 +400,28 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 }
                 
                 overlayArgs.push(
-                    '-filter_complex', filterGraph,
-                    '-map', '0:v:0',
-                    '-map', '[aout]',
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    finalVideoPath
+                    '-filter_complex', filterGraph
                 );
+                
+                if (flipped) {
+                    overlayArgs.push(
+                        '-map', '[vout]',
+                        '-map', '[aout]',
+                        '-c:v', 'libx264',
+                        '-preset', 'veryfast',
+                        '-crf', '23',
+                        '-c:a', 'aac',
+                        finalVideoPath
+                    );
+                } else {
+                    overlayArgs.push(
+                        '-map', '0:v:0',
+                        '-map', '[aout]',
+                        '-c:v', 'copy',
+                        '-c:a', 'aac',
+                        finalVideoPath
+                    );
+                }
                 
                 await runFFmpeg(overlayArgs, sourcesDir, () => {});
                 
