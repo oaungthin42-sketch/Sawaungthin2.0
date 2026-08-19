@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Play, AlertCircle } from 'lucide-react';
+import { UploadCloud, Play, AlertCircle, ArrowRight, Check } from 'lucide-react';
 import axios from 'axios';
 
 const RecapVideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement | null> }) => {
@@ -61,6 +61,10 @@ export const AIRecapTool: React.FC = () => {
     const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
     const [watermarkText, setWatermarkText] = useState<string>('');
     const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+    const [currentStep, setCurrentStep] = useState(1);
+    const [isFlipped, setIsFlipped] = useState<boolean>(false);
+    
+    const steps = ["ဗီဒီယို", "Blur & Watermark", "စာတန်း", "အသံ & စတင်မည်"];
 
     useEffect(() => {
         if (videoFile) {
@@ -108,6 +112,12 @@ export const AIRecapTool: React.FC = () => {
         window.addEventListener('resize', updateVideoRect);
         return () => window.removeEventListener('resize', updateVideoRect);
     }, []);
+
+    useEffect(() => {
+        if (currentStep >= 1 && currentStep <= 3) {
+            setTimeout(updateVideoRect, 50);
+        }
+    }, [currentStep, isFlipped]);
 
     const handlePointerDown = (e: React.PointerEvent, boxId: string, action: 'move' | 'tl' | 'tr' | 'bl' | 'br') => {
         e.preventDefault();
@@ -351,7 +361,8 @@ export const AIRecapTool: React.FC = () => {
                 subtitleColor,
                 blurBoxes: JSON.stringify(blurBoxes),
                 subtitlePosition: JSON.stringify(subtitlePosition),
-                watermarkText
+                watermarkText,
+                flipped: isFlipped ? '1' : '0'
             });
             startGenerationPolling(jobId);
         } catch (err: any) {
@@ -389,6 +400,7 @@ export const AIRecapTool: React.FC = () => {
         setResult(null);
         setErrorMsg('');
         setJobId(null);
+        setCurrentStep(1);
     };
 
     return (
@@ -480,28 +492,228 @@ export const AIRecapTool: React.FC = () => {
 
             {status === 'complete' && result && (
                 <div className="max-w-4xl mx-auto space-y-6">
-                    <div className="flex items-center justify-between">
-                        <h3 className="text-xl font-bold text-white">Analysis Complete</h3>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={reset}
-                                className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                            >
-                                Start New
-                            </button>
-                        </div>
+                    <div className="flex items-center justify-between mb-8 relative">
+                        <div className="absolute left-0 top-1/2 w-full h-1 bg-gray-800 -z-10" />
+                        <div className="absolute left-0 top-1/2 h-1 bg-indigo-500 -z-10 transition-all duration-300" style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }} />
+                        {steps.map((step, idx) => {
+                            const stepNum = idx + 1;
+                            const isActive = currentStep === stepNum;
+                            const isPast = currentStep > stepNum;
+                            return (
+                                <button
+                                    key={idx}
+                                    onClick={() => setCurrentStep(stepNum)}
+                                    className="flex flex-col items-center gap-2 group"
+                                >
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
+                                        isActive ? 'bg-indigo-500 text-white shadow-[0_0_20px_rgba(99,102,241,0.4)] ring-4 ring-gray-950' :
+                                        isPast ? 'bg-indigo-500 text-white ring-4 ring-gray-950' :
+                                        'bg-gray-800 text-gray-400 group-hover:bg-gray-700 ring-4 ring-gray-950'
+                                    }`}>
+                                        {isPast ? <Check className="w-5 h-5" /> : stepNum}
+                                    </div>
+                                    <span className={`text-xs font-bold absolute -bottom-6 whitespace-nowrap transition-colors ${
+                                        isActive ? 'text-indigo-400' : isPast ? 'text-gray-300' : 'text-gray-600'
+                                    }`}>
+                                        {step}
+                                    </span>
+                                </button>
+                            );
+                        })}
                     </div>
 
-                    <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-6">
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                                <span className="text-white text-lg leading-none mt-[-2px]">✦</span>
-                            </div>
-                            <h4 className="text-xl font-bold text-white tracking-tight">Generation Settings</h4>
-                        </div>
+                    <div className="bg-gray-900 border border-gray-800 rounded-3xl p-8 space-y-8 mt-12 relative overflow-hidden min-h-[400px] flex flex-col">
                         
-                        <div className="grid md:grid-cols-2 gap-6 mb-6">
-                            <div className="space-y-4">
+                        {currentStep === 1 && (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <label className="text-white font-bold text-sm">Preview</label>
+                                    <div className="flex items-center gap-3 bg-gray-950 px-4 py-2 rounded-xl border border-gray-800">
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">ဗီဒီယို လှည့်ရန်</span>
+                                        <button onClick={() => setIsFlipped(!isFlipped)} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isFlipped ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
+                                            <ArrowRight size={14} className={`transition-transform duration-300 ${isFlipped ? 'rotate-180' : ''}`} />
+                                        </button>
+                                    </div>
+                                </div>
+                                <div 
+                                    ref={previewContainerRef}
+                                    className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none max-w-2xl mx-auto"
+                                    style={{ aspectRatio: '16/9' }}
+                                    onClick={() => setSelectedElement(null)}
+                                >
+                                    <video 
+                                        ref={videoPreviewRef}
+                                        src={videoPreviewUrl || undefined}
+                                        className="w-full h-full object-contain pointer-events-none"
+                                        style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }}
+                                        muted playsInline
+                                        onLoadedMetadata={updateVideoRect}
+                                    />
+                                </div>
+                                <div className="max-w-2xl mx-auto">
+                                    <RecapVideoSeekBar videoRef={videoPreviewRef} />
+                                </div>
+                            </div>
+                        )}
+
+                        {currentStep === 2 && (
+                            <div className="space-y-6 max-w-2xl mx-auto w-full">
+                                <div className="flex justify-between items-center mb-4">
+                                    <label className="text-white font-bold text-sm">Blur Boxes</label>
+                                    <button 
+                                        onClick={() => {
+                                            if (blurBoxes.length >= 3) return;
+                                            setBlurBoxes([...blurBoxes, { id: 'box_' + Date.now(), xPct: 25, yPct: 15, widthPct: 50, heightPct: 15, strength: 15 }]);
+                                            setSelectedElement('box_' + Date.now());
+                                        }} 
+                                        disabled={blurBoxes.length >= 3} 
+                                        className="text-xs bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-colors"
+                                    >
+                                        Add blur box
+                                    </button>
+                                </div>
+
+                                <div 
+                                    ref={previewContainerRef}
+                                    className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none"
+                                    style={{ aspectRatio: '16/9' }}
+                                    onClick={() => setSelectedElement(null)}
+                                >
+                                    <video 
+                                        ref={videoPreviewRef}
+                                        src={videoPreviewUrl || undefined}
+                                        className="w-full h-full object-contain pointer-events-none opacity-50"
+                                        style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }}
+                                        muted playsInline
+                                        onLoadedMetadata={updateVideoRect}
+                                    />
+                                    
+                                    {blurBoxes.map((box, index) => (
+                                        <div
+                                            key={box.id}
+                                            onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
+                                            onClick={(e) => { e.stopPropagation(); setSelectedElement(box.id); }}
+                                            className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-amber-500 bg-amber-500/10 z-20' : 'border-amber-600/60 border-dashed bg-amber-500/5 z-10'}`}
+                                            style={{
+                                                left: `${videoRect.left + (box.xPct / 100) * videoRect.width}px`,
+                                                top: `${videoRect.top + (box.yPct / 100) * videoRect.height}px`,
+                                                width: `${(box.widthPct / 100) * videoRect.width}px`,
+                                                height: `${(box.heightPct / 100) * videoRect.height}px`,
+                                            }}
+                                        >
+                                            <div className="absolute top-1 left-1 bg-amber-500/80 text-black text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none">Blur #{index + 1}</div>
+                                            {selectedElement === box.id && (
+                                                <>
+                                                    <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
+                                                    <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
+                                                </>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                
+                                {selectedElement && selectedElement.startsWith('box_') && (
+                                    <div className="mt-4 p-4 bg-gray-950 rounded-xl border border-gray-800 flex items-center justify-between">
+                                        <div className="flex-1 max-w-xs space-y-2">
+                                            <div className="flex justify-between text-xs text-gray-400 font-bold">
+                                                <span>Blur Strength</span>
+                                                <span>{blurBoxes.find(b => b.id === selectedElement)?.strength || 15}</span>
+                                            </div>
+                                            <input 
+                                                type="range" min="1" max="30" 
+                                                value={blurBoxes.find(b => b.id === selectedElement)?.strength || 15}
+                                                onChange={(e) => setBlurBoxes(blurBoxes.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
+                                                className="w-full accent-indigo-500"
+                                            />
+                                        </div>
+                                        <button 
+                                            onClick={() => { setBlurBoxes(blurBoxes.filter(b => b.id !== selectedElement)); setSelectedElement(null); }}
+                                            className="bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-300 px-4 py-2 rounded-lg text-sm font-bold transition-colors border border-red-900/50"
+                                        >
+                                            Remove Box
+                                        </button>
+                                    </div>
+                                )}
+                                
+                                <div className="mt-6">
+                                    <label className="block text-white font-bold text-sm mb-2">Watermark (ရေစတန်း)</label>
+                                    <input 
+                                        type="text" 
+                                        value={watermarkText} 
+                                        onChange={(e) => setWatermarkText(e.target.value)} 
+                                        className="w-full bg-gray-950 border border-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors"
+                                    />
+                                    <p className="text-gray-500 text-xs mt-2">ဗီဒီယိုပေါ်တွင် ရွေ့လျားနေမည့် စာသားထည့်ရန်</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {currentStep === 3 && (
+                            <div className="space-y-6 max-w-2xl mx-auto w-full">
+                                <div className="flex items-center justify-between bg-gray-950/60 border border-gray-800 rounded-2xl px-4 py-3 mb-2">
+                                    <label htmlFor="subtitleCheck" className="text-sm font-bold text-gray-300 cursor-pointer">စာတန်းထိုးမည်</label>
+                                    <input type="checkbox" id="subtitleCheck" checked={burnSubtitles} onChange={e => setBurnSubtitles(e.target.checked)} className="w-5 h-5 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500 cursor-pointer" />
+                                </div>
+                                {burnSubtitles && (
+                                    <>
+                                        <div>
+                                            <label className="block text-white font-bold text-sm mb-2">Subtitle Color</label>
+                                            <div className="flex gap-2">
+                                                {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(color => (
+                                                    <button
+                                                        key={color}
+                                                        onClick={() => setSubtitleColor(color)}
+                                                        className={`w-9 h-9 rounded-full transition-transform duration-200 ${subtitleColor === color ? 'scale-110 ring-2 ring-offset-2 ring-offset-gray-900 ring-indigo-500' : 'hover:scale-105'}`}
+                                                        style={{ backgroundColor: color }}
+                                                        title={color}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                        
+                                        <div 
+                                            ref={previewContainerRef}
+                                            className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none mt-4"
+                                            style={{ aspectRatio: '16/9' }}
+                                            onClick={() => setSelectedElement(null)}
+                                        >
+                                            <video 
+                                                ref={videoPreviewRef}
+                                                src={videoPreviewUrl || undefined}
+                                                className="w-full h-full object-contain pointer-events-none opacity-50"
+                                                style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }}
+                                                muted playsInline
+                                                onLoadedMetadata={updateVideoRect}
+                                            />
+                                            <div
+                                                onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
+                                                onClick={(e) => { e.stopPropagation(); setSelectedElement('subtitle'); }}
+                                                className={`absolute border-2 cursor-move flex items-center justify-center overflow-hidden ${selectedElement === 'subtitle' ? 'border-indigo-500 bg-indigo-500/20 z-20' : 'border-gray-500 border-dashed bg-gray-500/10 z-10'}`}
+                                                style={{
+                                                    left: `${videoRect.left + (subtitlePosition.xPct / 100) * videoRect.width}px`,
+                                                    top: `${videoRect.top + (subtitlePosition.yPct / 100) * videoRect.height}px`,
+                                                    width: `${(subtitlePosition.widthPct / 100) * videoRect.width}px`,
+                                                    height: `${(subtitlePosition.heightPct / 100) * videoRect.height}px`,
+                                                }}
+                                            >
+                                                <div className="text-center font-bold px-2 pointer-events-none w-full" style={{ color: subtitleColor, fontSize: `${Math.max(10, (subtitlePosition.heightPct / 100) * videoRect.height * 0.5)}px`, textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}>
+                                                    စာတန်းထိုး နေရာ
+                                                </div>
+                                                {selectedElement === 'subtitle' && (
+                                                    <>
+                                                        <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} />
+                                                        <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} />
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
+                        {currentStep === 4 && (
+                            <div className="space-y-6 max-w-2xl mx-auto w-full">
                                 <div>
                                     <label className="block text-white font-bold text-sm mb-2">အသံရွေးချယ်ရန်</label>
                                     <select 
@@ -533,156 +745,32 @@ export const AIRecapTool: React.FC = () => {
                                     </div>
                                 )}
                             </div>
-                            
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between bg-gray-950/60 border border-gray-800 rounded-2xl px-4 py-3 mb-2">
-                                    <label htmlFor="subtitleCheck" className="text-sm font-bold text-gray-300 cursor-pointer">စာတန်းထိုးမည်</label>
-                                    <input type="checkbox" id="subtitleCheck" checked={burnSubtitles} onChange={e => setBurnSubtitles(e.target.checked)} className="w-5 h-5 rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500 cursor-pointer" />
-                                </div>
-                                {burnSubtitles && (
-                                    <div>
-                                        <label className="block text-white font-bold text-sm mb-2">Subtitle Color</label>
-                                        <div className="flex gap-2">
-                                            {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(color => (
-                                                <button
-                                                    key={color}
-                                                    onClick={() => setSubtitleColor(color)}
-                                                    className={`w-9 h-9 rounded-full transition-transform duration-200 ${subtitleColor === color ? 'scale-110 ring-2 ring-offset-2 ring-offset-gray-900 ring-indigo-500' : 'hover:scale-105'}`}
-                                                    style={{ backgroundColor: color }}
-                                                    title={color}
-                                                />
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        
-                        <div className="pt-4 border-t border-gray-800">
-                            <div className="flex justify-between items-center mb-4">
-                                <label className="text-white font-bold text-sm">Preview & Adjustments</label>
-                                <button 
-                                    onClick={() => {
-                                        if (blurBoxes.length >= 3) return;
-                                        setBlurBoxes([...blurBoxes, { id: 'box_' + Date.now(), xPct: 25, yPct: 15, widthPct: 50, heightPct: 15, strength: 15 }]);
-                                        setSelectedElement('box_' + Date.now());
-                                    }} 
-                                    disabled={blurBoxes.length >= 3} 
-                                    className="text-xs bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-indigo-400 px-3 py-1.5 rounded-lg font-bold transition-colors"
-                                >
-                                    Add blur box
-                                </button>
-                            </div>
-                            
-                            <div 
-                                ref={previewContainerRef}
-                                className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none"
-                                style={{ aspectRatio: '16/9' }}
-                                onClick={() => setSelectedElement(null)}
-                            >
-                                <div className="absolute top-2 left-2 z-30 bg-black/40 backdrop-blur-sm rounded-lg px-2 py-1 pointer-events-none">
-                                    <span className="text-[10px] uppercase font-bold text-gray-300 tracking-wider">Preview</span>
-                                </div>
-                                <video 
-                                    ref={videoPreviewRef}
-                                    src={videoPreviewUrl || undefined}
-                                    className="w-full h-full object-contain pointer-events-none"
-                                    muted playsInline
-                                    onLoadedMetadata={updateVideoRect}
-                                />
-                                
-                                {blurBoxes.map((box, index) => (
-                                    <div
-                                        key={box.id}
-                                        onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
-                                        onClick={(e) => { e.stopPropagation(); setSelectedElement(box.id); }}
-                                        className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-amber-500 bg-amber-500/10 z-20' : 'border-amber-600/60 border-dashed bg-amber-500/5 z-10'}`}
-                                        style={{
-                                            left: `${videoRect.left + (box.xPct / 100) * videoRect.width}px`,
-                                            top: `${videoRect.top + (box.yPct / 100) * videoRect.height}px`,
-                                            width: `${(box.widthPct / 100) * videoRect.width}px`,
-                                            height: `${(box.heightPct / 100) * videoRect.height}px`,
-                                        }}
-                                    >
-                                        <div className="absolute top-1 left-1 bg-amber-500/80 text-black text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none">Blur #{index + 1}</div>
-                                        {selectedElement === box.id && (
-                                            <>
-                                                <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
-                                                <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
-                                            </>
-                                        )}
-                                    </div>
-                                ))}
-                                
-                                {burnSubtitles && (
-                                    <div
-                                        onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')}
-                                        onClick={(e) => { e.stopPropagation(); setSelectedElement('subtitle'); }}
-                                        className={`absolute border-2 cursor-move flex items-center justify-center overflow-hidden ${selectedElement === 'subtitle' ? 'border-indigo-500 bg-indigo-500/20 z-20' : 'border-gray-500 border-dashed bg-gray-500/10 z-10'}`}
-                                        style={{
-                                            left: `${videoRect.left + (subtitlePosition.xPct / 100) * videoRect.width}px`,
-                                            top: `${videoRect.top + (subtitlePosition.yPct / 100) * videoRect.height}px`,
-                                            width: `${(subtitlePosition.widthPct / 100) * videoRect.width}px`,
-                                            height: `${(subtitlePosition.heightPct / 100) * videoRect.height}px`,
-                                        }}
-                                    >
-                                        <div className="text-center font-bold px-2 pointer-events-none w-full" style={{ color: subtitleColor, fontSize: `${Math.max(10, (subtitlePosition.heightPct / 100) * videoRect.height * 0.5)}px`, textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}>
-                                            စာတန်းထိုး နေရာ
-                                        </div>
-                                        {selectedElement === 'subtitle' && (
-                                            <>
-                                                <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} />
-                                                <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-500" onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} />
-                                            </>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                            
-                            <RecapVideoSeekBar videoRef={videoPreviewRef} />
-                            
-                            {selectedElement && selectedElement.startsWith('box_') && (
-                                <div className="mt-4 p-4 bg-gray-950 rounded-xl border border-gray-800 flex items-center justify-between">
-                                    <div className="flex-1 max-w-xs space-y-2">
-                                        <div className="flex justify-between text-xs text-gray-400 font-bold">
-                                            <span>Blur Strength</span>
-                                            <span>{blurBoxes.find(b => b.id === selectedElement)?.strength || 15}</span>
-                                        </div>
-                                        <input 
-                                            type="range" min="1" max="30" 
-                                            value={blurBoxes.find(b => b.id === selectedElement)?.strength || 15}
-                                            onChange={(e) => setBlurBoxes(blurBoxes.map(b => b.id === selectedElement ? { ...b, strength: parseInt(e.target.value) } : b))}
-                                            className="w-full accent-indigo-500"
-                                        />
-                                    </div>
-                                    <button 
-                                        onClick={() => { setBlurBoxes(blurBoxes.filter(b => b.id !== selectedElement)); setSelectedElement(null); }}
-                                        className="bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-300 px-4 py-2 rounded-lg text-sm font-bold transition-colors border border-red-900/50"
-                                    >
-                                        Remove Box
-                                    </button>
-                                </div>
-                            )}
-                            
-                            <div className="mt-6">
-                                <label className="block text-white font-bold text-sm mb-2">Watermark (ရေစတန်း)</label>
-                                <input 
-                                    type="text" 
-                                    value={watermarkText} 
-                                    onChange={(e) => setWatermarkText(e.target.value)} 
-                                    className="w-full bg-gray-950 border border-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors"
-                                />
-                                <p className="text-gray-500 text-xs mt-2">ဗီဒီယိုပေါ်တွင် ရွေ့လျားနေမည့် စာသားထည့်ရန်</p>
-                            </div>
-                        </div>
-                        
-                        <div className="pt-4 border-t border-gray-800 flex justify-end">
+                        )}
+
+                        <div className="pt-6 border-t border-gray-800/50 flex justify-between items-center mt-auto">
                             <button
-                                onClick={generateVideo}
-                                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-600 text-white px-8 py-3 rounded-xl font-bold transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-indigo-900/20"
+                                onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
+                                disabled={currentStep === 1}
+                                className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-bold text-sm transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                             >
-                                Generate Video
+                                Back
                             </button>
+                            
+                            {currentStep < 4 ? (
+                                <button
+                                    onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-2.5 rounded-xl font-bold text-sm transition-all shadow-lg shadow-indigo-900/20"
+                                >
+                                    Next Step
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={generateVideo}
+                                    className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-600 text-white px-8 py-2.5 rounded-xl font-bold text-sm transition-all shadow-lg shadow-indigo-900/30 transform hover:scale-[1.02] active:scale-[0.98]"
+                                >
+                                    Generate Video
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
