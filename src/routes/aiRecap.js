@@ -138,6 +138,97 @@ async function trimSilence(sourceVideoPath, outputPath, workDir) {
     if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
 }
 
+async function generateNarrationScript(cleanedVideoPath) {
+    const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is missing");
+    }
+    const ai = new GoogleGenAI({ apiKey });
+
+    console.log(`[AI Recap] Uploading ${cleanedVideoPath} to Gemini...`);
+    let fileUpload = await ai.files.upload({
+        file: cleanedVideoPath,
+        config: { mimeType: 'video/mp4' },
+    });
+    console.log(`[AI Recap] File uploaded. URI: ${fileUpload.uri}, Name: ${fileUpload.name}`);
+
+    let state = fileUpload.state;
+    let attempts = 0;
+    while (state === 'PROCESSING' && attempts < 60) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        fileUpload = await ai.files.get({ name: fileUpload.name });
+        state = fileUpload.state;
+        console.log(`[AI Recap] File state: ${state}`);
+        attempts++;
+    }
+
+    if (state !== 'ACTIVE') {
+        throw new Error(`Gemini file processing failed or timed out. Final state: ${state}`);
+    }
+
+    const prompt = `You are writing a full Burmese movie recap script. Watch the entire video and provide a sequential narration script that covers the whole plot from start to finish.
+
+REQUIREMENTS:
+1. Output ONLY a JSON array of segment objects. No markdown formatting or markdown code fences (\`\`\`).
+2. Each segment must have: "start" (number, seconds), "end" (number, seconds), and "narration_text" (string, Burmese).
+3. The segments must be sequential, cover the video from 0s to the end without overlapping, and be in ascending chronological order.
+4. The narration_text MUST be entirely in natural-sounding Burmese.
+5. The start and end values are strictly for subtitle timing and narration synchronization. You are narrating the exact video provided. Do NOT write instructions to skip, re-cut, or re-order scenes.`;
+
+    console.log(`[AI Recap] Calling generateContent for narration script...`);
+    const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: [
+            {
+                role: "user",
+                parts: [
+                    { fileData: { fileUri: fileUpload.uri, mimeType: fileUpload.mimeType } },
+                    { text: prompt }
+                ]
+            }
+        ],
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: "ARRAY",
+                items: {
+                    type: "OBJECT",
+                    properties: {
+                        start: { type: "NUMBER" },
+                        end: { type: "NUMBER" },
+                        narration_text: { type: "STRING" }
+                    },
+                    required: ["start", "end", "narration_text"]
+                }
+            }
+        }
+    });
+
+    try {
+        await ai.files.delete({ name: fileUpload.name });
+        console.log(`[AI Recap] Deleted file ${fileUpload.name} from Gemini`);
+    } catch (e) {
+        console.error("[AI Recap] Failed to delete file from Gemini:", e);
+    }
+
+    if (!response.text) {
+        throw new Error("Empty response from Gemini.");
+    }
+    
+    let parsed;
+    try {
+        parsed = JSON.parse(response.text);
+    } catch (e) {
+        throw new Error(`Failed to parse Gemini response as JSON. Response was: ${response.text}`);
+    }
+    
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("Gemini returned an empty or invalid array.");
+    }
+    
+    return parsed;
+}
+
 router.post('/analyze', authMiddleware, upload.single('video'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No video file provided' });
@@ -166,8 +257,12 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
             await trimSilence(sourceVideoPath, cleanedVideoPath, sourcesDir);
             console.log(`[AI Recap] Silence trim complete for job ${jobId}.`);
 
+            console.log(`[AI Recap] Generating narration script for job ${jobId}...`);
+            const scenes = await generateNarrationScript(cleanedVideoPath);
+            console.log(`[AI Recap] Narration script generated successfully.`);
+
             const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`);
-            stmt.run(JSON.stringify({ trimmed: true }), cleanedVideoPath, jobId);
+            stmt.run(JSON.stringify({ scenes }), cleanedVideoPath, jobId);
         } catch (e) {
             console.error("[AI Recap] Job failed", e);
             const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'error', error = ? WHERE id = ?`);
@@ -189,7 +284,6 @@ router.get('/status/:jobId', authMiddleware, (req, res) => {
     }
 });
 
-
 router.post('/generate/:jobId', authMiddleware, async (req, res) => {
     try {
         const jobId = req.params.jobId;
@@ -208,8 +302,8 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
 
         const row = db.prepare(`SELECT * FROM ai_recap_jobs WHERE id = ? AND userId = ?`).get(jobId, req.user.id);
         
-        if (!row || row.status !== 'done' || !row.resultJson || !row.sourceVideoPath) {
-            return res.status(400).json({ error: 'Job not ready for generation' });
+        if (!row || row.status !== 'done' || !row.resultJson || !row.cleanedVideoPath || !fs.existsSync(row.cleanedVideoPath)) {
+            return res.status(400).json({ error: 'Job not ready for generation or cleaned video missing' });
         }
 
         db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'generating' WHERE id = ?`).run(jobId);
@@ -221,6 +315,10 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 const result = JSON.parse(row.resultJson);
                 const scenes = result.scenes || [];
                 
+                if (scenes.length === 0) {
+                    throw new Error("No scenes found to generate");
+                }
+
                 const sceneNarration = scenes.map(s => ({
                     narration_text: s.narration_text,
                     scene_start: s.start,
@@ -241,87 +339,70 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                     timeline = JSON.parse(fs.readFileSync(authoritativeTimelinePath, 'utf8'));
                 }
                 
-                // Cut scenes and concat
-                const concatListPath = path.join(sourcesDir, jobId + '_concat.txt');
-                let concatContent = '';
-                const tempVideoFiles = [];
-                
+                // Split narration into per-scene wavs
+                const narrationClipPaths = [];
                 for (let i = 0; i < scenes.length; i++) {
-                    const s = scenes[i];
-                    const outPath = path.join(sourcesDir, jobId + '_scene_' + i + '.mp4');
-                    tempVideoFiles.push(outPath);
+                    const sub = timeline[i] || {};
+                    const outPath = path.join(sourcesDir, `${jobId}_narr_${i}.wav`);
+                    narrationClipPaths.push(outPath);
                     
-                    let target_dur = s.end - s.start;
-                    if (timeline[i] && timeline[i].final_dur) {
-                        target_dur = timeline[i].final_dur;
-                    }
+                    const start = sub.final_audio_start || 0;
+                    const end = sub.final_audio_end || 0;
                     
-                    const desired_orig_dur = s.end - s.start;
-                    let speed = 1.0;
-                    if (desired_orig_dur > 0.1 && target_dur > 0.1) {
-                        speed = desired_orig_dur / target_dur;
-                        if (speed < 0.35) speed = 0.35;
-                        if (speed > 100.0) speed = 100.0;
-                    }
-                    
-                    const filter = `[0:v]setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur.toFixed(3)},fps=30,setsar=1,format=yuv420p[v]`;
-
-                    // run ffmpeg to cut
                     await runFFmpeg([
                         '-y',
-                        '-ss', String(s.start),
-                        '-t', String(desired_orig_dur),
-                        '-i', row.sourceVideoPath,
-                        '-filter_complex', filter,
-                        '-map', '[v]',
-                        '-c:v', 'libx264',
-                        '-preset', 'veryfast',
-                        '-crf', '23',
-                        '-an',
+                        '-ss', String(start),
+                        '-to', String(end),
+                        '-i', cachePath,
+                        '-c:a', 'copy',
                         outPath
                     ], sourcesDir, () => {});
-                    
-                    concatContent += `file '${outPath}'\n`;
                 }
                 
-                fs.writeFileSync(concatListPath, concatContent);
+                // Build duck-and-overlay filter_complex
+                let filterGraph = '';
+                let lastDuck = '0:a';
                 
-                const concatVideoPath = path.join(sourcesDir, jobId + '_concat.mp4');
-                await runFFmpeg([
-                    '-y',
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-i', concatListPath,
-                    '-c', 'copy',
-                    concatVideoPath
-                ], sourcesDir, () => {});
+                for (let i = 0; i < scenes.length; i++) {
+                    const sub = timeline[i] || {};
+                    const sStart = scenes[i].start;
+                    const sEnd = sStart + (sub.final_dur || 0);
+                    const nextDuck = `duck${i}`;
+                    
+                    filterGraph += `[${lastDuck}]volume=0.15:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
+                    lastDuck = nextDuck;
+                }
                 
-                // Mux with audio
-                await runFFmpeg([
-                    '-y',
-                    '-i', concatVideoPath,
-                    '-i', cachePath,
+                filterGraph += `[${lastDuck}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[duckfinal];`;
+                
+                let mixInputs = `[duckfinal]`;
+                for (let i = 0; i < scenes.length; i++) {
+                    const delayMs = Math.round(scenes[i].start * 1000);
+                    filterGraph += `[${i+1}:a]adelay=delays=${delayMs}:all=1[aud${i}_delayed];`;
+                    filterGraph += `[aud${i}_delayed]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aud${i}];`;
+                    mixInputs += `[aud${i}]`;
+                }
+                
+                const totalInputs = scenes.length + 1;
+                filterGraph += `${mixInputs}amix=inputs=${totalInputs}:duration=first:dropout_transition=0[aout]`;
+                
+                // Run single ffmpeg command for audio overlay
+                const overlayArgs = ['-y', '-i', row.cleanedVideoPath];
+                for (const p of narrationClipPaths) {
+                    overlayArgs.push('-i', p);
+                }
+                
+                overlayArgs.push(
+                    '-filter_complex', filterGraph,
+                    '-map', '0:v:0',
+                    '-map', '[aout]',
                     '-c:v', 'copy',
                     '-c:a', 'aac',
-                    '-shortest',
                     finalVideoPath
-                ], sourcesDir, () => {});
+                );
                 
-                // Get video dimensions for passes
-                let vidW = 1080;
-                let vidH = 1920;
-                try {
-                    const probeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${finalVideoPath}"`;
-                    const out = execSync(probeCmd).toString().trim();
-                    if (out && out.includes('x')) {
-                        const parts = out.split('x');
-                        vidW = parseInt(parts[0], 10);
-                        vidH = parseInt(parts[1], 10);
-                    }
-                } catch(e) {
-                    console.log("[AI Recap] ffprobe failed to get dimensions, using default 1080x1920");
-                }
-
+                await runFFmpeg(overlayArgs, sourcesDir, () => {});
+                
                 // BLUR PASS
                 if (Array.isArray(blurBoxes) && blurBoxes.length > 0) {
                     try {
@@ -330,6 +411,11 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                         let lastMap = '[0:v]';
                         let splitInputs = '';
                         
+                        const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                        const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                        const vidW = parseInt(execSync(vidWCmd).toString().trim());
+                        const vidH = parseInt(execSync(vidHCmd).toString().trim());
+
                         for (let i = 0; i < blurBoxes.length; i++) {
                             const box = blurBoxes[i];
                             const x = Math.round((box.xPct / 100) * vidW);
@@ -437,6 +523,11 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                         const subTmpPath = path.join(sourcesDir, `${jobId}_subburn.mp4`);
                         const pos = subtitlePosition;
                         
+                        const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                        const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                        const vidW = parseInt(execSync(vidWCmd).toString().trim());
+                        const vidH = parseInt(execSync(vidHCmd).toString().trim());
+                        
                         const marginL = Math.round((pos.xPct / 100) * vidW);
                         const marginR = Math.round(vidW - ((pos.xPct + pos.widthPct) / 100) * vidW);
                         const marginV = Math.round((pos.yPct / 100) * vidH);
@@ -461,9 +552,11 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                         
                         const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Padauk,${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
                         
-                        const assLines = timeline.map(sub => {
-                            const startStr = toAssTime(sub.final_audio_start || 0);
-                            const endStr = toAssTime(sub.final_audio_end || 0);
+                        const assLines = timeline.map((sub, i) => {
+                            const sStart = scenes[i]?.start || 0;
+                            const sEnd = sStart + (sub.final_dur || 0);
+                            const startStr = toAssTime(sStart);
+                            const endStr = toAssTime(sEnd);
                             const assText = (sub.text || '').replace(/\n/g, '\\N');
                             return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
                         });
@@ -497,19 +590,17 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 }
                 
                 // Cleanup temps
-                for (const tempFile of tempVideoFiles) {
-                    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+                for (const p of narrationClipPaths) {
+                    if (fs.existsSync(p)) fs.unlinkSync(p);
                 }
-                if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
-                if (fs.existsSync(concatVideoPath)) fs.unlinkSync(concatVideoPath);
+                if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+                if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
                 
                 db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ? WHERE id = ?`).run(finalVideoPath, jobId);
                 
-                // Now delete the source video
                 if (fs.existsSync(row.sourceVideoPath)) {
                     fs.unlinkSync(row.sourceVideoPath);
                 }
-
             } catch (err) {
                 console.error("[AI Recap] Generation failed", err);
                 db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ? WHERE id = ?`).run(err.message || "Generation error", jobId);
@@ -534,4 +625,3 @@ router.get('/download/:jobId', authMiddleware, (req, res) => {
 });
 
 export default router;
-
