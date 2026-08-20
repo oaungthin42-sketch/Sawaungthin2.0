@@ -7,8 +7,8 @@ import { getSetting } from '../services/settings.js';
 import db from '../services/db.js';
 import { authMiddleware } from './auth.js';
 import { GoogleGenAI } from '@google/genai';
-import { generateNarrationTTS } from '../ai/index.js';
-import { runFFmpeg } from '../ffmpeg/index.js';
+import { generateNarrationTTS, transcribeWav } from '../ai/index.js';
+import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
 
 const router = express.Router();
 
@@ -30,79 +30,86 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-function detectSilenceIntervals(videoPath) {
-    const cmd = `ffmpeg -i "${videoPath}" -af silencedetect=noise=-30dB:d=1.0 -f null - 2>&1`;
-    let output = '';
-    try {
-        output = execSync(cmd, { maxBuffer: 1024 * 1024 * 50 }).toString();
-    } catch (e) {
-        output = (e.stdout ? e.stdout.toString() : '') + (e.stderr ? e.stderr.toString() : '');
-    }
-    const intervals = [];
-    const startRegex = /silence_start:\s*([\d.]+)/g;
-    const endRegex = /silence_end:\s*([\d.]+)/g;
-    let starts = [];
-    let ends = [];
-    let m;
-    while ((m = startRegex.exec(output)) !== null) starts.push(parseFloat(m[1]));
-    while ((m = endRegex.exec(output)) !== null) ends.push(parseFloat(m[1]));
-    for (let i = 0; i < Math.min(starts.length, ends.length); i++) {
-        intervals.push({ start: starts[i], end: ends[i] });
-    }
-    return intervals;
-}
-
 async function trimSilence(sourceVideoPath, outputPath, workDir) {
-    const SILENCE_THRESHOLD = 3.0;
-    const KEEP_BUFFER = 1.2;
-
     let totalDuration = 0;
     try {
         const durCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${sourceVideoPath}"`;
         totalDuration = parseFloat(execSync(durCmd).toString().trim());
     } catch (e) {
-        console.error("[AI Recap] Failed to get source duration, skipping silence trim", e);
+        console.error("[AI Recap] Failed to get source duration, skipping trim", e);
         fs.copyFileSync(sourceVideoPath, outputPath);
         return;
     }
 
-    let rawIntervals = [];
+    let speechSegments = [];
+    let tempWavPath = path.join(workDir, `temp_audio_${Date.now()}.wav`);
     try {
-        rawIntervals = detectSilenceIntervals(sourceVideoPath);
+        await extractWav(sourceVideoPath, tempWavPath);
+        const segments = await transcribeWav(tempWavPath, null);
+        if (segments && Array.isArray(segments)) {
+            speechSegments = segments;
+        }
     } catch (e) {
-        console.error("[AI Recap] Silence detection failed, skipping trim", e);
+        console.error("[AI Recap] Speech detection failed, skipping trim", e);
+    } finally {
+        if (fs.existsSync(tempWavPath)) fs.unlinkSync(tempWavPath);
     }
 
-    const longSilences = rawIntervals.filter(iv => (iv.end - iv.start) > SILENCE_THRESHOLD);
+    if (speechSegments.length === 0) {
+        fs.copyFileSync(sourceVideoPath, outputPath);
+        return;
+    }
 
-    let cuts = [];
-    for (const iv of longSilences) {
-        const cutStart = iv.start + KEEP_BUFFER;
-        const cutEnd = iv.end;
-        if (cutEnd > cutStart) {
-            cuts.push({ cutStart, cutEnd });
+    // 1. Sort segments by start time
+    speechSegments.sort((a, b) => a.timestamp[0] - b.timestamp[0]);
+
+    // 2. Merge consecutive segments if the gap is less than 1.5 seconds
+    let merged = [];
+    for (const seg of speechSegments) {
+        const s = seg.timestamp[0];
+        const e = seg.timestamp[1];
+        if (merged.length === 0) {
+            merged.push({ start: s, end: e });
+        } else {
+            const last = merged[merged.length - 1];
+            if (s - last.end < 1.5) {
+                last.end = Math.max(last.end, e);
+            } else {
+                merged.push({ start: s, end: e });
+            }
         }
     }
 
-    let keepSegments = [];
-    let cursor = 0;
-    for (const cut of cuts) {
-        if (cut.cutStart > cursor) {
-            keepSegments.push({ start: cursor, end: cut.cutStart });
+    // 3. Expand each kept range by 0.4s buffer and clamp
+    for (const m of merged) {
+        m.start = Math.max(0, m.start - 0.4);
+        m.end = Math.min(totalDuration, m.end + 0.4);
+    }
+
+    // 4. Merge any overlapping ranges after padding
+    let finalMerged = [];
+    for (const m of merged) {
+        if (finalMerged.length === 0) {
+            finalMerged.push(m);
+        } else {
+            const last = finalMerged[finalMerged.length - 1];
+            if (m.start <= last.end) {
+                last.end = Math.max(last.end, m.end);
+            } else {
+                finalMerged.push(m);
+            }
         }
-        cursor = Math.max(cursor, cut.cutEnd);
     }
-    if (cursor < totalDuration) {
-        keepSegments.push({ start: cursor, end: totalDuration });
-    }
-    keepSegments = keepSegments.filter(s => (s.end - s.start) > 0.1);
+
+    // 5. Drop ranges shorter than 0.1s
+    let keepSegments = finalMerged.filter(s => (s.end - s.start) > 0.1);
 
     if (keepSegments.length === 0) {
         fs.copyFileSync(sourceVideoPath, outputPath);
         return;
     }
 
-    console.log(`[AI Recap] Silence trim: ${longSilences.length} long silences found, ${keepSegments.length} segments kept.`);
+    console.log(`[AI Recap] Speech-based trim: ${speechSegments.length} speech segments found -> ${keepSegments.length} merged/padded segments kept.`);
 
     const segmentFiles = [];
     for (let i = 0; i < keepSegments.length; i++) {
@@ -372,7 +379,7 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                     const sEnd = sStart + (sub.final_dur || 0);
                     const nextDuck = `duck${i}`;
                     
-                    filterGraph += `[${lastDuck}]volume=0.15:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
+                    filterGraph += `[${lastDuck}]volume=0.03:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
                     lastDuck = nextDuck;
                 }
                 
