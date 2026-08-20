@@ -537,8 +537,7 @@ export const AIRecapTool: React.FC = () => {
                                 </div>
                                 <div 
                                     ref={previewContainerRef}
-                                    className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none max-w-2xl mx-auto"
-                                    style={{ aspectRatio: '16/9' }}
+                                    className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none max-w-2xl mx-auto group"
                                     onClick={() => setSelectedElement(null)}
                                 >
                                     <video 
@@ -575,14 +574,13 @@ export const AIRecapTool: React.FC = () => {
 
                                 <div 
                                     ref={previewContainerRef}
-                                    className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none"
-                                    style={{ aspectRatio: '16/9' }}
+                                    className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none group mx-auto"
                                     onClick={() => setSelectedElement(null)}
                                 >
                                     <video 
                                         ref={videoPreviewRef}
                                         src={videoPreviewUrl || undefined}
-                                        className="w-full h-full object-contain pointer-events-none opacity-50"
+                                        className="w-full h-full object-contain pointer-events-none"
                                         style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }}
                                         muted playsInline
                                         onLoadedMetadata={updateVideoRect}
@@ -593,19 +591,21 @@ export const AIRecapTool: React.FC = () => {
                                             key={box.id}
                                             onPointerDown={(e) => handlePointerDown(e, box.id, 'move')}
                                             onClick={(e) => { e.stopPropagation(); setSelectedElement(box.id); }}
-                                            className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-amber-500 bg-amber-500/10 z-20' : 'border-amber-600/60 border-dashed bg-amber-500/5 z-10'}`}
+                                            className={`absolute border-2 cursor-move flex items-center justify-center group ${selectedElement === box.id ? 'border-indigo-400 z-20' : 'border-gray-400 border-dashed z-10'}`}
                                             style={{
                                                 left: `${videoRect.left + (box.xPct / 100) * videoRect.width}px`,
                                                 top: `${videoRect.top + (box.yPct / 100) * videoRect.height}px`,
                                                 width: `${(box.widthPct / 100) * videoRect.width}px`,
                                                 height: `${(box.heightPct / 100) * videoRect.height}px`,
+                                                backdropFilter: `blur(${box.strength * 1.2}px)`,
+                                                WebkitBackdropFilter: `blur(${box.strength * 1.2}px)`
                                             }}
                                         >
-                                            <div className="absolute top-1 left-1 bg-amber-500/80 text-black text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none">Blur #{index + 1}</div>
+                                            <div className="absolute top-1 left-1 text-white text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none bg-black/50">Blur #{index + 1}</div>
                                             {selectedElement === box.id && (
                                                 <>
-                                                    <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
-                                                    <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-amber-500" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
+                                                    <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-400" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
+                                                    <div className="absolute -bottom-2 -right-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-400" onPointerDown={(e) => handlePointerDown(e, box.id, 'br')} />
                                                 </>
                                             )}
                                         </div>
@@ -673,14 +673,13 @@ export const AIRecapTool: React.FC = () => {
                                         
                                         <div 
                                             ref={previewContainerRef}
-                                            className="relative w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none mt-4"
-                                            style={{ aspectRatio: '16/9' }}
+                                            className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800/80 select-none touch-none mt-4 group mx-auto"
                                             onClick={() => setSelectedElement(null)}
                                         >
                                             <video 
                                                 ref={videoPreviewRef}
                                                 src={videoPreviewUrl || undefined}
-                                                className="w-full h-full object-contain pointer-events-none opacity-50"
+                                                className="w-full h-full object-contain pointer-events-none"
                                                 style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }}
                                                 muted playsInline
                                                 onLoadedMetadata={updateVideoRect}
