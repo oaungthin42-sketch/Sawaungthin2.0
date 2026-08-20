@@ -9,6 +9,7 @@ import { authMiddleware } from './auth.js';
 import { GoogleGenAI } from '@google/genai';
 import { generateNarrationTTS, transcribeWav } from '../ai/index.js';
 import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
+import { getTranslationSystemInstruction } from '../ai/translation.js';
 
 const router = express.Router();
 
@@ -173,16 +174,24 @@ async function generateNarrationScript(cleanedVideoPath) {
         throw new Error(`Gemini file processing failed or timed out. Final state: ${state}`);
     }
 
-    const prompt = `You are writing a full Burmese movie recap script. Watch the entire video and provide a sequential narration script that covers the whole plot from start to finish.
+    const styleGuide = getTranslationSystemInstruction();
+    const prompt = `${styleGuide}
 
-REQUIREMENTS:
+---
+
+IMPORTANT — READ CAREFULLY, THIS OVERRIDES THE TASK AND OUTPUT FORMAT DESCRIBED ABOVE:
+
+All the style and translation rules above still apply to this task. But ignore the "Input format" / "Output format" JSON example described above — this task uses a different format, specified below.
+
+YOUR TASK: Watch and listen to the attached video carefully. It has already been edited to contain ONLY the scenes where characters are speaking — non-speaking portions have already been removed. Transcribe and translate ONLY the actual dialogue/lines that characters literally speak in the audio, translated into natural spoken Burmese following every style rule above.
+
+Do NOT act as a narrator. Do NOT write a third-person plot summary, exposition, or explanation of what is happening on screen (e.g. do not write things like "In this scene, the character decides to..." or "Meanwhile, at the village..."). Only translate the literal words the characters say — the same way you would for dubbing a movie, not summarizing it.
+
+REQUIRED OUTPUT FORMAT:
 1. Output ONLY a JSON array of segment objects. No markdown formatting or markdown code fences (\`\`\`).
-2. Each segment must have: "start" (number, seconds), "end" (number, seconds), and "narration_text" (string, Burmese).
-3. The segments must be sequential, cover the video from 0s to the end without overlapping, and be in ascending chronological order.
-4. The narration_text MUST be entirely in natural-sounding Burmese.
-5. The start and end values are strictly for subtitle timing and narration synchronization. You are narrating the exact video provided. Do NOT write instructions to skip, re-cut, or re-order scenes.
-6. Character names and proper nouns: identify any character names or proper nouns and render them as natural Burmese phonetic transliteration (e.g. "John" -> "ဂျွန်", "Maria" -> "မာရီယာ") rather than leaving them in Latin script. Use the SAME transliteration consistently for the same character every time they are mentioned across the entire script.
-7. ZERO ENGLISH CHARACTERS: narration_text must be written 100% in Burmese script — no English letters, Latin acronyms, or digits. Numbers must ALWAYS be fully spelled out as Burmese words, NEVER as Arabic numerals (0-9) or Burmese numerals (၀-၉), no matter how large: 500 -> "ငါးရာ", 1000 -> "တစ်ထောင်", 10000 -> "တစ်သောင်း", 1500 -> "တစ်ထောင့်ငါးရာ". This applies to ages, dates, times, counts, and any other number mentioned in the narration.`;
+2. Each segment must have: "start" (number, seconds), "end" (number, seconds), and "narration_text" (string, Burmese) — narration_text is the Burmese translation of the dialogue spoken during that time range.
+3. Segments must be sequential, cover the video from 0s to the end without overlapping, and be in ascending chronological order. Each segment should correspond to a natural spoken line or short group of consecutive lines — do not merge the entire video into one giant segment, and do not invent a segment for a time range where nobody is actually speaking.
+4. The start and end values are strictly for subtitle timing and narration synchronization. You are translating the exact video provided, in its exact chronological order. Do NOT write instructions to skip, re-cut, or re-order scenes.`;
 
     console.log(`[AI Recap] Calling generateContent for narration script...`);
     const response = await ai.models.generateContent({
