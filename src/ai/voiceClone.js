@@ -2,8 +2,139 @@ import PQueue from 'p-queue';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import db from '../services/db.js';
 import { getDuration } from '../ffmpeg/index.js';
+
+// --- OpenVoice lazy start / idle shutdown (moved here from server.js) ---
+// The service used to be spawned once at server boot and left running forever.
+// It is now spawned on first use and torn down after a period of inactivity
+// to free the RAM/PyTorch model when nobody is voice-cloning.
+let openvoiceProcess = null;
+let restartCount = 0;
+let lastRestart = Date.now();
+let lastUsedAt = 0;
+let idleWatcherStarted = false;
+let startingPromise = null;
+
+const IDLE_TIMEOUT_MS = parseInt(process.env.VOICE_CLONE_IDLE_TIMEOUT_MS, 10) || 300000;
+
+function spawnOpenVoiceProcess() {
+    return new Promise(async (resolve) => {
+        const { spawn } = await import('child_process');
+        const pythonBin = process.env.PYTHON_BIN || (process.env.NODE_ENV === 'production' ? '/opt/venv/bin/python3' : 'python3');
+        const pyScript = path.join(process.cwd(), 'src', 'ai', 'openvoice_service.py');
+        console.log(`[OpenVoice] Starting service on-demand on port ${process.env.VOICE_CLONE_PORT || '5001'} using ${pythonBin}`);
+
+        const proc = spawn(pythonBin, [pyScript], {
+            env: {
+                ...process.env,
+                VOICE_CLONE_PORT: process.env.VOICE_CLONE_PORT || '5001'
+            }
+        });
+
+        openvoiceProcess = proc;
+
+        proc.stdout.on('data', (data) => {
+            console.log(`[OpenVoice Service STDOUT] ${data.toString().trim()}`);
+        });
+
+        proc.stderr.on('data', (data) => {
+            console.error(`[OpenVoice Service STDERR] ${data.toString().trim()}`);
+        });
+
+        proc.on('close', (code, signal) => {
+            console.log(`[OpenVoice Service] Process exited with code ${code} and signal ${signal}`);
+            if (openvoiceProcess === proc) openvoiceProcess = null;
+
+            if (code === 0) {
+                console.log(`[OpenVoice] Service gracefully disabled or exited cleanly. Not restarting.`);
+                return;
+            }
+
+            if (signal === 'SIGTERM') {
+                console.log(`[OpenVoice] Service stopped (idle shutdown or manual SIGTERM). Will restart on next request.`);
+                return;
+            }
+
+            const now = Date.now();
+            if (now - lastRestart > 5 * 60 * 1000) {
+                restartCount = 0;
+                lastRestart = now;
+            }
+
+            if (restartCount >= 5) {
+                console.error(`[OpenVoice] CRITICAL: service crash-looping, giving up auto-restart`);
+                return;
+            }
+
+            restartCount++;
+            console.log(`[OpenVoice] Scheduling restart (${restartCount}/5) in 3000ms...`);
+            setTimeout(() => spawnOpenVoiceProcess(), 3000);
+        });
+
+        resolve(proc);
+    });
+}
+
+async function waitForOpenVoiceReady(timeoutMs = 180000) {
+    const port = process.env.VOICE_CLONE_PORT || '5001';
+    const healthUrl = `http://127.0.0.1:${port}/health`;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (!openvoiceProcess) throw new Error('OpenVoice process is not running');
+        try {
+            const res = await axios.get(healthUrl, { timeout: 3000 });
+            if (res.data && res.data.model_loaded) return true;
+        } catch (e) {
+            // not up yet, keep polling
+        }
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    throw new Error('Timed out waiting for OpenVoice service to become ready');
+}
+
+function startIdleWatcher() {
+    if (idleWatcherStarted) return;
+    idleWatcherStarted = true;
+    setInterval(() => {
+        if (openvoiceProcess && (Date.now() - lastUsedAt) > IDLE_TIMEOUT_MS) {
+            console.log(`[OpenVoice] Idle for over ${IDLE_TIMEOUT_MS}ms, shutting down to free memory.`);
+            const proc = openvoiceProcess;
+            openvoiceProcess = null;
+            proc.kill('SIGTERM');
+        }
+    }, 30000);
+}
+
+/**
+ * Ensures the OpenVoice python microservice is running, spawning it on first
+ * use if needed, and waiting until it has finished loading its models.
+ * No-op if VOICE_CLONE_ENABLED is not 'true'.
+ */
+export async function ensureOpenVoiceService() {
+    if (process.env.VOICE_CLONE_ENABLED !== 'true') return;
+
+    lastUsedAt = Date.now();
+    startIdleWatcher();
+
+    if (openvoiceProcess) {
+        if (startingPromise) await startingPromise;
+        return;
+    }
+
+    startingPromise = (async () => {
+        await spawnOpenVoiceProcess();
+        await waitForOpenVoiceReady();
+    })();
+
+    try {
+        await startingPromise;
+    } finally {
+        startingPromise = null;
+    }
+}
 
 /**
  * Applies voice cloning (timbre conversion) to a list of standardized chunk files.
@@ -28,6 +159,8 @@ export async function applyVoiceClone(chunkWavPaths, referenceVoiceId, options =
             console.error(`[VoiceClone] Reference voice not found in database for ID: ${referenceVoiceId}. Falling back to original EdgeTTS.`);
             return { chunks: chunkWavPaths, fallbackCount: chunkWavPaths.length, totalChunks: chunkWavPaths.length };
         }
+
+        await ensureOpenVoiceService();
 
         const port = process.env.VOICE_CLONE_PORT || '5001';
         const serviceUrl = `http://127.0.0.1:${port}/convert`;

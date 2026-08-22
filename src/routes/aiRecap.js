@@ -634,14 +634,14 @@ router.post('/generate/:jobId', authMiddleware, async (req, res) => {
                 if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
                 if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
                 
-                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ? WHERE id = ?`).run(finalVideoPath, jobId);
+                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
                 
                 if (fs.existsSync(row.sourceVideoPath)) {
                     fs.unlinkSync(row.sourceVideoPath);
                 }
             } catch (err) {
                 console.error("[AI Recap] Generation failed", err);
-                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ? WHERE id = ?`).run(err.message || "Generation error", jobId);
+                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ?, videoCompletedAt = ? WHERE id = ?`).run(err.message || "Generation error", Date.now(), jobId);
             }
         })();
     } catch (e) {

@@ -17,6 +17,7 @@ import { getDuration } from '../ffmpeg/index.js';
 import { computeCreditsForDuration } from '../utils/index.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import ffmpeg from 'fluent-ffmpeg';
+import { ensureOpenVoiceService } from '../ai/voiceClone.js';
 
 function assessReferenceAudioDuration(seconds) {
     if (!seconds) return { status: 'warn', message: 'Could not read audio duration — quality could not be fully checked.' };
@@ -881,6 +882,7 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
             fs.unlinkSync(finalAudioPath);
             return res.status(400).json({ error: quality.message });
         }
+        await ensureOpenVoiceService();
 
         // Call python microservice to extract embedding
         const port = process.env.VOICE_CLONE_PORT || '5001';
@@ -1018,6 +1020,7 @@ router.get('/admin/tau-ab-test', authMiddleware, adminOnly, async (req, res) => 
             // copy the found chunk into the public folder so we can play it
             fs.copyFileSync(chunkPath, path.join(outputDir, 'source_chunk.wav'));
         }
+        await ensureOpenVoiceService();
 
         // Run the 4 conversions
         const taus = [0.20, 0.22, 0.25, 0.30];

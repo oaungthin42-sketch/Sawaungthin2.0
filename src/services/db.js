@@ -146,6 +146,7 @@ try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN sourceVideoPath TEXT`); } ca
 try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN finalVideoPath TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN generationStatus TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN cleanedVideoPath TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN videoCompletedAt INTEGER`); } catch (e) {}
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN useVoiceClone INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN watermarkText TEXT`); } catch (e) {}

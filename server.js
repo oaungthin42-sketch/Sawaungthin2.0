@@ -7,6 +7,7 @@ import apiRoutes from './src/routes/api.js';
 import authRoutes from './src/routes/auth.js';
 import userRoutes from './src/routes/user.js';
 import aiRecapRouter from './src/routes/aiRecap.js';
+import adminDiagnosticsRouter from './src/routes/adminDiagnostics.js';
 import session from 'express-session';
 
 import { initModels } from './src/ai/index.js';
@@ -39,6 +40,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api', apiRoutes);
 app.use('/api/ai-recap', aiRecapRouter);
+app.use('/api/admin', adminDiagnosticsRouter);
 
 async function startServer() {
   recoverStuckJobs();
@@ -61,60 +63,9 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on port ${PORT}`);
 
-    if (process.env.VOICE_CLONE_ENABLED === 'true') {
-      let restartCount = 0;
-      let lastRestart = Date.now();
-
-      const startOpenVoiceService = async () => {
-        const { spawn } = await import('child_process');
-        const pythonBin = process.env.PYTHON_BIN || (process.env.NODE_ENV === 'production' ? '/opt/venv/bin/python3' : 'python3');
-        const pyScript = path.join(process.cwd(), 'src', 'ai', 'openvoice_service.py');
-        console.log(`[OpenVoice] Starting persistent background service on port ${process.env.VOICE_CLONE_PORT || '5001'} using ${pythonBin}`);
-        
-        const openvoiceProcess = spawn(pythonBin, [pyScript], {
-          env: {
-            ...process.env,
-            VOICE_CLONE_PORT: process.env.VOICE_CLONE_PORT || '5001'
-          }
-        });
-
-        openvoiceProcess.stdout.on('data', (data) => {
-          console.log(`[OpenVoice Service STDOUT] ${data.toString().trim()}`);
-        });
-
-        openvoiceProcess.stderr.on('data', (data) => {
-          console.error(`[OpenVoice Service STDERR] ${data.toString().trim()}`);
-        });
-
-        openvoiceProcess.on('close', (code, signal) => {
-          console.log(`[OpenVoice Service] Process exited with code ${code} and signal ${signal}`);
-          
-          if (code === 0) {
-            console.log(`[OpenVoice] Service gracefully disabled or exited cleanly. Not restarting.`);
-            return;
-          }
-          
-          if (!signal || signal !== 'SIGTERM') {
-            const now = Date.now();
-            if (now - lastRestart > 5 * 60 * 1000) {
-              restartCount = 0;
-              lastRestart = now;
-            }
-            
-            if (restartCount >= 5) {
-              console.error(`[OpenVoice] CRITICAL: service crash-looping, giving up auto-restart`);
-              return;
-            }
-            
-            restartCount++;
-            console.log(`[OpenVoice] Scheduling restart (${restartCount}/5) in 3000ms...`);
-            setTimeout(startOpenVoiceService, 3000);
-          }
-        });
-      };
-
-      startOpenVoiceService();
-    }
+    // NOTE: OpenVoice is no longer auto-started here. It is now spawned lazily,
+    // on first use, from src/ai/voiceClone.js (see ensureOpenVoiceService),
+    // and idles itself down automatically after VOICE_CLONE_IDLE_TIMEOUT_MS.
   });
 }
 
