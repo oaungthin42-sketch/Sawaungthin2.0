@@ -374,10 +374,10 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             for (let i = 0; i < scenes.length; i++) {
                 const sub = timeline[i] || {};
                 const sStart = scenes[i].start;
-                const sEnd = sStart + (sub.final_dur || 0);
+                const sEnd = Math.max(scenes[i].end, sStart + (sub.final_dur || 0));
                 const nextDuck = `duck${i}`;
                 
-                filterGraph += `[${lastDuck}]volume=0.03:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
+                filterGraph += `[${lastDuck}]volume=0.0:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
                 lastDuck = nextDuck;
             }
             
