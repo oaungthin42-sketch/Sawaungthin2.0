@@ -153,3 +153,6 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN watermarkText TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN referenceVoiceId TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN voiceCloneDegraded INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN voiceCloneFallbackCount INTEGER DEFAULT 0`); } catch (e) {}
+
+try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN progress REAL`); } catch (e) {}
+try { db.exec(`ALTER TABLE ai_recap_jobs ADD COLUMN currentStep TEXT`); } catch (e) {}

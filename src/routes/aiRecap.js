@@ -273,7 +273,14 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
     res.json({ jobId });
 
     (async () => {
+        const updateProgress = (prog, step) => {
+            try {
+                db.prepare('UPDATE ai_recap_jobs SET progress = ?, currentStep = ? WHERE id = ?').run(prog, step, jobId);
+            } catch(e) {}
+        };
+
         try {
+            updateProgress(0, 'Initializing job...');
             const voiceId = req.body.voiceId || 'male-young-adult';
             const useVoiceClone = req.body.useVoiceClone === '1';
             const referenceVoiceId = req.body.referenceVoiceId || null;
@@ -293,10 +300,12 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             const cleanedVideoPath = path.join(sourcesDir, jobId + '_cleaned.mp4');
             console.log(`[AI Recap] Trimming silence for job ${jobId}...`);
+            updateProgress(5, 'Trimming silence...');
             await trimSilence(sourceVideoPath, cleanedVideoPath, sourcesDir);
             console.log(`[AI Recap] Silence trim complete for job ${jobId}.`);
 
             console.log(`[AI Recap] Generating narration script for job ${jobId}...`);
+            updateProgress(20, 'Analyzing video and generating narration...');
             const scenes = await generateNarrationScript(cleanedVideoPath);
             console.log(`[AI Recap] Narration script generated successfully.`);
             
@@ -310,6 +319,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             // Generate TTS clips
             const narrationClipPaths = [];
             for (let i = 0; i < scenes.length; i++) {
+                updateProgress(40 + (30 * (i / scenes.length)), `Generating audio for scene ${i + 1}/${scenes.length}`);
                 const sub = timeline[i] || {};
                 const ttsText = sub.text || scenes[i].narration_text || '';
                 
@@ -423,10 +433,12 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             
             overlayArgs.push('-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac', finalVideoPath);
 
+            updateProgress(70, 'Mixing audio and generating final video...');
             await runFFmpeg(overlayArgs, sourcesDir, () => {});
 
             // BLUR PASS
             if (blurBoxes && blurBoxes.length > 0) {
+                updateProgress(80, 'Applying blur effects...');
                 try {
                     const blurTmpPath = path.join(sourcesDir, `${jobId}_blur.mp4`);
                     const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
@@ -436,15 +448,51 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     
                     let filterComplex = '';
                     let lastMap = '[0:v]';
+                    
                     blurBoxes.forEach((box, index) => {
-                        const bw = Math.round((box.widthPct / 100) * vidW);
-                        const bh = Math.round((box.heightPct / 100) * vidH);
-                        const bx = Math.round((box.xPct / 100) * vidW);
-                        const by = Math.round((box.yPct / 100) * vidH);
+                        const x = Math.round((box.xPct / 100) * vidW);
+                        const y = Math.round((box.yPct / 100) * vidH);
+                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * vidW);
+                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * vidH);
+                        const w = Math.max(2, x2 - x);
+                        const h = Math.max(2, y2 - y);
+
+                        const strength = Math.min(30, Math.max(1, box.strength || 15));
+                        const eff = Math.min(50, Math.round(strength * 1.5) + 5);
+                        const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
+                        const expand = maskBlur + 2;
+                        const pad = expand + maskBlur + 2;
+
+                        const cx = Math.max(0, x - pad);
+                        const cy = Math.max(0, y - pad);
+                        const cw = Math.min(vidW - cx, w + pad * 2);
+                        const ch = Math.min(vidH - cy, h + pad * 2);
+
+                        const boxInCropX = x - cx;
+                        const boxInCropY = y - cy;
+
+                        const maskX = Math.max(0, boxInCropX - expand);
+                        const maskY = Math.max(0, boxInCropY - expand);
+                        const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
+                        const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
+
+                        const nextMap = `[v${index}]`;
+                        const mainSplit = `[main${index}]`;
+                        const blurSplit = `[blur${index}]`;
+                        const maskBase = `[mask_base${index}]`;
+                        const mask = `[mask${index}]`;
+                        const blurCrop = `[blur_crop${index}]`;
+                        const blurDone = `[blur_done${index}]`;
+                        const alphaBlur = `[alpha_blur${index}]`;
+
+                        filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
+                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
+                        filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                        filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
+                        filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
                         
-                        filterComplex += `[0:v]crop=${bw}:${bh}:${bx}:${by},boxblur=${box.strength}:1[b${index}];`;
-                        filterComplex += `${lastMap}[b${index}]overlay=${bx}:${by}[v${index}];`;
-                        lastMap = `[v${index}]`;
+                        lastMap = nextMap;
                     });
                     
                     const blurArgs = [
@@ -472,6 +520,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             // WATERMARK PASS
             if (watermarkText) {
+                updateProgress(85, 'Adding watermark...');
                 try {
                     const wmTmpPath = path.join(sourcesDir, `${jobId}_watermark.mp4`);
                     let escapedText = watermarkText
@@ -505,6 +554,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             // SUBTITLE PASS
             if (burnSubtitles && timeline.length > 0) {
+                updateProgress(90, 'Burning subtitles...');
                 try {
                     const subTmpPath = path.join(sourcesDir, `${jobId}_subburn.mp4`);
                     const pos = subtitlePosition;
@@ -538,14 +588,61 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     
                     const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Padauk,${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
                     
-                    const assLines = timeline.map((sub, i) => {
+                    const assLines = [];
+                    for (let i = 0; i < timeline.length; i++) {
+                        const sub = timeline[i] || {};
                         const sStart = scenes[i]?.start || 0;
-                        const sEnd = sStart + (sub.final_dur || 0);
-                        const startStr = toAssTime(sStart);
-                        const endStr = toAssTime(sEnd);
-                        const assText = (sub.text || scenes[i].narration_text || '').replace(/\n/g, '\\N');
-                        return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
-                    });
+                        const duration = (sub.final_dur || 0);
+                        const sEnd = sStart + duration;
+                        const text = (sub.text || scenes[i].narration_text || '').trim();
+                        if (!text) continue;
+
+                        const words = text.split(/\s+/);
+                        const pieces = [];
+                        let currentPiece = '';
+
+                        for (const word of words) {
+                            if (!word) continue;
+                            if (!currentPiece) {
+                                currentPiece = word;
+                            } else {
+                                if (currentPiece.length + 1 + word.length > 40) {
+                                    pieces.push(currentPiece);
+                                    currentPiece = word;
+                                } else {
+                                    currentPiece += ' ' + word;
+                                }
+                            }
+                        }
+                        if (currentPiece) pieces.push(currentPiece);
+
+                        if (pieces.length === 0) continue;
+
+                        const totalChars = pieces.reduce((sum, p) => sum + p.length, 0);
+                        let currentStart = sStart;
+                        
+                        pieces.forEach((piece, pIdx) => {
+                            let pieceDuration = 0;
+                            if (totalChars > 0) {
+                                pieceDuration = (piece.length / totalChars) * duration;
+                            } else {
+                                pieceDuration = duration / pieces.length;
+                            }
+
+                            let pieceEnd = currentStart + pieceDuration;
+                            if (pIdx === pieces.length - 1) {
+                                pieceEnd = sEnd;
+                            }
+
+                            const startStr = toAssTime(currentStart);
+                            const endStr = toAssTime(pieceEnd);
+                            const assText = piece.trim().replace(/\n/g, '\\N');
+                            
+                            assLines.push(`Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`);
+                            
+                            currentStart = pieceEnd;
+                        });
+                    }
                     
                     const assPath = path.join(sourcesDir, jobId + ".ass");
                     fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
@@ -577,10 +674,11 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             
             // Cleanup temps
             for (const p of narrationClipPaths) {
-                if (fs.existsSync(p)) fs.unlinkSync(p);
+                if (p && fs.existsSync(p)) fs.unlinkSync(p);
             }
             if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
             
+            updateProgress(100, 'Done');
             db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
             
             if (fs.existsSync(sourceVideoPath)) {

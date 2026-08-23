@@ -50,6 +50,8 @@ export const AIRecapTool: React.FC = () => {
     const [jobId, setJobId] = useState<string | null>(null);
     const videoInputRef = useRef<HTMLInputElement>(null);
     const [pollTimer, setPollTimer] = useState<any>(null);
+    const [progress, setProgress] = useState<number>(0);
+    const [currentStepText, setCurrentStepText] = useState<string>("");
     const [voices, setVoices] = useState<any[]>([]);
     const [voiceId, setVoiceId] = useState<string>('');
     const [useVoiceClone, setUseVoiceClone] = useState<number>(0);
@@ -329,9 +331,11 @@ export const AIRecapTool: React.FC = () => {
         const interval = setInterval(async () => {
             try {
                 const statusRes = await axios.get(`/api/ai-recap/status/${id}`);
-                const job = statusRes.data;
+                                const job = statusRes.data;
                 
-                if (job.generationStatus === 'video_done') {
+                if (job.progress !== undefined && job.progress !== null) setProgress(job.progress);
+                if (job.currentStep) setCurrentStepText(job.currentStep);
+if (job.generationStatus === 'video_done') {
                     clearInterval(interval);
                     setStatus('video_done');
                 } else if (job.generationStatus === 'video_error') {
@@ -365,6 +369,8 @@ export const AIRecapTool: React.FC = () => {
         setErrorMsg('');
         setJobId(null);
         setCurrentStep(1);
+    setProgress(0);
+        setCurrentStepText("");
     };
 
     return (
@@ -702,14 +708,17 @@ export const AIRecapTool: React.FC = () => {
                 <div className="max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-12 text-center space-y-6">
                     <div className="relative w-24 h-24 mx-auto">
                         <div className="absolute inset-0 border-4 border-indigo-500/20 rounded-full"></div>
-                        <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+                        <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin" style={{ animationDuration: '3s' }}></div>
                         <div className="absolute inset-0 flex items-center justify-center">
-                            <span className="text-indigo-400 font-bold text-sm">VID</span>
+                            <span className="text-indigo-400 font-bold text-lg">{Math.round(progress)}%</span>
                         </div>
                     </div>
                     <div>
                         <h3 className="text-xl font-bold text-white mb-2">Processing Video...</h3>
-                        <p className="text-gray-400">Cutting scenes and generating narration</p>
+                        <p className="text-gray-400">{currentStepText || 'Cutting scenes and generating narration'}</p>
+                    </div>
+                    <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden">
+                        <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
                     </div>
                 </div>
             )}
