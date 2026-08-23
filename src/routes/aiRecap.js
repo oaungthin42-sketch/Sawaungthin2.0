@@ -10,6 +10,9 @@ import { GoogleGenAI } from '@google/genai';
 import { generateNarrationTTS, transcribeWav } from '../ai/index.js';
 import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
 import { getTranslationSystemInstruction } from '../ai/translation.js';
+import { EdgeTTS } from 'node-edge-tts';
+import { getVoiceConfig } from '../ai/voices.js';
+import { applyVoiceClone } from '../ai/voiceClone.js';
 
 const router = express.Router();
 
@@ -247,7 +250,8 @@ REQUIRED OUTPUT FORMAT:
     return parsed;
 }
 
-router.post('/analyze', authMiddleware, upload.single('video'), async (req, res) => {
+
+router.post('/process', authMiddleware, upload.single('video'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No video file provided' });
     }
@@ -258,8 +262,8 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
     fs.renameSync(tempVideoPath, sourceVideoPath);
 
     try {
-        const stmt = db.prepare(`INSERT INTO ai_recap_jobs (id, userId, status, createdAt, sourceVideoPath) VALUES (?, ?, ?, ?, ?)`);
-        stmt.run(jobId, req.user.id, 'processing', Date.now(), sourceVideoPath);
+        const stmt = db.prepare(`INSERT INTO ai_recap_jobs (id, userId, status, generationStatus, createdAt, sourceVideoPath) VALUES (?, ?, ?, ?, ?, ?)`);
+        stmt.run(jobId, req.user.id, 'processing', 'processing', Date.now(), sourceVideoPath);
     } catch (e) {
         console.error("Error creating recap job", e);
         if (fs.existsSync(sourceVideoPath)) fs.unlinkSync(sourceVideoPath);
@@ -270,6 +274,23 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
 
     (async () => {
         try {
+            const voiceId = req.body.voiceId || 'male-young-adult';
+            const useVoiceClone = req.body.useVoiceClone === '1';
+            const referenceVoiceId = req.body.referenceVoiceId || null;
+            const blurBoxesRaw = req.body.blurBoxes || '[]';
+            const burnSubtitles = req.body.burnSubtitles === 'true' || req.body.burnSubtitles === '1';
+            const subtitleColor = req.body.subtitleColor || 'white';
+            const subtitlePositionRaw = req.body.subtitlePosition || '{"xPct":10,"yPct":78,"widthPct":80,"heightPct":12}';
+            const flipped = req.body.flipped === '1' || req.body.flipped === 'true';
+
+            let blurBoxes = [];
+            try { blurBoxes = JSON.parse(blurBoxesRaw); } catch(e) {}
+            
+            let subtitlePosition = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+            try { subtitlePosition = JSON.parse(subtitlePositionRaw); } catch(e) {}
+            
+            const watermarkText = (req.body.watermarkText || '').trim();
+
             const cleanedVideoPath = path.join(sourcesDir, jobId + '_cleaned.mp4');
             console.log(`[AI Recap] Trimming silence for job ${jobId}...`);
             await trimSilence(sourceVideoPath, cleanedVideoPath, sourcesDir);
@@ -278,16 +299,301 @@ router.post('/analyze', authMiddleware, upload.single('video'), async (req, res)
             console.log(`[AI Recap] Generating narration script for job ${jobId}...`);
             const scenes = await generateNarrationScript(cleanedVideoPath);
             console.log(`[AI Recap] Narration script generated successfully.`);
+            
+            db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`).run(JSON.stringify({ scenes }), cleanedVideoPath, jobId);
 
-            const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`);
-            stmt.run(JSON.stringify({ scenes }), cleanedVideoPath, jobId);
-        } catch (e) {
-            console.error("[AI Recap] Job failed", e);
-            const stmt = db.prepare(`UPDATE ai_recap_jobs SET status = 'error', error = ? WHERE id = ?`);
-            stmt.run(e.message || "Unknown error", jobId);
+            // Now do the video generation part
+            const timeline = scenes;
+            const authoritativeTimelinePath = path.join(sourcesDir, jobId + '_timeline.json');
+            fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(timeline, null, 2));
+
+            // Generate TTS clips
+            const narrationClipPaths = [];
+            for (let i = 0; i < scenes.length; i++) {
+                const sub = timeline[i] || {};
+                const ttsText = sub.text || scenes[i].narration_text || '';
+                
+                if (!ttsText.trim()) {
+                    narrationClipPaths.push(null);
+                    timeline[i].final_dur = 0.1;
+                    continue;
+                }
+
+                const outPath = path.join(sourcesDir, `${jobId}_tts_${i}.wav`);
+                
+                let success = false;
+                try {
+                    console.log(`[AI Recap] Generating Edge TTS for scene ${i}`);
+                    const { edgeVoice, pitch, rate } = getVoiceConfig(voiceId);
+                    const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
+                    await ttsClient.ttsPromise(ttsText, outPath);
+                    if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+                        success = true;
+                    }
+                } catch(e) {
+                    console.error("[AI Recap] Edge TTS failed", e);
+                }
+
+                if (success && useVoiceClone && referenceVoiceId) {
+                    try {
+                        const row = db.prepare(`SELECT audioPath, embeddingCachePath FROM reference_voices WHERE id = ?`).get(referenceVoiceId);
+                        if (row && (fs.existsSync(row.audioPath) || (row.embeddingCachePath && fs.existsSync(row.embeddingCachePath)))) {
+                            console.log(`[AI Recap] Applying voice clone for scene ${i}`);
+                            const { chunks } = await applyVoiceClone([outPath], referenceVoiceId, { sourceMode: 'shared' });
+                            if (chunks && chunks[0] && fs.existsSync(chunks[0])) {
+                                fs.copyFileSync(chunks[0], outPath);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("[AI Recap] Clone failed", e);
+                    }
+                }
+
+                if (success && fs.existsSync(outPath)) {
+                    let durStr;
+                    try {
+                        durStr = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${outPath}"`).toString().trim();
+                    } catch(e) {}
+                    const dur = durStr ? parseFloat(durStr) : 2.0;
+                    timeline[i].final_dur = dur;
+                    narrationClipPaths.push(outPath);
+                } else {
+                    narrationClipPaths.push(null);
+                    timeline[i].final_dur = 0.1;
+                }
+            }
+
+            fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(timeline, null, 2));
+
+            const finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
+
+            // Build duck-and-overlay filter_complex
+            let filterGraph = '';
+            let lastDuck = '0:a';
+            
+            for (let i = 0; i < scenes.length; i++) {
+                const sub = timeline[i] || {};
+                const sStart = scenes[i].start;
+                const sEnd = sStart + (sub.final_dur || 0);
+                const nextDuck = `duck${i}`;
+                
+                filterGraph += `[${lastDuck}]volume=0.03:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
+                lastDuck = nextDuck;
+            }
+            
+            filterGraph += `[${lastDuck}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[duckfinal];`;
+            
+            let mixInputs = `[duckfinal]`;
+            let currentInputIndex = 1;
+            let validScenesCount = 0;
+            const ffmpegInputArgs = [];
+            
+            for (let i = 0; i < scenes.length; i++) {
+                const p = narrationClipPaths[i];
+                if (p) {
+                    ffmpegInputArgs.push('-i', p);
+                    const delayMs = Math.round(scenes[i].start * 1000);
+                    filterGraph += `[${currentInputIndex}:a]adelay=delays=${delayMs}:all=1[aud${i}_delayed];`;
+                    filterGraph += `[aud${i}_delayed]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aud${i}];`;
+                    mixInputs += `[aud${i}]`;
+                    currentInputIndex++;
+                    validScenesCount++;
+                }
+            }
+            
+            const totalInputs = validScenesCount + 1;
+            filterGraph += `${mixInputs}amix=inputs=${totalInputs}:duration=first:dropout_transition=0:normalize=0[aout]`;
+            
+            if (flipped) {
+                filterGraph += `;[0:v]hflip[vout]`;
+            }
+            
+            // Run single ffmpeg command for audio overlay
+            const overlayArgs = ['-y', '-i', cleanedVideoPath];
+            for (const arg of ffmpegInputArgs) {
+                overlayArgs.push(arg);
+            }
+            overlayArgs.push('-filter_complex', filterGraph);
+            
+            if (flipped) {
+                overlayArgs.push('-map', '[vout]');
+            } else {
+                overlayArgs.push('-map', '0:v');
+            }
+            
+            overlayArgs.push('-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac', finalVideoPath);
+
+            await runFFmpeg(overlayArgs, sourcesDir, () => {});
+
+            // BLUR PASS
+            if (blurBoxes && blurBoxes.length > 0) {
+                try {
+                    const blurTmpPath = path.join(sourcesDir, `${jobId}_blur.mp4`);
+                    const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                    const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                    const vidW = parseInt(execSync(vidWCmd).toString().trim());
+                    const vidH = parseInt(execSync(vidHCmd).toString().trim());
+                    
+                    let filterComplex = '';
+                    let lastMap = '[0:v]';
+                    blurBoxes.forEach((box, index) => {
+                        const bw = Math.round((box.widthPct / 100) * vidW);
+                        const bh = Math.round((box.heightPct / 100) * vidH);
+                        const bx = Math.round((box.xPct / 100) * vidW);
+                        const by = Math.round((box.yPct / 100) * vidH);
+                        
+                        filterComplex += `[0:v]crop=${bw}:${bh}:${bx}:${by},boxblur=${box.strength}:1[b${index}];`;
+                        filterComplex += `${lastMap}[b${index}]overlay=${bx}:${by}[v${index}];`;
+                        lastMap = `[v${index}]`;
+                    });
+                    
+                    const blurArgs = [
+                        '-y',
+                        '-i', finalVideoPath,
+                        '-filter_complex', filterComplex.replace(/;$/, ''),
+                        '-map', lastMap,
+                        '-map', '0:a?',
+                        '-c:a', 'copy',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        blurTmpPath
+                    ];
+                    
+                    await runFFmpeg(blurArgs, sourcesDir, () => {});
+                    
+                    if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
+                        fs.unlinkSync(finalVideoPath);
+                        fs.renameSync(blurTmpPath, finalVideoPath);
+                    }
+                } catch (e) {
+                    console.error("[AI Recap] Blur pass failed", e);
+                }
+            }
+
+            // WATERMARK PASS
+            if (watermarkText) {
+                try {
+                    const wmTmpPath = path.join(sourcesDir, `${jobId}_watermark.mp4`);
+                    let escapedText = watermarkText
+                        .replace(/\\/g, "\\\\")
+                        .replace(/:/g, "\\:")
+                        .replace(/'/g, "\\'")
+                        .replace(/%/g, "\\%");
+                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
+                    const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
+                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+                    const wmArgs = [
+                        '-y',
+                        '-i', finalVideoPath,
+                        '-vf', drawtextFilter,
+                        '-c:a', 'copy',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        wmTmpPath
+                    ];
+                    await runFFmpeg(wmArgs, sourcesDir, () => {});
+                    
+                    if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
+                        fs.unlinkSync(finalVideoPath);
+                        fs.renameSync(wmTmpPath, finalVideoPath);
+                    }
+                } catch (e) {
+                    console.error("[AI Recap] Watermark pass failed", e);
+                }
+            }
+
+            // SUBTITLE PASS
+            if (burnSubtitles && timeline.length > 0) {
+                try {
+                    const subTmpPath = path.join(sourcesDir, `${jobId}_subburn.mp4`);
+                    const pos = subtitlePosition;
+                    
+                    const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                    const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
+                    const vidW = parseInt(execSync(vidWCmd).toString().trim());
+                    const vidH = parseInt(execSync(vidHCmd).toString().trim());
+                    
+                    const marginL = Math.round((pos.xPct / 100) * vidW);
+                    const marginR = Math.round(vidW - ((pos.xPct + pos.widthPct) / 100) * vidW);
+                    const marginV = Math.round((pos.yPct / 100) * vidH);
+                    
+                    let fontsize = Math.round(((pos.heightPct / 100) * vidH) * 0.6);
+                    if (fontsize < 24) fontsize = 24;
+                    if (fontsize > 80) fontsize = 80;
+                    
+                    let primaryColor = "&H00FFFFFF";
+                    if (subtitleColor === "yellow") primaryColor = "&H0000FFFF";
+                    if (subtitleColor === "cyan") primaryColor = "&H00FFFF00";
+                    if (subtitleColor === "lime") primaryColor = "&H0000FF00";
+                    if (subtitleColor === "magenta") primaryColor = "&H00FF00FF";
+                    
+                    const toAssTime = (sec) => {
+                        const h = Math.floor(sec / 3600);
+                        const m = Math.floor((sec % 3600) / 60);
+                        const s = Math.floor(sec % 60);
+                        const cs = Math.floor((sec % 1) * 100);
+                        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+                    };
+                    
+                    const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Padauk,${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+                    
+                    const assLines = timeline.map((sub, i) => {
+                        const sStart = scenes[i]?.start || 0;
+                        const sEnd = sStart + (sub.final_dur || 0);
+                        const startStr = toAssTime(sStart);
+                        const endStr = toAssTime(sEnd);
+                        const assText = (sub.text || scenes[i].narration_text || '').replace(/\n/g, '\\N');
+                        return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                    });
+                    
+                    const assPath = path.join(sourcesDir, jobId + ".ass");
+                    fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
+                    
+                    const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                    
+                    const subArgs = [
+                        '-y',
+                        '-i', finalVideoPath,
+                        '-filter_complex', filterComplex,
+                        '-map', '[v]',
+                        '-map', '0:a?',
+                        '-c:a', 'copy',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        subTmpPath
+                    ];
+                    
+                    await runFFmpeg(subArgs, sourcesDir, () => {});
+                    if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                        fs.unlinkSync(finalVideoPath);
+                        fs.renameSync(subTmpPath, finalVideoPath);
+                    }
+                    if (fs.existsSync(assPath)) fs.unlinkSync(assPath);
+                } catch (e) {
+                    console.error("[AI Recap] Subtitle pass failed", e);
+                }
+            }
+            
+            // Cleanup temps
+            for (const p of narrationClipPaths) {
+                if (fs.existsSync(p)) fs.unlinkSync(p);
+            }
+            if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
+            
+            db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
+            
+            if (fs.existsSync(sourceVideoPath)) {
+                fs.unlinkSync(sourceVideoPath);
+            }
+
+        } catch (err) {
+            console.error("[AI Recap] Generation failed", err);
+            db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ?, videoCompletedAt = ? WHERE id = ?`).run(err.message || "Generation error", Date.now(), jobId);
         }
     })();
 });
+
 
 router.get('/status/:jobId', authMiddleware, (req, res) => {
     try {
@@ -302,353 +608,7 @@ router.get('/status/:jobId', authMiddleware, (req, res) => {
     }
 });
 
-router.post('/generate/:jobId', authMiddleware, async (req, res) => {
-    try {
-        const jobId = req.params.jobId;
-        const voiceId = req.body.voiceId || 'male-young-adult';
-        const useVoiceClone = req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1' ? 1 : 0;
-        const referenceVoiceId = req.body.referenceVoiceId || null;
-        const blurBoxesRaw = req.body.blurBoxes || '[]';
-        const burnSubtitles = req.body.burnSubtitles === true || req.body.burnSubtitles === 'true';
-        const subtitleColor = req.body.subtitleColor || 'white';
-        const subtitlePositionRaw = req.body.subtitlePosition || '{"xPct":10,"yPct":78,"widthPct":80,"heightPct":12}';
-        const flipped = req.body.flipped === '1' || req.body.flipped === 1 || req.body.flipped === 'true' || req.body.flipped === true;
-        let blurBoxes = [];
-        try { blurBoxes = JSON.parse(blurBoxesRaw); } catch(e) {}
-        let subtitlePosition = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
-        try { subtitlePosition = JSON.parse(subtitlePositionRaw); } catch(e) {}
-        const watermarkText = (req.body.watermarkText || '').trim();
 
-        const row = db.prepare(`SELECT * FROM ai_recap_jobs WHERE id = ? AND userId = ?`).get(jobId, req.user.id);
-        
-        if (!row || row.status !== 'done' || !row.resultJson || !row.cleanedVideoPath || !fs.existsSync(row.cleanedVideoPath)) {
-            return res.status(400).json({ error: 'Job not ready for generation or cleaned video missing' });
-        }
-
-        db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'generating' WHERE id = ?`).run(jobId);
-        res.json({ started: true });
-
-        (async () => {
-            let finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
-            try {
-                const result = JSON.parse(row.resultJson);
-                const scenes = result.scenes || [];
-                
-                if (scenes.length === 0) {
-                    throw new Error("No scenes found to generate");
-                }
-
-                const sceneNarration = scenes.map(s => ({
-                    narration_text: s.narration_text,
-                    scene_start: s.start,
-                    scene_end: s.end
-                }));
-
-                const cachePath = path.join(sourcesDir, jobId + '_narration.wav');
-                
-                await generateNarrationTTS(sceneNarration, cachePath, voiceId, [], {
-                    useVoiceClone: useVoiceClone,
-                    referenceVoiceId: referenceVoiceId,
-                    sourceMode: 'shared'
-                });
-                
-                const authoritativeTimelinePath = cachePath + '.timeline.json';
-                let timeline = [];
-                if (fs.existsSync(authoritativeTimelinePath)) {
-                    timeline = JSON.parse(fs.readFileSync(authoritativeTimelinePath, 'utf8'));
-                }
-                
-                // Split narration into per-scene wavs
-                const narrationClipPaths = [];
-                for (let i = 0; i < scenes.length; i++) {
-                    const sub = timeline[i] || {};
-                    const outPath = path.join(sourcesDir, `${jobId}_narr_${i}.wav`);
-                    narrationClipPaths.push(outPath);
-                    
-                    const start = sub.final_audio_start || 0;
-                    const end = sub.final_audio_end || 0;
-                    
-                    await runFFmpeg([
-                        '-y',
-                        '-ss', String(start),
-                        '-to', String(end),
-                        '-i', cachePath,
-                        '-c:a', 'copy',
-                        outPath
-                    ], sourcesDir, () => {});
-                }
-                
-                // Build duck-and-overlay filter_complex
-                let filterGraph = '';
-                let lastDuck = '0:a';
-                
-                for (let i = 0; i < scenes.length; i++) {
-                    const sub = timeline[i] || {};
-                    const sStart = scenes[i].start;
-                    const sEnd = sStart + (sub.final_dur || 0);
-                    const nextDuck = `duck${i}`;
-                    
-                    filterGraph += `[${lastDuck}]volume=0.03:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
-                    lastDuck = nextDuck;
-                }
-                
-                filterGraph += `[${lastDuck}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[duckfinal];`;
-                
-                let mixInputs = `[duckfinal]`;
-                for (let i = 0; i < scenes.length; i++) {
-                    const delayMs = Math.round(scenes[i].start * 1000);
-                    filterGraph += `[${i+1}:a]adelay=delays=${delayMs}:all=1[aud${i}_delayed];`;
-                    filterGraph += `[aud${i}_delayed]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aud${i}];`;
-                    mixInputs += `[aud${i}]`;
-                }
-                
-                const totalInputs = scenes.length + 1;
-                filterGraph += `${mixInputs}amix=inputs=${totalInputs}:duration=first:dropout_transition=0[aout]`;
-                
-                if (flipped) {
-                    filterGraph += `;[0:v]hflip[vout]`;
-                }
-                
-                // Run single ffmpeg command for audio overlay
-                const overlayArgs = ['-y', '-i', row.cleanedVideoPath];
-                for (const p of narrationClipPaths) {
-                    overlayArgs.push('-i', p);
-                }
-                
-                overlayArgs.push(
-                    '-filter_complex', filterGraph
-                );
-                
-                if (flipped) {
-                    overlayArgs.push(
-                        '-map', '[vout]',
-                        '-map', '[aout]',
-                        '-c:v', 'libx264',
-                        '-preset', 'veryfast',
-                        '-crf', '23',
-                        '-c:a', 'aac',
-                        finalVideoPath
-                    );
-                } else {
-                    overlayArgs.push(
-                        '-map', '0:v:0',
-                        '-map', '[aout]',
-                        '-c:v', 'copy',
-                        '-c:a', 'aac',
-                        finalVideoPath
-                    );
-                }
-                
-                await runFFmpeg(overlayArgs, sourcesDir, () => {});
-                
-                // BLUR PASS
-                if (Array.isArray(blurBoxes) && blurBoxes.length > 0) {
-                    try {
-                        const blurTmpPath = path.join(sourcesDir, `${jobId}_blur.mp4`);
-                        let filterComplex = '';
-                        let lastMap = '[0:v]';
-                        let splitInputs = '';
-                        
-                        const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                        const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                        const vidW = parseInt(execSync(vidWCmd).toString().trim());
-                        const vidH = parseInt(execSync(vidHCmd).toString().trim());
-
-                        for (let i = 0; i < blurBoxes.length; i++) {
-                            const box = blurBoxes[i];
-                            const x = Math.round((box.xPct / 100) * vidW);
-                            const y = Math.round((box.yPct / 100) * vidH);
-                            const x2 = Math.round(((box.xPct + box.widthPct) / 100) * vidW);
-                            const y2 = Math.round(((box.yPct + box.heightPct) / 100) * vidH);
-                            const w = Math.max(2, x2 - x);
-                            const h = Math.max(2, y2 - y);
-                            
-                            const strength = Math.min(30, Math.max(1, box.strength || 10));
-                            const eff = Math.min(50, Math.round(strength * 1.5) + 5);
-                            const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
-                            const expand = maskBlur + 2;
-                            const pad = expand + maskBlur + 2;
-                            
-                            const cx = Math.max(0, x - pad);
-                            const cy = Math.max(0, y - pad);
-                            const cw = Math.min(vidW - cx, w + pad * 2);
-                            const ch = Math.min(vidH - cy, h + pad * 2);
-                            
-                            const boxInCropX = x - cx;
-                            const boxInCropY = y - cy;
-                            
-                            const maskX = Math.max(0, boxInCropX - expand);
-                            const maskY = Math.max(0, boxInCropY - expand);
-                            const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
-                            const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
-                            
-                            const nextMap = `[v${i}]`;
-                            const mainSplit = `[main${i}]`;
-                            const blurSplit = `[blur${i}]`;
-                            
-                            splitInputs += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                            filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2[crop_content${i}][crop_mask${i}];`;
-                            filterComplex += `[crop_mask${i}]drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1[mask_done${i}];`;
-                            filterComplex += `[crop_content${i}]boxblur=${eff}:1,boxblur=${eff}:1[blur_done${i}];`;
-                            filterComplex += `[blur_done${i}][mask_done${i}]alphamerge[alpha_blur${i}];`;
-                            filterComplex += `${mainSplit}[alpha_blur${i}]overlay=${cx}:${cy}${nextMap};`;
-                            
-                            lastMap = nextMap;
-                        }
-                        
-                        let combinedBlurFilter = (splitInputs + filterComplex).trim();
-                        if (combinedBlurFilter.endsWith(';')) {
-                            combinedBlurFilter = combinedBlurFilter.slice(0, -1);
-                        }
-
-                        const blurArgs = [
-                            '-y',
-                            '-i', finalVideoPath,
-                            '-filter_complex', combinedBlurFilter,
-                            '-map', lastMap,
-                            '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            blurTmpPath
-                        ];
-                        
-                        await runFFmpeg(blurArgs, sourcesDir, () => {});
-                        if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                            fs.unlinkSync(finalVideoPath);
-                            fs.renameSync(blurTmpPath, finalVideoPath);
-                        }
-                    } catch (e) {
-                        console.error("[AI Recap] Blur pass failed", e);
-                    }
-                }
-
-                // WATERMARK PASS
-                if (watermarkText) {
-                    try {
-                        const wmTmpPath = path.join(sourcesDir, `${jobId}_watermark.mp4`);
-                        let escapedText = watermarkText
-                            .replace(/\\/g, "\\\\")
-                            .replace(/:/g, "\\:")
-                            .replace(/'/g, "\\'")
-                            .replace(/%/g, "\\%");
-                        const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
-                        const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
-                        const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
-                        const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
-                        const wmArgs = [
-                            '-y',
-                            '-i', finalVideoPath,
-                            '-vf', drawtextFilter,
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            wmTmpPath
-                        ];
-                        await runFFmpeg(wmArgs, sourcesDir, () => {});
-                        if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
-                            fs.unlinkSync(finalVideoPath);
-                            fs.renameSync(wmTmpPath, finalVideoPath);
-                        }
-                    } catch (e) {
-                        console.error("[AI Recap] Watermark pass failed", e);
-                    }
-                }
-
-                // SUBTITLE PASS
-                if (burnSubtitles && timeline.length > 0) {
-                    try {
-                        const subTmpPath = path.join(sourcesDir, `${jobId}_subburn.mp4`);
-                        const pos = subtitlePosition;
-                        
-                        const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                        const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                        const vidW = parseInt(execSync(vidWCmd).toString().trim());
-                        const vidH = parseInt(execSync(vidHCmd).toString().trim());
-                        
-                        const marginL = Math.round((pos.xPct / 100) * vidW);
-                        const marginR = Math.round(vidW - ((pos.xPct + pos.widthPct) / 100) * vidW);
-                        const marginV = Math.round((pos.yPct / 100) * vidH);
-                        
-                        let fontsize = Math.round(((pos.heightPct / 100) * vidH) * 0.6);
-                        if (fontsize < 24) fontsize = 24;
-                        if (fontsize > 80) fontsize = 80;
-                        
-                        let primaryColor = "&H00FFFFFF";
-                        if (subtitleColor === "yellow") primaryColor = "&H0000FFFF";
-                        if (subtitleColor === "cyan") primaryColor = "&H00FFFF00";
-                        if (subtitleColor === "lime") primaryColor = "&H0000FF00";
-                        if (subtitleColor === "magenta") primaryColor = "&H00FF00FF";
-                        
-                        const toAssTime = (sec) => {
-                            const h = Math.floor(sec / 3600);
-                            const m = Math.floor((sec % 3600) / 60);
-                            const s = Math.floor(sec % 60);
-                            const cs = Math.floor((sec % 1) * 100);
-                            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
-                        };
-                        
-                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Padauk,${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-                        
-                        const assLines = timeline.map((sub, i) => {
-                            const sStart = scenes[i]?.start || 0;
-                            const sEnd = sStart + (sub.final_dur || 0);
-                            const startStr = toAssTime(sStart);
-                            const endStr = toAssTime(sEnd);
-                            const assText = (sub.text || '').replace(/\n/g, '\\N');
-                            return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
-                        });
-                        
-                        const assPath = path.join(sourcesDir, jobId + ".ass");
-                        fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
-                        
-                        const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                        
-                        const subArgs = [
-                            '-y',
-                            '-i', finalVideoPath,
-                            '-filter_complex', filterComplex,
-                            '-map', '[v]',
-                            '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            subTmpPath
-                        ];
-                        
-                        await runFFmpeg(subArgs, sourcesDir, () => {});
-                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                            fs.unlinkSync(finalVideoPath);
-                            fs.renameSync(subTmpPath, finalVideoPath);
-                        }
-                        if (fs.existsSync(assPath)) fs.unlinkSync(assPath);
-                    } catch (e) {
-                        console.error("[AI Recap] Subtitle pass failed", e);
-                    }
-                }
-                
-                // Cleanup temps
-                for (const p of narrationClipPaths) {
-                    if (fs.existsSync(p)) fs.unlinkSync(p);
-                }
-                if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
-                if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
-                
-                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
-                
-                if (fs.existsSync(row.sourceVideoPath)) {
-                    fs.unlinkSync(row.sourceVideoPath);
-                }
-            } catch (err) {
-                console.error("[AI Recap] Generation failed", err);
-                db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ?, videoCompletedAt = ? WHERE id = ?`).run(err.message || "Generation error", Date.now(), jobId);
-            }
-        })();
-    } catch (e) {
-        console.error("Error starting generation", e);
-        res.status(500).json({ error: 'Failed to start generation' });
-    }
-});
 
 router.get('/download/:jobId', authMiddleware, (req, res) => {
     try {

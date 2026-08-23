@@ -44,9 +44,9 @@ const RecapVideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoEl
 
 export const AIRecapTool: React.FC = () => {
     const [videoFile, setVideoFile] = useState<File | null>(null);
-    const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error' | 'generating_video' | 'video_done' | 'video_error'>('idle');
+    const [status, setStatus] = useState<'idle' | 'processing' | 'video_done' | 'video_error'>('idle');
     const [errorMsg, setErrorMsg] = useState('');
-    const [result, setResult] = useState<any>(null);
+    
     const [jobId, setJobId] = useState<string | null>(null);
     const videoInputRef = useRef<HTMLInputElement>(null);
     const [pollTimer, setPollTimer] = useState<any>(null);
@@ -294,77 +294,30 @@ export const AIRecapTool: React.FC = () => {
         };
     }, [pollTimer]);
 
-    const startAnalysis = async () => {
+    const processVideo = async () => {
         if (!videoFile) return;
-        
-        setStatus('uploading');
+        setStatus('processing');
         setErrorMsg('');
-        setResult(null);
-
+        
         const formData = new FormData();
         formData.append('video', videoFile);
+        formData.append('voiceId', voiceId);
+        formData.append('useVoiceClone', useVoiceClone.toString());
+        formData.append('referenceVoiceId', referenceVoiceId);
+        formData.append('burnSubtitles', burnSubtitles ? '1' : '0');
+        formData.append('subtitleColor', subtitleColor);
+        formData.append('blurBoxes', JSON.stringify(blurBoxes));
+        formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
+        formData.append('watermarkText', watermarkText);
+        formData.append('flipped', isFlipped ? '1' : '0');
 
         try {
-            const response = await axios.post('/api/ai-recap/analyze', formData, {
+            const response = await axios.post('/api/ai-recap/process', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
             const newJobId = response.data.jobId;
             setJobId(newJobId);
-            setStatus('analyzing');
-            startPolling(newJobId);
-        } catch (err: any) {
-            setStatus('error');
-            setErrorMsg(err.response?.data?.error || err.message || 'Upload failed');
-        }
-    };
-
-    const startPolling = (id: string) => {
-        if (pollTimer) clearInterval(pollTimer);
-
-        const interval = setInterval(async () => {
-            try {
-                const statusRes = await axios.get(`/api/ai-recap/status/${id}`);
-                const job = statusRes.data;
-                
-                if (job.status === 'done') {
-                    clearInterval(interval);
-                    try {
-                        setResult(JSON.parse(job.resultJson));
-                    } catch (e) {
-                        setResult(job.resultJson);
-                    }
-                    setStatus('complete');
-                } else if (job.status === 'error') {
-                    clearInterval(interval);
-                    setStatus('error');
-                    setErrorMsg(job.error || 'Processing failed');
-                }
-            } catch (e) {
-                // Ignore temporary network errors
-            }
-        }, 3000);
-
-        setPollTimer(interval);
-    };
-
-    
-    const generateVideo = async () => {
-        if (!jobId) return;
-        setStatus('generating_video');
-        setErrorMsg('');
-        try {
-            await axios.post(`/api/ai-recap/generate/${jobId}`, {
-                voiceId,
-                useVoiceClone,
-                referenceVoiceId,
-                burnSubtitles,
-                subtitleColor,
-                blurBoxes: JSON.stringify(blurBoxes),
-                subtitlePosition: JSON.stringify(subtitlePosition),
-                watermarkText,
-                flipped: isFlipped ? '1' : '0'
-            });
-            startGenerationPolling(jobId);
+            startGenerationPolling(newJobId);
         } catch (err: any) {
             setStatus('video_error');
             setErrorMsg(err.response?.data?.error || err.message || 'Generation failed');
@@ -393,11 +346,22 @@ export const AIRecapTool: React.FC = () => {
         setPollTimer(interval);
     };
 
+    
+    useEffect(() => {
+        if (videoFile) {
+            const url = URL.createObjectURL(videoFile);
+            setVideoPreviewUrl(url);
+            return () => { URL.revokeObjectURL(url); };
+        } else {
+            setVideoPreviewUrl('');
+        }
+    }, [videoFile]);
+
     const reset = () => {
         if (pollTimer) clearInterval(pollTimer);
         setVideoFile(null);
         setStatus('idle');
-        setResult(null);
+        
         setErrorMsg('');
         setJobId(null);
         setCurrentStep(1);
@@ -412,7 +376,7 @@ export const AIRecapTool: React.FC = () => {
                 </p>
             </div>
 
-            {status === 'idle' && (
+            {status === 'idle' && !videoFile && (
                 <div className="max-w-2xl mx-auto space-y-8">
                     <div className="bg-gray-900 border border-gray-800 rounded-3xl p-8 space-y-6">
                         <div 
@@ -435,62 +399,19 @@ export const AIRecapTool: React.FC = () => {
                             </div>
                             <div>
                                 <p className="text-white font-bold text-lg mb-1">
-                                    {videoFile ? videoFile.name : 'ဗီဒီယို ဖိုင် ရွေးချယ်ပါ'}
+                                    {videoFile ? (videoFile as any).name : 'ဗီဒီယို ဖိုင် ရွေးချယ်ပါ'}
                                 </p>
                                 <p className="text-gray-500 text-sm">MP4, MKV, MOV up to 100MB (limit for testing)</p>
                             </div>
                         </div>
 
-                        {videoFile && (
-                            <button
-                                onClick={startAnalysis}
-                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-900/20 transition-all flex items-center justify-center gap-2"
-                            >
-                                <Play className="w-5 h-5" />
-                                စတင် ပိုင်းခြားစိတ်ဖြာမည်
-                            </button>
-                        )}
                     </div>
                 </div>
             )}
 
-            {(status === 'uploading' || status === 'analyzing') && (
-                <div className="max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-12 text-center space-y-6">
-                    <div className="relative w-24 h-24 mx-auto">
-                        <div className="absolute inset-0 border-4 border-indigo-500/20 rounded-full"></div>
-                        <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <span className="text-indigo-400 font-bold text-sm">
-                                {status === 'uploading' ? 'UP' : 'AI'}
-                            </span>
-                        </div>
-                    </div>
-                    <div>
-                        <h3 className="text-xl font-bold text-white mb-2">
-                            {status === 'uploading' ? 'ဗီဒီယို တင်နေပါသည်...' : 'AI ပိုင်းခြားစိတ်ဖြာနေပါသည်...'}
-                        </h3>
-                        <p className="text-gray-400">
-                            {status === 'analyzing' ? 'Gemini သည် ဇာတ်ကွက်ကို နားလည်ရန် ဗီဒီယိုကို ကြည့်ရှုနေပါသည်။' : 'ခဏစောင့်ပါ။'}
-                        </p>
-                    </div>
-                </div>
-            )}
 
-            {status === 'error' && (
-                <div className="max-w-2xl mx-auto bg-red-950/20 border border-red-900/50 rounded-3xl p-8 text-center space-y-6">
-                    <AlertCircle className="w-16 h-16 text-red-500 mx-auto" />
-                    <h3 className="text-xl font-bold text-red-400">Processing Error</h3>
-                    <p className="text-red-300">{errorMsg}</p>
-                    <button
-                        onClick={reset}
-                        className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
-                    >
-                        နောက်တစ်ကြိမ် ပြန်ကြိုးစားမည်
-                    </button>
-                </div>
-            )}
 
-            {status === 'complete' && result && (
+            {videoFile && status === 'idle' && (
                 <div className="max-w-4xl mx-auto space-y-6">
                     <div className="flex items-center justify-between mb-8 relative">
                         <div className="absolute left-0 top-1/2 w-full h-1 bg-gray-800 -z-10" />
@@ -585,7 +506,6 @@ export const AIRecapTool: React.FC = () => {
                                         muted playsInline
                                         onLoadedMetadata={updateVideoRect}
                                     />
-                                    
                                     {blurBoxes.map((box, index) => (
                                         <div
                                             key={box.id}
@@ -602,6 +522,7 @@ export const AIRecapTool: React.FC = () => {
                                             }}
                                         >
                                             <div className="absolute top-1 left-1 text-white text-[10px] px-1 rounded backdrop-blur-sm pointer-events-none bg-black/50">Blur #{index + 1}</div>
+
                                             {selectedElement === box.id && (
                                                 <>
                                                     <div className="absolute -top-2 -left-2 w-4 h-4 bg-white rounded-full cursor-nwse-resize shadow-md border-2 border-indigo-400" onPointerDown={(e) => handlePointerDown(e, box.id, 'tl')} />
@@ -611,6 +532,7 @@ export const AIRecapTool: React.FC = () => {
                                         </div>
                                     ))}
                                 </div>
+                                <div className="max-w-2xl mx-auto mt-2"><RecapVideoSeekBar videoRef={videoPreviewRef} /></div>
                                 
                                 {selectedElement && selectedElement.startsWith('box_') && (
                                     <div className="mt-4 p-4 bg-gray-950 rounded-xl border border-gray-800 flex items-center justify-between">
@@ -706,6 +628,7 @@ export const AIRecapTool: React.FC = () => {
                                                 )}
                                             </div>
                                         </div>
+<div className="max-w-2xl mx-auto mt-2"><RecapVideoSeekBar videoRef={videoPreviewRef} /></div>
                                     </>
                                 )}
                             </div>
@@ -764,7 +687,7 @@ export const AIRecapTool: React.FC = () => {
                                 </button>
                             ) : (
                                 <button
-                                    onClick={generateVideo}
+                                    onClick={processVideo}
                                     className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-600 text-white px-8 py-2.5 rounded-xl font-bold text-sm transition-all shadow-lg shadow-indigo-900/30 transform hover:scale-[1.02] active:scale-[0.98]"
                                 >
                                     Generate Video
@@ -775,7 +698,7 @@ export const AIRecapTool: React.FC = () => {
                 </div>
             )}
 
-            {status === 'generating_video' && (
+            {status === 'processing' && (
                 <div className="max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-3xl p-12 text-center space-y-6">
                     <div className="relative w-24 h-24 mx-auto">
                         <div className="absolute inset-0 border-4 border-indigo-500/20 rounded-full"></div>
@@ -785,7 +708,7 @@ export const AIRecapTool: React.FC = () => {
                         </div>
                     </div>
                     <div>
-                        <h3 className="text-xl font-bold text-white mb-2">Generating Video...</h3>
+                        <h3 className="text-xl font-bold text-white mb-2">Processing Video...</h3>
                         <p className="text-gray-400">Cutting scenes and generating narration</p>
                     </div>
                 </div>
@@ -797,7 +720,7 @@ export const AIRecapTool: React.FC = () => {
                     <h3 className="text-xl font-bold text-red-400">Video Generation Error</h3>
                     <p className="text-red-300">{errorMsg}</p>
                     <button
-                        onClick={generateVideo}
+                        onClick={processVideo}
                         className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
                     >
                         Retry Generation
