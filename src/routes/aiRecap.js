@@ -394,6 +394,8 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             let lastDuck = '0:a';
             
             for (let i = 0; i < scenes.length; i++) {
+                if (!narrationClipPaths[i]) continue;
+                
                 const sub = timeline[i] || {};
                 const sStart = actualStart[i];
                 let sEnd = Math.max(scenes[i].end, sStart + (sub.final_dur || 0));
