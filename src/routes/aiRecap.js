@@ -378,13 +378,30 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             const finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
 
             // Build duck-and-overlay filter_complex
+            const actualStart = new Array(scenes.length);
+            if (scenes.length > 0) {
+                actualStart[0] = scenes[0].start;
+                for (let i = 1; i < scenes.length; i++) {
+                    actualStart[i] = Math.max(scenes[i].start, actualStart[i-1] + (timeline[i-1].final_dur || 0));
+                }
+            }
+            // Update scenes/timeline start so subtitles align correctly with delayed audio
+            for (let i = 0; i < scenes.length; i++) {
+                scenes[i].start = actualStart[i];
+            }
+
             let filterGraph = '';
             let lastDuck = '0:a';
             
             for (let i = 0; i < scenes.length; i++) {
                 const sub = timeline[i] || {};
-                const sStart = scenes[i].start;
-                const sEnd = Math.max(scenes[i].end, sStart + (sub.final_dur || 0));
+                const sStart = actualStart[i];
+                let sEnd = Math.max(scenes[i].end, sStart + (sub.final_dur || 0));
+                
+                if (i < scenes.length - 1) {
+                    sEnd = Math.max(sEnd, actualStart[i+1]);
+                }
+                
                 const nextDuck = `duck${i}`;
                 
                 filterGraph += `[${lastDuck}]volume=0.0:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
@@ -402,7 +419,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 const p = narrationClipPaths[i];
                 if (p) {
                     ffmpegInputArgs.push('-i', p);
-                    const delayMs = Math.round(scenes[i].start * 1000);
+                    const delayMs = Math.round(actualStart[i] * 1000);
                     filterGraph += `[${currentInputIndex}:a]adelay=delays=${delayMs}:all=1[aud${i}_delayed];`;
                     filterGraph += `[aud${i}_delayed]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aud${i}];`;
                     mixInputs += `[aud${i}]`;
