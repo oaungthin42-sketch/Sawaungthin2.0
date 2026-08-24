@@ -5,7 +5,7 @@ import path from 'path';
 export const startCleanupSweep = () => {
     const sweep = () => {
         try {
-            const timeLimit = Date.now() - 24 * 60 * 60 * 1000;
+            const timeLimit = Date.now() - 4 * 60 * 60 * 1000;
             const stmt = db.prepare(`SELECT id FROM jobs WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at < ?`);
             const expiredJobs = stmt.all(timeLimit);
 
@@ -46,8 +46,9 @@ export const startCleanupSweep = () => {
                 }
             }
 
+            const recapTimeLimit = Date.now() - 4 * 60 * 60 * 1000;
             const recapStmt = db.prepare(`SELECT id, sourceVideoPath, finalVideoPath, cleanedVideoPath FROM ai_recap_jobs WHERE (generationStatus = 'video_done' OR generationStatus = 'video_error') AND videoCompletedAt IS NOT NULL AND videoCompletedAt < ?`);
-            const expiredRecaps = recapStmt.all(timeLimit);
+            const expiredRecaps = recapStmt.all(recapTimeLimit);
 
             if (expiredRecaps.length > 0) {
                 console.log(`[Cleanup] Found ${expiredRecaps.length} expired AI Recap jobs.`);

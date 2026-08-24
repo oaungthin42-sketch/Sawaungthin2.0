@@ -303,6 +303,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             updateProgress(5, 'Trimming silence...');
             await trimSilence(sourceVideoPath, cleanedVideoPath, sourcesDir);
             console.log(`[AI Recap] Silence trim complete for job ${jobId}.`);
+            if (fs.existsSync(sourceVideoPath)) fs.unlinkSync(sourceVideoPath);
 
             console.log(`[AI Recap] Generating narration script for job ${jobId}...`);
             updateProgress(20, 'Analyzing video and generating narration...');
@@ -453,6 +454,17 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             overlayArgs.push('-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac', finalVideoPath);
 
             updateProgress(70, 'Mixing audio and generating final video...');
+            try {
+                const stats = fs.statfsSync(sourcesDir);
+                const availSpaceMB = (stats.bavail * stats.bsize) / (1024 * 1024);
+                console.log(`[AI Recap] Available disk space before mix: ${availSpaceMB.toFixed(2)} MB`);
+                if (availSpaceMB < 500) {
+                    throw new Error("Insufficient disk space to generate video");
+                }
+            } catch (e) {
+                if (e.message === "Insufficient disk space to generate video") throw e;
+                console.warn("[AI Recap] Failed to check disk space:", e);
+            }
             await runFFmpeg(overlayArgs, sourcesDir, () => {});
 
             // BLUR PASS
@@ -707,6 +719,15 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
         } catch (err) {
             console.error("[AI Recap] Generation failed", err);
             db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ?, videoCompletedAt = ? WHERE id = ?`).run(err.message || "Generation error", Date.now(), jobId);
+            try {
+                const files = fs.readdirSync(sourcesDir);
+                for (const file of files) {
+                    if (file.startsWith(jobId)) {
+                        const fp = path.join(sourcesDir, file);
+                        if (fs.existsSync(fp)) fs.unlinkSync(fp);
+                    }
+                }
+            } catch(e) {}
         }
     })();
 });
