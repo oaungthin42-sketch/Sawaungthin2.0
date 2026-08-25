@@ -467,6 +467,10 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             }
             await runFFmpeg(overlayArgs, sourcesDir, () => {});
 
+            if (fs.existsSync(finalVideoPath) && fs.statSync(finalVideoPath).size > 0) {
+                if (fs.existsSync(cleanedVideoPath)) fs.unlinkSync(cleanedVideoPath);
+            }
+
             // BLUR PASS
             if (blurBoxes && blurBoxes.length > 0) {
                 updateProgress(80, 'Applying blur effects...');
