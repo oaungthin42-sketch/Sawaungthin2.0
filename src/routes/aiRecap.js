@@ -427,25 +427,43 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 }
 
                 const target_dur = timeline[i].final_dur;
-                let speed = source_dur / target_dur;
-                speed = Math.max(0.35, Math.min(3.0, speed));
-
+                let segArgs;
                 const segPath = path.join(sourcesDir, `${jobId}_seg_${i}.ts`);
-                
-                const segArgs = [
-                    '-y',
-                    '-ss', scenes[i].source_start.toString(),
-                    '-t', source_dur.toString(),
-                    '-i', sourceVideoPath,
-                    '-an',
-                    '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${target_dur}[v]`,
-                    '-map', '[v]',
-                    '-t', target_dur.toString(),
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-f', 'mpegts',
-                    segPath
-                ];
+
+                if (source_dur >= target_dur) {
+                    // Footage is long enough: play it at NORMAL speed, just take the
+                    // first target_dur seconds — never speed up footage.
+                    segArgs = [
+                        '-y',
+                        '-ss', scenes[i].source_start.toString(),
+                        '-t', target_dur.toString(),
+                        '-i', sourceVideoPath,
+                        '-an',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-f', 'mpegts',
+                        segPath
+                    ];
+                } else {
+                    // Footage is shorter than needed: mild slow-down only (never
+                    // slower than 0.7x speed, i.e. never more than ~1.43x
+                    // slow-motion), then freeze-pad any remaining shortfall.
+                    const speed = Math.max(0.7, source_dur / target_dur);
+                    segArgs = [
+                        '-y',
+                        '-ss', scenes[i].source_start.toString(),
+                        '-t', source_dur.toString(),
+                        '-i', sourceVideoPath,
+                        '-an',
+                        '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${target_dur}[v]`,
+                        '-map', '[v]',
+                        '-t', target_dur.toString(),
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-f', 'mpegts',
+                        segPath
+                    ];
+                }
 
                 try {
                     await runFFmpeg(segArgs, sourcesDir, () => {});
@@ -526,6 +544,202 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             if (!fs.existsSync(finalVideoPath) || fs.statSync(finalVideoPath).size === 0) {
                 throw new Error("Video assembly failed: no valid segments produced");
+            }
+
+            // --- NEW: BLUR / WATERMARK / SUBTITLE PASSES ---
+            
+            let vidW = 1080;
+            let vidH = 1920;
+            try {
+                const probeSize = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${finalVideoPath}"`).toString().trim();
+                const parts = probeSize.split('x');
+                if (parts.length === 2) {
+                    vidW = parseInt(parts[0], 10);
+                    vidH = parseInt(parts[1], 10);
+                }
+            } catch(e) {}
+
+            if (blurBoxes && blurBoxes.length > 0) {
+                try {
+                    const blurTmpPath = path.join(sourcesDir, `${jobId}_blur.mp4`);
+                    let filterComplex = '';
+                    let lastMap = '[0:v]';
+                    let mainSplit = '';
+
+                    for (let i = 0; i < blurBoxes.length; i++) {
+                        const box = blurBoxes[i];
+                        const nextMap = `[out${i}]`;
+                        mainSplit = `[main${i}]`;
+                        const blurSplit = `[blur${i}]`;
+
+                        const x = Math.round((box.xPct / 100) * vidW);
+                        const y = Math.round((box.yPct / 100) * vidH);
+                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * vidW);
+                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * vidH);
+                        const w = Math.max(2, x2 - x);
+                        const h = Math.max(2, y2 - y);
+
+                        const strength = Math.min(30, Math.max(1, box.strength || 10));
+                        const eff = Math.min(50, Math.round(strength * 1.5) + 5);
+                        const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
+                        const expand = maskBlur + 2;
+                        const pad = expand + maskBlur + 2;
+
+                        const cx = Math.max(0, x - pad);
+                        const cy = Math.max(0, y - pad);
+                        const cw = Math.min(vidW - cx, w + pad * 2);
+                        const ch = Math.min(vidH - cy, h + pad * 2);
+
+                        const boxInCropX = x - cx;
+                        const boxInCropY = y - cy;
+                        const maskX = Math.max(0, boxInCropX - expand);
+                        const maskY = Math.max(0, boxInCropY - expand);
+                        const maskW = w + expand * 2;
+                        const maskH = h + expand * 2;
+
+                        const maskBase = `[mask_base${i}]`;
+                        const mask = `[mask${i}]`;
+                        const blurCrop = `[blur_crop${i}]`;
+                        const blurDone = `[blur_done${i}]`;
+                        const alphaBlur = `[alpha_blur${i}]`;
+
+                        filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
+                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
+                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
+                        filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                        filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
+                        filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
+
+                        lastMap = nextMap;
+                    }
+
+                    if (filterComplex) {
+                        await runFFmpeg([
+                            '-y',
+                            '-i', finalVideoPath,
+                            '-filter_complex', filterComplex.replace(/;\s*$/, ""),
+                            '-map', lastMap, '-map', '0:a?',
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            blurTmpPath
+                        ], sourcesDir, () => {});
+
+                        if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
+                            fs.unlinkSync(finalVideoPath);
+                            fs.renameSync(blurTmpPath, finalVideoPath);
+                        }
+                    }
+                } catch(e) { console.error("[AI Recap] Blur error", e); }
+            }
+
+            if (watermarkText) {
+                try {
+                    const wmTmpPath = path.join(sourcesDir, `${jobId}_wm.mp4`);
+                    const escapedText = watermarkText
+                        .replace(/\\/g, "\\\\")
+                        .replace(/:/g, "\\:")
+                        .replace(/'/g, "\\'")
+                        .replace(/%/g, "\\%");
+                    
+                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
+                    const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
+                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+
+                    await runFFmpeg([
+                        '-y',
+                        '-i', finalVideoPath,
+                        '-vf', drawtextFilter,
+                        '-c:a', 'copy',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        wmTmpPath
+                    ], sourcesDir, () => {});
+
+                    if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
+                        fs.unlinkSync(finalVideoPath);
+                        fs.renameSync(wmTmpPath, finalVideoPath);
+                    }
+                } catch(e) { console.error("[AI Recap] Watermark error", e); }
+            }
+
+            if (burnSubtitles) {
+                try {
+                    const subTmpPath = path.join(sourcesDir, `${jobId}_sub.mp4`);
+                    
+                    let cumulativeTime = 0;
+                    const subtitleCues = [];
+                    for (let i = 0; i < scenes.length; i++) {
+                        if (!narrationClipPaths[i]) continue;
+                        const dur = timeline[i].final_dur;
+                        subtitleCues.push({
+                            start: cumulativeTime,
+                            end: cumulativeTime + dur,
+                            text: scenes[i].narration_text
+                        });
+                        cumulativeTime += dur;
+                    }
+
+                    if (subtitleCues.length > 0) {
+                        let pos = subtitlePosition || { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+                        const marginL = Math.round((pos.xPct / 100) * vidW);
+                        const marginR = Math.round(vidW - ((pos.xPct + pos.widthPct) / 100) * vidW);
+                        const marginV = Math.round((pos.yPct / 100) * vidH);
+                        
+                        let fontsize = Math.round(((pos.heightPct / 100) * vidH) * 0.6);
+                        if (fontsize < 24) fontsize = 24;
+                        if (fontsize > 80) fontsize = 80;
+
+                        let fontName = "Padauk";
+                        let primaryColor = "&H00FFFFFF";
+                        if (subtitleColor === "yellow") primaryColor = "&H0000FFFF";
+                        if (subtitleColor === "cyan") primaryColor = "&H00FFFF00";
+                        if (subtitleColor === "lime") primaryColor = "&H0000FF00";
+                        if (subtitleColor === "magenta") primaryColor = "&H00FF00FF";
+
+                        const toAssTime = (sec) => {
+                            const h = Math.floor(sec / 3600);
+                            const m = Math.floor((sec % 3600) / 60);
+                            const s = Math.floor(sec % 60);
+                            const cs = Math.floor((sec % 1) * 100);
+                            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+                        };
+
+                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+                        
+                        const assLines = subtitleCues.map(sub => {
+                            const startStr = toAssTime(sub.start);
+                            const endStr = toAssTime(sub.end);
+                            const assText = (sub.text || '').replace(/\n/g, '\\N');
+                            return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                        });
+
+                        const assPath = path.join(sourcesDir, `${jobId}.ass`);
+                        fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
+
+                        const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+
+                        await runFFmpeg([
+                            '-y',
+                            '-i', finalVideoPath,
+                            '-filter_complex', filterComplex,
+                            '-map', '[v]',
+                            '-map', '0:a?',
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            subTmpPath
+                        ], sourcesDir, () => {});
+
+                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                            fs.unlinkSync(finalVideoPath);
+                            fs.renameSync(subTmpPath, finalVideoPath);
+                        }
+                        
+                        if (fs.existsSync(assPath)) fs.unlinkSync(assPath);
+                    }
+                } catch(e) { console.error("[AI Recap] Subtitle error", e); }
             }
 
             updateProgress(100, 'Done');
