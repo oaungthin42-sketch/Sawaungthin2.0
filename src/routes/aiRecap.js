@@ -205,8 +205,13 @@ by description), their relationships, and important turning points.
 Do not invent events that are not shown or clearly implied in the
 video.
 
-Break the narration into short segments, roughly 1-3 sentences each,
-in the order they should be spoken. For EACH segment, also provide a
+Break the narration into MANY short segments — each segment should
+be ONE single short sentence only (roughly 5-15 words), never
+multiple sentences combined. This means a typical movie clip should
+produce considerably more segments than before (expect 15-40+
+segments for a few-minutes-long clip, not just 5). Shorter segments
+let each one be matched to a tighter, more accurate span of footage,
+and make the narration sound more natural when spoken aloud. For EACH segment, also provide a
 \`source_start\` and \`source_end\` timestamp in seconds, referencing a
 span in the ORIGINAL video (the one you were given) whose visuals
 best match what that narration segment describes — this footage will
@@ -708,11 +713,45 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
                         const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
                         
-                        const assLines = subtitleCues.map(sub => {
-                            const startStr = toAssTime(sub.start);
-                            const endStr = toAssTime(sub.end);
-                            const assText = (sub.text || '').replace(/\n/g, '\\N');
-                            return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                        const assLines = [];
+                        subtitleCues.forEach(sub => {
+                            const text = (sub.text || '').replace(/\n/g, ' ').trim();
+                            if (!text) return;
+                            const words = text.split(/\s+/);
+                            const pieces = [];
+                            let currentPiece = "";
+                            for (const word of words) {
+                                if (!currentPiece) {
+                                    currentPiece = word;
+                                } else if (currentPiece.length + 1 + word.length <= 40) {
+                                    currentPiece += " " + word;
+                                } else {
+                                    pieces.push(currentPiece);
+                                    currentPiece = word;
+                                }
+                            }
+                            if (currentPiece) pieces.push(currentPiece);
+
+                            const totalCharLength = pieces.reduce((sum, p) => sum + p.length, 0);
+                            const totalDur = sub.end - sub.start;
+                            
+                            let pieceStart = sub.start;
+                            for (let i = 0; i < pieces.length; i++) {
+                                let pieceEnd;
+                                if (i === pieces.length - 1) {
+                                    pieceEnd = sub.end;
+                                } else {
+                                    const pieceDur = (pieces[i].length / totalCharLength) * totalDur;
+                                    pieceEnd = pieceStart + pieceDur;
+                                }
+                                
+                                const startStr = toAssTime(pieceStart);
+                                const endStr = toAssTime(pieceEnd);
+                                const assText = pieces[i];
+                                assLines.push(`Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`);
+                                
+                                pieceStart = pieceEnd;
+                            }
                         });
 
                         const assPath = path.join(sourcesDir, `${jobId}.ass`);
