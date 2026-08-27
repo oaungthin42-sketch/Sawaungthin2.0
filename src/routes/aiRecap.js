@@ -149,16 +149,16 @@ async function trimSilence(sourceVideoPath, outputPath, workDir) {
     if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
 }
 
-async function generateNarrationScript(cleanedVideoPath) {
+async function generateNarrationScript(sourceVideoPath) {
     const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
     if (!apiKey) {
         throw new Error("GEMINI_API_KEY is missing");
     }
     const ai = new GoogleGenAI({ apiKey });
 
-    console.log(`[AI Recap] Uploading ${cleanedVideoPath} to Gemini...`);
+    console.log(`[AI Recap] Uploading ${sourceVideoPath} to Gemini...`);
     let fileUpload = await ai.files.upload({
-        file: cleanedVideoPath,
+        file: sourceVideoPath,
         config: { mimeType: 'video/mp4' },
     });
     console.log(`[AI Recap] File uploaded. URI: ${fileUpload.uri}, Name: ${fileUpload.name}`);
@@ -186,15 +186,44 @@ IMPORTANT — READ CAREFULLY, THIS OVERRIDES THE TASK AND OUTPUT FORMAT DESCRIBE
 
 All the style and translation rules above still apply to this task. But ignore the "Input format" / "Output format" JSON example described above — this task uses a different format, specified below.
 
-YOUR TASK: Watch and listen to the attached video carefully. It has already been edited to contain ONLY the scenes where characters are speaking — non-speaking portions have already been removed. Transcribe and translate ONLY the actual dialogue/lines that characters literally speak in the audio, translated into natural spoken Burmese following every style rule above.
+YOUR TASK: Watch this movie clip in full, from start to end — it has
+NOT been cut or trimmed, so it includes both dialogue and
+non-dialogue (action, transition, establishing, reaction) scenes.
+Understand the complete story: the sequence of events, the
+characters and their relationships, their motivations, the
+cause-and-effect between scenes, and how the story resolves.
 
-Do NOT act as a narrator. Do NOT write a third-person plot summary, exposition, or explanation of what is happening on screen (e.g. do not write things like "In this scene, the character decides to..." or "Meanwhile, at the village..."). Only translate the literal words the characters say — the same way you would for dubbing a movie, not summarizing it.
+Then write a Burmese-language movie recap narration script — the way
+a narrator explains a movie's plot to someone who hasn't seen it
+(third-person, explanatory, summarizing). Do NOT translate or
+transcribe literal dialogue lines, and do NOT quote spoken lines
+directly — paraphrase and summarize what happens in your own words.
+
+Cover the story from beginning to end: setup, rising events, climax,
+and resolution. Mention key characters (by name if known, otherwise
+by description), their relationships, and important turning points.
+Do not invent events that are not shown or clearly implied in the
+video.
+
+Break the narration into short segments, roughly 1-3 sentences each,
+in the order they should be spoken. For EACH segment, also provide a
+\`source_start\` and \`source_end\` timestamp in seconds, referencing a
+span in the ORIGINAL video (the one you were given) whose visuals
+best match what that narration segment describes — this footage will
+later be shown on screen while that narration segment plays, so pick
+a span that makes visual sense for it. The source span does not need
+to be a dialogue scene — pick whichever portion (action, reaction,
+establishing shot, dialogue, etc.) best illustrates the point.
+source_start/source_end should generally follow the movie's
+chronological order across segments, except when a segment is
+intentionally referencing an earlier moment (e.g. a flashback-style
+narration line).
 
 REQUIRED OUTPUT FORMAT:
 1. Output ONLY a JSON array of segment objects. No markdown formatting or markdown code fences (\`\`\`).
-2. Each segment must have: "start" (number, seconds), "end" (number, seconds), and "narration_text" (string, Burmese) — narration_text is the Burmese translation of the dialogue spoken during that time range.
-3. Segments must be sequential, cover the video from 0s to the end without overlapping, and be in ascending chronological order. Each segment should correspond to a natural spoken line or short group of consecutive lines — do not merge the entire video into one giant segment, and do not invent a segment for a time range where nobody is actually speaking.
-4. The start and end values are strictly for subtitle timing and narration synchronization. You are translating the exact video provided, in its exact chronological order. Do NOT write instructions to skip, re-cut, or re-order scenes.`;
+2. Each segment must have: "source_start" (number, seconds), "source_end" (number, seconds), and "narration_text" (string, Burmese).
+3. Narration segments must be in the order they should be spoken. Each segment should correspond to a short group of sentences — do not merge the entire script into one giant segment.
+4. Ensure source_start and source_end values are valid (within the video's duration, and source_end > source_start).`;
 
     console.log(`[AI Recap] Calling generateContent for narration script...`);
     const response = await ai.models.generateContent({
@@ -215,11 +244,11 @@ REQUIRED OUTPUT FORMAT:
                 items: {
                     type: "OBJECT",
                     properties: {
-                        start: { type: "NUMBER" },
-                        end: { type: "NUMBER" },
+                        source_start: { type: "NUMBER" },
+                        source_end: { type: "NUMBER" },
                         narration_text: { type: "STRING" }
                     },
-                    required: ["start", "end", "narration_text"]
+                    required: ["source_start", "source_end", "narration_text"]
                 }
             }
         }
@@ -298,19 +327,12 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             
             const watermarkText = (req.body.watermarkText || '').trim();
 
-            const cleanedVideoPath = path.join(sourcesDir, jobId + '_cleaned.mp4');
-            console.log(`[AI Recap] Trimming silence for job ${jobId}...`);
-            updateProgress(5, 'Trimming silence...');
-            await trimSilence(sourceVideoPath, cleanedVideoPath, sourcesDir);
-            console.log(`[AI Recap] Silence trim complete for job ${jobId}.`);
-            if (fs.existsSync(sourceVideoPath)) fs.unlinkSync(sourceVideoPath);
-
             console.log(`[AI Recap] Generating narration script for job ${jobId}...`);
             updateProgress(20, 'Analyzing video and generating narration...');
-            const scenes = await generateNarrationScript(cleanedVideoPath);
+            const scenes = await generateNarrationScript(sourceVideoPath);
             console.log(`[AI Recap] Narration script generated successfully.`);
             
-            db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`).run(JSON.stringify({ scenes }), cleanedVideoPath, jobId);
+            db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`).run(JSON.stringify({ scenes }), sourceVideoPath, jobId);
 
             // Now do the video generation part
             const timeline = scenes;
@@ -376,350 +398,41 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(timeline, null, 2));
 
-            const finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
 
-            // Build duck-and-overlay filter_complex
-            const actualStart = new Array(scenes.length);
-            if (scenes.length > 0) {
-                actualStart[0] = scenes[0].start;
-                for (let i = 1; i < scenes.length; i++) {
-                    actualStart[i] = Math.max(scenes[i].start, actualStart[i-1] + (timeline[i-1].final_dur || 0));
-                }
-            }
-            // Update scenes/timeline start so subtitles align correctly with delayed audio
-            for (let i = 0; i < scenes.length; i++) {
-                scenes[i].start = actualStart[i];
-            }
+            // TEMPORARY (Phase 1): outputs narration audio only for review.
+            // Phase 3 will replace this with real video assembly — matching each
+            // segment's source_start/source_end footage, speed-adjusting it to
+            // the segment's TTS duration, concatenating segments, muting original
+            // audio, then re-applying blur/watermark/subtitle passes.
 
-            let filterGraph = '';
-            let lastDuck = '0:a';
-            
-            for (let i = 0; i < scenes.length; i++) {
-                if (!narrationClipPaths[i]) continue;
-                
-                const sub = timeline[i] || {};
-                const sStart = actualStart[i];
-                let sEnd = Math.max(scenes[i].end, sStart + (sub.final_dur || 0));
-                
-                if (i < scenes.length - 1) {
-                    sEnd = Math.max(sEnd, actualStart[i+1]);
-                }
-                
-                const nextDuck = `duck${i}`;
-                
-                filterGraph += `[${lastDuck}]volume=0.0:enable='between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)})'[${nextDuck}];`;
-                lastDuck = nextDuck;
-            }
-            
-            filterGraph += `[${lastDuck}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[duckfinal];`;
-            
-            let mixInputs = `[duckfinal]`;
-            let currentInputIndex = 1;
-            let validScenesCount = 0;
-            const ffmpegInputArgs = [];
-            
-            for (let i = 0; i < scenes.length; i++) {
-                const p = narrationClipPaths[i];
-                if (p) {
-                    ffmpegInputArgs.push('-i', p);
-                    const delayMs = Math.round(actualStart[i] * 1000);
-                    filterGraph += `[${currentInputIndex}:a]adelay=delays=${delayMs}:all=1[aud${i}_delayed];`;
-                    filterGraph += `[aud${i}_delayed]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[aud${i}];`;
-                    mixInputs += `[aud${i}]`;
-                    currentInputIndex++;
-                    validScenesCount++;
-                }
-            }
-            
-            const totalInputs = validScenesCount + 1;
-            filterGraph += `${mixInputs}amix=inputs=${totalInputs}:duration=first:dropout_transition=0:normalize=0[aout]`;
-            
-            if (flipped) {
-                filterGraph += `;[0:v]hflip[vout]`;
-            }
-            
-            // Run single ffmpeg command for audio overlay
-            const overlayArgs = ['-y', '-i', cleanedVideoPath];
-            for (const arg of ffmpegInputArgs) {
-                overlayArgs.push(arg);
-            }
-            overlayArgs.push('-filter_complex', filterGraph);
-            
-            if (flipped) {
-                overlayArgs.push('-map', '[vout]');
-            } else {
-                overlayArgs.push('-map', '0:v');
-            }
-            
-            overlayArgs.push('-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac', finalVideoPath);
-
-            updateProgress(70, 'Mixing audio and generating final video...');
-            try {
-                const stats = fs.statfsSync(sourcesDir);
-                const availSpaceMB = (stats.bavail * stats.bsize) / (1024 * 1024);
-                console.log(`[AI Recap] Available disk space before mix: ${availSpaceMB.toFixed(2)} MB`);
-                if (availSpaceMB < 500) {
-                    throw new Error("Insufficient disk space to generate video");
-                }
-            } catch (e) {
-                if (e.message === "Insufficient disk space to generate video") throw e;
-                console.warn("[AI Recap] Failed to check disk space:", e);
-            }
-            await runFFmpeg(overlayArgs, sourcesDir, () => {});
-
-            if (fs.existsSync(finalVideoPath) && fs.statSync(finalVideoPath).size > 0) {
-                if (fs.existsSync(cleanedVideoPath)) fs.unlinkSync(cleanedVideoPath);
+            const previewAudioPath = path.join(sourcesDir, jobId + '_narration_preview.wav');
+            const validAudioPaths = narrationClipPaths.filter(p => p && fs.existsSync(p));
+            if (validAudioPaths.length > 0) {
+                const concatListPath = path.join(sourcesDir, `concat_${jobId}.txt`);
+                fs.writeFileSync(concatListPath, validAudioPaths.map(f => `file '${f}'`).join('\n'));
+                await runFFmpeg([
+                    '-y',
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', concatListPath,
+                    '-c', 'copy',
+                    previewAudioPath
+                ], sourcesDir, () => {});
+                if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
             }
 
-            // BLUR PASS
-            if (blurBoxes && blurBoxes.length > 0) {
-                updateProgress(80, 'Applying blur effects...');
-                try {
-                    const blurTmpPath = path.join(sourcesDir, `${jobId}_blur.mp4`);
-                    const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                    const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                    const vidW = parseInt(execSync(vidWCmd).toString().trim());
-                    const vidH = parseInt(execSync(vidHCmd).toString().trim());
-                    
-                    let filterComplex = '';
-                    let lastMap = '[0:v]';
-                    
-                    blurBoxes.forEach((box, index) => {
-                        const x = Math.round((box.xPct / 100) * vidW);
-                        const y = Math.round((box.yPct / 100) * vidH);
-                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * vidW);
-                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * vidH);
-                        const w = Math.max(2, x2 - x);
-                        const h = Math.max(2, y2 - y);
-
-                        const strength = Math.min(30, Math.max(1, box.strength || 15));
-                        const eff = Math.min(50, Math.round(strength * 1.5) + 5);
-                        const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
-                        const expand = maskBlur + 2;
-                        const pad = expand + maskBlur + 2;
-
-                        const cx = Math.max(0, x - pad);
-                        const cy = Math.max(0, y - pad);
-                        const cw = Math.min(vidW - cx, w + pad * 2);
-                        const ch = Math.min(vidH - cy, h + pad * 2);
-
-                        const boxInCropX = x - cx;
-                        const boxInCropY = y - cy;
-
-                        const maskX = Math.max(0, boxInCropX - expand);
-                        const maskY = Math.max(0, boxInCropY - expand);
-                        const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
-                        const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
-
-                        const nextMap = `[v${index}]`;
-                        const mainSplit = `[main${index}]`;
-                        const blurSplit = `[blur${index}]`;
-                        const maskBase = `[mask_base${index}]`;
-                        const mask = `[mask${index}]`;
-                        const blurCrop = `[blur_crop${index}]`;
-                        const blurDone = `[blur_done${index}]`;
-                        const alphaBlur = `[alpha_blur${index}]`;
-
-                        filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
-                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
-                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
-                        filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
-                        filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
-                        filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
-                        
-                        lastMap = nextMap;
-                    });
-                    
-                    const blurArgs = [
-                        '-y',
-                        '-i', finalVideoPath,
-                        '-filter_complex', filterComplex.replace(/;$/, ''),
-                        '-map', lastMap,
-                        '-map', '0:a?',
-                        '-c:a', 'copy',
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        blurTmpPath
-                    ];
-                    
-                    await runFFmpeg(blurArgs, sourcesDir, () => {});
-                    
-                    if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                        fs.unlinkSync(finalVideoPath);
-                        fs.renameSync(blurTmpPath, finalVideoPath);
-                    }
-                } catch (e) {
-                    console.error("[AI Recap] Blur pass failed", e);
-                }
-            }
-
-            // WATERMARK PASS
-            if (watermarkText) {
-                updateProgress(85, 'Adding watermark...');
-                try {
-                    const wmTmpPath = path.join(sourcesDir, `${jobId}_watermark.mp4`);
-                    let escapedText = watermarkText
-                        .replace(/\\/g, "\\\\")
-                        .replace(/:/g, "\\:")
-                        .replace(/'/g, "\\'")
-                        .replace(/%/g, "\\%");
-                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
-                    const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
-                    const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
-                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
-                    const wmArgs = [
-                        '-y',
-                        '-i', finalVideoPath,
-                        '-vf', drawtextFilter,
-                        '-c:a', 'copy',
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        wmTmpPath
-                    ];
-                    await runFFmpeg(wmArgs, sourcesDir, () => {});
-                    
-                    if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
-                        fs.unlinkSync(finalVideoPath);
-                        fs.renameSync(wmTmpPath, finalVideoPath);
-                    }
-                } catch (e) {
-                    console.error("[AI Recap] Watermark pass failed", e);
-                }
-            }
-
-            // SUBTITLE PASS
-            if (burnSubtitles && timeline.length > 0) {
-                updateProgress(90, 'Burning subtitles...');
-                try {
-                    const subTmpPath = path.join(sourcesDir, `${jobId}_subburn.mp4`);
-                    const pos = subtitlePosition;
-                    
-                    const vidWCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                    const vidHCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "${finalVideoPath}"`;
-                    const vidW = parseInt(execSync(vidWCmd).toString().trim());
-                    const vidH = parseInt(execSync(vidHCmd).toString().trim());
-                    
-                    const marginL = Math.round((pos.xPct / 100) * vidW);
-                    const marginR = Math.round(vidW - ((pos.xPct + pos.widthPct) / 100) * vidW);
-                    const marginV = Math.round((pos.yPct / 100) * vidH);
-                    
-                    let fontsize = Math.round(((pos.heightPct / 100) * vidH) * 0.6);
-                    if (fontsize < 24) fontsize = 24;
-                    if (fontsize > 80) fontsize = 80;
-                    
-                    let primaryColor = "&H00FFFFFF";
-                    if (subtitleColor === "yellow") primaryColor = "&H0000FFFF";
-                    if (subtitleColor === "cyan") primaryColor = "&H00FFFF00";
-                    if (subtitleColor === "lime") primaryColor = "&H0000FF00";
-                    if (subtitleColor === "magenta") primaryColor = "&H00FF00FF";
-                    
-                    const toAssTime = (sec) => {
-                        const h = Math.floor(sec / 3600);
-                        const m = Math.floor((sec % 3600) / 60);
-                        const s = Math.floor(sec % 60);
-                        const cs = Math.floor((sec % 1) * 100);
-                        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
-                    };
-                    
-                    const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${vidW}\nPlayResY: ${vidH}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Padauk,${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-                    
-                    const assLines = [];
-                    for (let i = 0; i < timeline.length; i++) {
-                        const sub = timeline[i] || {};
-                        const sStart = scenes[i]?.start || 0;
-                        const duration = (sub.final_dur || 0);
-                        const sEnd = sStart + duration;
-                        const text = (sub.text || scenes[i].narration_text || '').trim();
-                        if (!text) continue;
-
-                        const words = text.split(/\s+/);
-                        const pieces = [];
-                        let currentPiece = '';
-
-                        for (const word of words) {
-                            if (!word) continue;
-                            if (!currentPiece) {
-                                currentPiece = word;
-                            } else {
-                                if (currentPiece.length + 1 + word.length > 40) {
-                                    pieces.push(currentPiece);
-                                    currentPiece = word;
-                                } else {
-                                    currentPiece += ' ' + word;
-                                }
-                            }
-                        }
-                        if (currentPiece) pieces.push(currentPiece);
-
-                        if (pieces.length === 0) continue;
-
-                        const totalChars = pieces.reduce((sum, p) => sum + p.length, 0);
-                        let currentStart = sStart;
-                        
-                        pieces.forEach((piece, pIdx) => {
-                            let pieceDuration = 0;
-                            if (totalChars > 0) {
-                                pieceDuration = (piece.length / totalChars) * duration;
-                            } else {
-                                pieceDuration = duration / pieces.length;
-                            }
-
-                            let pieceEnd = currentStart + pieceDuration;
-                            if (pIdx === pieces.length - 1) {
-                                pieceEnd = sEnd;
-                            }
-
-                            const startStr = toAssTime(currentStart);
-                            const endStr = toAssTime(pieceEnd);
-                            const assText = piece.trim().replace(/\n/g, '\\N');
-                            
-                            assLines.push(`Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`);
-                            
-                            currentStart = pieceEnd;
-                        });
-                    }
-                    
-                    const assPath = path.join(sourcesDir, jobId + ".ass");
-                    fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
-                    
-                    const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                    
-                    const subArgs = [
-                        '-y',
-                        '-i', finalVideoPath,
-                        '-filter_complex', filterComplex,
-                        '-map', '[v]',
-                        '-map', '0:a?',
-                        '-c:a', 'copy',
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        subTmpPath
-                    ];
-                    
-                    await runFFmpeg(subArgs, sourcesDir, () => {});
-                    if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                        fs.unlinkSync(finalVideoPath);
-                        fs.renameSync(subTmpPath, finalVideoPath);
-                    }
-                    if (fs.existsSync(assPath)) fs.unlinkSync(assPath);
-                } catch (e) {
-                    console.error("[AI Recap] Subtitle pass failed", e);
-                }
-            }
-            
             // Cleanup temps
             for (const p of narrationClipPaths) {
                 if (p && fs.existsSync(p)) fs.unlinkSync(p);
             }
             if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
-            
+
             updateProgress(100, 'Done');
-            db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
-            
+            db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(previewAudioPath, Date.now(), jobId);
+
             if (fs.existsSync(sourceVideoPath)) {
                 fs.unlinkSync(sourceVideoPath);
             }
-
         } catch (err) {
             console.error("[AI Recap] Generation failed", err);
             db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_error', error = ?, videoCompletedAt = ? WHERE id = ?`).run(err.message || "Generation error", Date.now(), jobId);
