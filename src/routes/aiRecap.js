@@ -399,36 +399,137 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(timeline, null, 2));
 
 
-            // TEMPORARY (Phase 1): outputs narration audio only for review.
-            // Phase 3 will replace this with real video assembly — matching each
-            // segment's source_start/source_end footage, speed-adjusting it to
-            // the segment's TTS duration, concatenating segments, muting original
-            // audio, then re-applying blur/watermark/subtitle passes.
+                        // Phase 3: Real Video Assembly
+            let originalVideoDur = 0;
+            try {
+                const durStr = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${sourceVideoPath}"`).toString().trim();
+                originalVideoDur = parseFloat(durStr) || 0;
+            } catch (e) {
+                console.error("[AI Recap] Failed to probe sourceVideoPath duration", e);
+            }
 
-            const previewAudioPath = path.join(sourcesDir, jobId + '_narration_preview.wav');
-            const validAudioPaths = narrationClipPaths.filter(p => p && fs.existsSync(p));
-            if (validAudioPaths.length > 0) {
-                const concatListPath = path.join(sourcesDir, `concat_${jobId}.txt`);
-                fs.writeFileSync(concatListPath, validAudioPaths.map(f => `file '${f}'`).join('\n'));
+            const videoSegmentPaths = [];
+            for (let i = 0; i < scenes.length; i++) {
+                if (!narrationClipPaths[i]) {
+                    videoSegmentPaths.push(null);
+                    continue;
+                }
+
+                if (originalVideoDur > 0 && scenes[i].source_end > originalVideoDur) {
+                    scenes[i].source_end = originalVideoDur;
+                }
+                
+                const source_dur = scenes[i].source_end - scenes[i].source_start;
+                if (source_dur <= 0) {
+                    videoSegmentPaths.push(null);
+                    narrationClipPaths[i] = null;
+                    continue;
+                }
+
+                const target_dur = timeline[i].final_dur;
+                let speed = source_dur / target_dur;
+                speed = Math.max(0.35, Math.min(3.0, speed));
+
+                const segPath = path.join(sourcesDir, `${jobId}_seg_${i}.ts`);
+                
+                const segArgs = [
+                    '-y',
+                    '-ss', scenes[i].source_start.toString(),
+                    '-t', source_dur.toString(),
+                    '-i', sourceVideoPath,
+                    '-an',
+                    '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${target_dur}[v]`,
+                    '-map', '[v]',
+                    '-t', target_dur.toString(),
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-f', 'mpegts',
+                    segPath
+                ];
+
+                try {
+                    await runFFmpeg(segArgs, sourcesDir, () => {});
+                    if (fs.existsSync(segPath) && fs.statSync(segPath).size > 0) {
+                        videoSegmentPaths.push(segPath);
+                    } else {
+                        console.warn(`[AI Recap] Segment ${i} failed or 0 bytes.`);
+                        videoSegmentPaths.push(null);
+                        narrationClipPaths[i] = null;
+                    }
+                } catch (e) {
+                    console.warn(`[AI Recap] ffmpeg error on segment ${i}`, e);
+                    videoSegmentPaths.push(null);
+                    narrationClipPaths[i] = null;
+                }
+            }
+
+            const validVideoPaths = videoSegmentPaths.filter(p => p && fs.existsSync(p));
+            const silentVideoPath = path.join(sourcesDir, jobId + '_video_silent.mp4');
+            const videoConcatListPath = path.join(sourcesDir, `concat_v_${jobId}.txt`);
+            
+            if (validVideoPaths.length > 0) {
+                fs.writeFileSync(videoConcatListPath, validVideoPaths.map(f => `file '${f}'`).join("\n"));
                 await runFFmpeg([
                     '-y',
                     '-f', 'concat',
                     '-safe', '0',
-                    '-i', concatListPath,
+                    '-i', videoConcatListPath,
+                    '-c', 'copy',
+                    silentVideoPath
+                ], sourcesDir, () => {});
+            }
+
+            const validAudioPaths = narrationClipPaths.filter(p => p && fs.existsSync(p));
+            const previewAudioPath = path.join(sourcesDir, jobId + '_narration_preview.wav');
+            const audioConcatListPath = path.join(sourcesDir, `concat_a_${jobId}.txt`);
+
+            if (validAudioPaths.length > 0) {
+                fs.writeFileSync(audioConcatListPath, validAudioPaths.map(f => `file '${f}'`).join("\n"));
+                await runFFmpeg([
+                    '-y',
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', audioConcatListPath,
                     '-c', 'copy',
                     previewAudioPath
                 ], sourcesDir, () => {});
-                if (fs.existsSync(concatListPath)) fs.unlinkSync(concatListPath);
+            }
+
+            const finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
+            if (fs.existsSync(silentVideoPath) && fs.existsSync(previewAudioPath)) {
+                await runFFmpeg([
+                    '-y',
+                    '-i', silentVideoPath,
+                    '-i', previewAudioPath,
+                    '-map', '0:v',
+                    '-map', '1:a',
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-shortest',
+                    finalVideoPath
+                ], sourcesDir, () => {});
             }
 
             // Cleanup temps
+            if (fs.existsSync(videoConcatListPath)) fs.unlinkSync(videoConcatListPath);
+            if (fs.existsSync(audioConcatListPath)) fs.unlinkSync(audioConcatListPath);
+            if (fs.existsSync(silentVideoPath)) fs.unlinkSync(silentVideoPath);
+            if (fs.existsSync(previewAudioPath)) fs.unlinkSync(previewAudioPath);
+            
+            for (const p of videoSegmentPaths) {
+                if (p && fs.existsSync(p)) fs.unlinkSync(p);
+            }
             for (const p of narrationClipPaths) {
                 if (p && fs.existsSync(p)) fs.unlinkSync(p);
             }
             if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
 
+            if (!fs.existsSync(finalVideoPath) || fs.statSync(finalVideoPath).size === 0) {
+                throw new Error("Video assembly failed: no valid segments produced");
+            }
+
             updateProgress(100, 'Done');
-            db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(previewAudioPath, Date.now(), jobId);
+            db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
 
             if (fs.existsSync(sourceVideoPath)) {
                 fs.unlinkSync(sourceVideoPath);
