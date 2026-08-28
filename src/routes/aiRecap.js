@@ -244,11 +244,14 @@ chronological order across segments, except when a segment is
 intentionally referencing an earlier moment (e.g. a flashback-style
 narration line).
 
+Do not invent or approximate timestamps. Every source_start/source_end must refer to a span in the original video that you can actually visually verify shows the subject, action, character, or event described by that narration segment. Do not choose a timestamp merely because it is close in time to the correct moment — it must actually depict what the narration describes. If you are not confident which exact span best matches a narration line, choose the closest span that still visually features the same character(s) or setting, rather than a visually unrelated scene.
+
 REQUIRED OUTPUT FORMAT:
 1. Output ONLY a JSON array of segment objects. No markdown formatting or markdown code fences (\`\`\`).
 2. Each segment must have: "source_start" (number, seconds), "source_end" (number, seconds), and "narration_text" (string, Burmese).
 3. Narration segments must be in the order they should be spoken. Each segment should correspond to a short group of sentences — do not merge the entire script into one giant segment.
-4. Ensure source_start and source_end values are valid (within the video's duration, and source_end > source_start).`;
+4. Ensure source_start and source_end values are valid (within the video's duration, and source_end > source_start).
+5. Every source_start and source_end MUST be valid: source_end must always be strictly greater than source_start, and the span (source_end - source_start) must be at least 2 seconds. Never output source_end equal to or less than source_start. Double-check every segment's timestamps before finalizing your output.`;
 
         if (retryMessage) {
             p += `\n\nIMPORTANT RETRY INSTRUCTION: ${retryMessage}`;
@@ -468,10 +471,18 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     scene.source_end = originalVideoDur;
                 }
                 
-                const source_dur = scene.source_end - scene.source_start;
+                let source_dur = scene.source_end - scene.source_start;
                 if (source_dur <= 0) {
-                    narrationClipPaths[i] = null;
-                    return;
+                    console.warn(`[AI Recap] Scene ${i} had invalid timestamps (start=${scene.source_start}, end=${scene.source_end}). Repairing.`);
+                    const MIN_SPAN = 2.0; // seconds
+                    scene.source_end = Math.min(originalVideoDur > 0 ? originalVideoDur : scene.source_start + MIN_SPAN, scene.source_start + MIN_SPAN);
+                    scene.source_start = Math.max(0, scene.source_end - MIN_SPAN);
+                    source_dur = scene.source_end - scene.source_start;
+                    if (source_dur <= 0) {
+                        // Still invalid (e.g. source_start was already at/near video end) — only now actually drop it.
+                        narrationClipPaths[i] = null;
+                        return;
+                    }
                 }
 
                 const target_dur = timeline[i].final_dur;
@@ -494,9 +505,9 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     ];
                 } else {
                     // Footage is shorter than needed: mild slow-down only (never
-                    // slower than 0.7x speed, i.e. never more than ~1.43x
+                    // slower than 0.5x speed, i.e. never more than 2x
                     // slow-motion), then freeze-pad any remaining shortfall.
-                    const speed = Math.max(0.7, source_dur / target_dur);
+                    const speed = Math.max(0.5, source_dur / target_dur);
                     segArgs = [
                         '-y',
                         '-ss', scene.source_start.toString(),
