@@ -208,50 +208,27 @@ async function generateNarrationScript(sourceVideoPath) {
     const buildPrompt = (retryMessage = "") => {
         let p = `${styleGuide}
 
-YOUR TASK: Watch this movie clip in full, from start to end — it has
-NOT been cut or trimmed, so it includes both dialogue and
-non-dialogue (action, transition, establishing, reaction) scenes.
-Understand the complete story: the sequence of events, the
-characters and their relationships, their motivations, the
-cause-and-effect between scenes, and how the story resolves.
+YOUR TASK HAS TWO STEPS. Complete them in order.
 
-Then write a Burmese-language movie recap narration script — the way
-a narrator explains a movie's plot to someone who hasn't seen it
-(third-person, explanatory, summarizing). Do NOT translate or
-transcribe literal dialogue lines, and do NOT quote spoken lines
-directly — paraphrase and summarize what happens in your own words.
+STEP 1 — BUILD A VISUAL TIMELINE:
+Watch the entire video from start to end. Produce a literal, chronological, shot-by-shot timeline of what is actually visible on screen — not the plot, just what you can directly observe: who/what is on screen, what action is happening, and where each shot starts and ends in seconds. Cover the ENTIRE video with no large unexplained gaps. Each timeline entry's "description" should be a short, literal, factual description of what is visible (e.g. "A man in a black jacket argues with a woman at a doorway", "Wide shot of a car driving down a street at night") — do not interpret or narrate meaning yet, just describe what is shown.
 
-Cover the story from beginning to end: setup, rising events, climax,
-and resolution. Mention key characters (by name if known, otherwise
-by description), their relationships, and important turning points.
-Do not invent events that are not shown or clearly implied in the
-video.
+STEP 2 — WRITE THE RECAP NARRATION USING ONLY THE TIMELINE FROM STEP 1:
+Now write the Burmese-language movie recap narration (third-person, explanatory storytelling — see style rules above). For EVERY narration segment, its "source_start" and "source_end" MUST exactly match (or be a sub-range within) one of the spans you already wrote in your own STEP 1 timeline. Do not invent a new timestamp that wasn't grounded in a timeline entry you already produced. Pick whichever timeline entry/entries actually show what that narration segment describes — if no timeline entry matches well, choose the closest one that still shows the same character(s) or setting, rather than an unrelated one.
+
+Cover the story from beginning to end: setup, rising events, climax, and resolution. Mention key characters (by name if known, otherwise by description), their relationships, and important turning points. Do not invent events that are not shown or clearly implied in the video. Do NOT translate or transcribe literal dialogue lines, and do NOT quote spoken lines directly — paraphrase and summarize in your own words.
 
 SOURCE VIDEO LENGTH: The source video is exactly ${durationMinutes} minutes long.
 TARGET NARRATION LENGTH: Your combined narration, when spoken aloud at a natural pace, should total roughly 40-55% of the source video's runtime (about ${targetMin} to ${targetMax} minutes of speaking).
 To achieve this, write roughly one segment per 8-15 seconds of source content, but do not sacrifice narrative coherence for segment count.
 
-Break the narration into short segments. Each segment can be 1-2 natural spoken sentences, whichever length reads most naturally as continuous storytelling — don't force artificial one-sentence breaks.
-For EACH segment, also provide a \`source_start\` and \`source_end\` timestamp in seconds, referencing a
-span in the ORIGINAL video (the one you were given) whose visuals
-best match what that narration segment describes — this footage will
-later be shown on screen while that narration segment plays, so pick
-a span that makes visual sense for it. The source span does not need
-to be a dialogue scene — pick whichever portion (action, reaction,
-establishing shot, dialogue, etc.) best illustrates the point.
-source_start/source_end should generally follow the movie's
-chronological order across segments, except when a segment is
-intentionally referencing an earlier moment (e.g. a flashback-style
-narration line).
-
-Do not invent or approximate timestamps. Every source_start/source_end must refer to a span in the original video that you can actually visually verify shows the subject, action, character, or event described by that narration segment. Do not choose a timestamp merely because it is close in time to the correct moment — it must actually depict what the narration describes. If you are not confident which exact span best matches a narration line, choose the closest span that still visually features the same character(s) or setting, rather than a visually unrelated scene.
+Break the narration into short segments (1-2 natural spoken sentences each). Narration segments must be in the order they should be spoken, and their source_start/source_end should generally follow the movie's chronological order, except when a segment intentionally references an earlier moment (flashback-style narration).
 
 REQUIRED OUTPUT FORMAT:
-1. Output ONLY a JSON array of segment objects. No markdown formatting or markdown code fences (\`\`\`).
-2. Each segment must have: "source_start" (number, seconds), "source_end" (number, seconds), and "narration_text" (string, Burmese).
-3. Narration segments must be in the order they should be spoken. Each segment should correspond to a short group of sentences — do not merge the entire script into one giant segment.
-4. Ensure source_start and source_end values are valid (within the video's duration, and source_end > source_start).
-5. Every source_start and source_end MUST be valid: source_end must always be strictly greater than source_start, and the span (source_end - source_start) must be at least 2 seconds. Never output source_end equal to or less than source_start. Double-check every segment's timestamps before finalizing your output.`;
+Output a single JSON object with exactly two fields:
+1. "timeline": the array of shot-by-shot entries from STEP 1, each with "start" (number, seconds), "end" (number, seconds), and "description" (string).
+2. "segments": the array of narration segments from STEP 2, each with "source_start" (number, seconds), "source_end" (number, seconds), and "narration_text" (string, Burmese).
+Every source_start/source_end in "segments" must fall within the bounds of at least one entry in "timeline". Every timestamp must satisfy: end > start, with a minimum span of 2 seconds, and must be within the video's actual duration.`;
 
         if (retryMessage) {
             p += `\n\nIMPORTANT RETRY INSTRUCTION: ${retryMessage}`;
@@ -279,26 +256,59 @@ REQUIRED OUTPUT FORMAT:
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
-                    type: "ARRAY",
-                    items: {
-                        type: "OBJECT",
-                        properties: {
-                            source_start: { type: "NUMBER" },
-                            source_end: { type: "NUMBER" },
-                            narration_text: { type: "STRING" }
+                    type: "OBJECT",
+                    properties: {
+                        timeline: {
+                            type: "ARRAY",
+                            description: "A literal, chronological shot-by-shot log of what is visually happening in the video.",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    start: { type: "NUMBER" },
+                                    end: { type: "NUMBER" },
+                                    description: { type: "STRING" }
+                                },
+                                required: ["start", "end", "description"]
+                            }
                         },
-                        required: ["source_start", "source_end", "narration_text"]
-                    }
+                        segments: {
+                            type: "ARRAY",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    source_start: { type: "NUMBER" },
+                                    source_end: { type: "NUMBER" },
+                                    narration_text: { type: "STRING" }
+                                },
+                                required: ["source_start", "source_end", "narration_text"]
+                            }
+                        }
+                    },
+                    required: ["timeline", "segments"]
                 }
             }
         });
 
         try {
-            parsed = JSON.parse(response.text);
-            if (!Array.isArray(parsed) || parsed.length === 0) {
-                throw new Error("Gemini returned an empty or invalid array.");
+            const responseObj = JSON.parse(response.text);
+            if (!responseObj || !Array.isArray(responseObj.segments) || responseObj.segments.length === 0) {
+                throw new Error("Gemini returned an empty or invalid segments array.");
             }
-            
+            const timeline = Array.isArray(responseObj.timeline) ? responseObj.timeline : [];
+            parsed = responseObj.segments;
+
+            // Validation/logging only — does not block or drop anything, just helps us monitor accuracy.
+            if (timeline.length > 0) {
+                let ungroundedCount = 0;
+                for (const seg of parsed) {
+                    const grounded = timeline.some(t => seg.source_start >= t.start - 0.5 && seg.source_end <= t.end + 0.5);
+                    if (!grounded) ungroundedCount++;
+                }
+                if (ungroundedCount > 0) {
+                    console.warn(`[AI Recap] ${ungroundedCount}/${parsed.length} segments used a timestamp not grounded in the generated timeline.`);
+                }
+            }
+
             // Estimate duration: assume ~2.5 words per second in Burmese for TTS
             const totalWords = parsed.reduce((sum, scene) => sum + (scene.narration_text.split(/\s+/).length), 0);
             const estDuration = totalWords / 2.5; 
