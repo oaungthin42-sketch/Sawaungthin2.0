@@ -9,7 +9,7 @@ import { authMiddleware } from './auth.js';
 import { GoogleGenAI } from '@google/genai';
 import { generateNarrationTTS, transcribeWav } from '../ai/index.js';
 import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
-import { getTranslationSystemInstruction } from '../ai/translation.js';
+import { getTranslationSystemInstruction, getRecapNarrationSystemInstruction } from '../ai/translation.js';
 import { EdgeTTS } from 'node-edge-tts';
 import { getVoiceConfig } from '../ai/voices.js';
 import { applyVoiceClone } from '../ai/voiceClone.js';
@@ -33,6 +33,20 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+
+const limitConcurrency = async (tasks, limit) => {
+    const results = new Array(tasks.length);
+    let i = 0;
+    const workers = new Array(limit).fill(0).map(async () => {
+        while (i < tasks.length) {
+            const index = i++;
+            results[index] = await tasks[index]();
+        }
+    });
+    await Promise.all(workers);
+    return results;
+};
+
 
 async function trimSilence(sourceVideoPath, outputPath, workDir) {
     let totalDuration = 0;
@@ -177,14 +191,22 @@ async function generateNarrationScript(sourceVideoPath) {
         throw new Error(`Gemini file processing failed or timed out. Final state: ${state}`);
     }
 
-    const styleGuide = getTranslationSystemInstruction();
-    const prompt = `${styleGuide}
+    let sourceDuration = 0;
+    try {
+        const durStr = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${sourceVideoPath}"`).toString().trim();
+        sourceDuration = parseFloat(durStr);
+    } catch(e) {
+        console.error("[AI Recap] Failed to probe source duration in generateNarrationScript", e);
+    }
 
----
+    const durationMinutes = (sourceDuration / 60).toFixed(2);
+    const targetMin = (sourceDuration * 0.4 / 60).toFixed(2);
+    const targetMax = (sourceDuration * 0.55 / 60).toFixed(2);
 
-IMPORTANT — READ CAREFULLY, THIS OVERRIDES THE TASK AND OUTPUT FORMAT DESCRIBED ABOVE:
-
-All the style and translation rules above still apply to this task. But ignore the "Input format" / "Output format" JSON example described above — this task uses a different format, specified below.
+    const styleGuide = getRecapNarrationSystemInstruction();
+    
+    const buildPrompt = (retryMessage = "") => {
+        let p = `${styleGuide}
 
 YOUR TASK: Watch this movie clip in full, from start to end — it has
 NOT been cut or trimmed, so it includes both dialogue and
@@ -205,14 +227,12 @@ by description), their relationships, and important turning points.
 Do not invent events that are not shown or clearly implied in the
 video.
 
-Break the narration into MANY short segments — each segment should
-be ONE single short sentence only (roughly 5-15 words), never
-multiple sentences combined. This means a typical movie clip should
-produce considerably more segments than before (expect 15-40+
-segments for a few-minutes-long clip, not just 5). Shorter segments
-let each one be matched to a tighter, more accurate span of footage,
-and make the narration sound more natural when spoken aloud. For EACH segment, also provide a
-\`source_start\` and \`source_end\` timestamp in seconds, referencing a
+SOURCE VIDEO LENGTH: The source video is exactly ${durationMinutes} minutes long.
+TARGET NARRATION LENGTH: Your combined narration, when spoken aloud at a natural pace, should total roughly 40-55% of the source video's runtime (about ${targetMin} to ${targetMax} minutes of speaking).
+To achieve this, write roughly one segment per 8-15 seconds of source content, but do not sacrifice narrative coherence for segment count.
+
+Break the narration into short segments. Each segment can be 1-2 natural spoken sentences, whichever length reads most naturally as continuous storytelling — don't force artificial one-sentence breaks.
+For EACH segment, also provide a \`source_start\` and \`source_end\` timestamp in seconds, referencing a
 span in the ORIGINAL video (the one you were given) whose visuals
 best match what that narration segment describes — this footage will
 later be shown on screen while that narration segment plays, so pick
@@ -230,55 +250,79 @@ REQUIRED OUTPUT FORMAT:
 3. Narration segments must be in the order they should be spoken. Each segment should correspond to a short group of sentences — do not merge the entire script into one giant segment.
 4. Ensure source_start and source_end values are valid (within the video's duration, and source_end > source_start).`;
 
-    console.log(`[AI Recap] Calling generateContent for narration script...`);
-    const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: [
-            {
-                role: "user",
-                parts: [
-                    { fileData: { fileUri: fileUpload.uri, mimeType: fileUpload.mimeType } },
-                    { text: prompt }
-                ]
-            }
-        ],
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "ARRAY",
-                items: {
-                    type: "OBJECT",
-                    properties: {
-                        source_start: { type: "NUMBER" },
-                        source_end: { type: "NUMBER" },
-                        narration_text: { type: "STRING" }
-                    },
-                    required: ["source_start", "source_end", "narration_text"]
+        if (retryMessage) {
+            p += `\n\nIMPORTANT RETRY INSTRUCTION: ${retryMessage}`;
+        }
+        return p;
+    };
+
+    let parsed = null;
+    let retryAttempt = 0;
+    
+    while (retryAttempt < 2) {
+        const currentPrompt = buildPrompt(retryAttempt === 1 ? "Your previous output was too short. This time, ensure you generate at least 35-40% of the source runtime in spoken narration length by adding more detailed storytelling and events." : "");
+        console.log(`[AI Recap] Calling generateContent for narration script (Attempt ${retryAttempt + 1})...`);
+        const response = await ai.models.generateContent({
+            model: "gemini-3.6-flash",
+            contents: [
+                {
+                    role: "user",
+                    parts: [
+                        { fileData: { fileUri: fileUpload.uri, mimeType: fileUpload.mimeType } },
+                        { text: currentPrompt }
+                    ]
+                }
+            ],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: "ARRAY",
+                    items: {
+                        type: "OBJECT",
+                        properties: {
+                            source_start: { type: "NUMBER" },
+                            source_end: { type: "NUMBER" },
+                            narration_text: { type: "STRING" }
+                        },
+                        required: ["source_start", "source_end", "narration_text"]
+                    }
                 }
             }
+        });
+
+        try {
+            parsed = JSON.parse(response.text);
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+                throw new Error("Gemini returned an empty or invalid array.");
+            }
+            
+            // Estimate duration: assume ~2.5 words per second in Burmese for TTS
+            const totalWords = parsed.reduce((sum, scene) => sum + (scene.narration_text.split(/\s+/).length), 0);
+            const estDuration = totalWords / 2.5; 
+            
+            if (retryAttempt === 0 && sourceDuration > 0 && estDuration < sourceDuration * 0.35) {
+                console.log(`[AI Recap] Generated script estimated at ${estDuration}s, less than 35% of source (${sourceDuration}s). Retrying...`);
+                retryAttempt++;
+                continue;
+            } else {
+                break;
+            }
+        } catch (e) {
+            console.error(`[AI Recap] Failed to parse Gemini response on attempt ${retryAttempt + 1}:`, e);
+            if (retryAttempt === 0) {
+                retryAttempt++;
+                continue;
+            } else {
+                throw new Error(`Failed to parse Gemini response or invalid array.`);
+            }
         }
-    });
+    }
 
     try {
         await ai.files.delete({ name: fileUpload.name });
         console.log(`[AI Recap] Deleted file ${fileUpload.name} from Gemini`);
     } catch (e) {
         console.error("[AI Recap] Failed to delete file from Gemini:", e);
-    }
-
-    if (!response.text) {
-        throw new Error("Empty response from Gemini.");
-    }
-    
-    let parsed;
-    try {
-        parsed = JSON.parse(response.text);
-    } catch (e) {
-        throw new Error(`Failed to parse Gemini response as JSON. Response was: ${response.text}`);
-    }
-    
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-        throw new Error("Gemini returned an empty or invalid array.");
     }
     
     return parsed;
@@ -345,16 +389,16 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(timeline, null, 2));
 
             // Generate TTS clips
-            const narrationClipPaths = [];
-            for (let i = 0; i < scenes.length; i++) {
+            const narrationClipPaths = new Array(scenes.length).fill(null);
+            
+            const ttsTasks = scenes.map((scene, i) => async () => {
                 updateProgress(40 + (30 * (i / scenes.length)), `Generating audio for scene ${i + 1}/${scenes.length}`);
                 const sub = timeline[i] || {};
-                const ttsText = sub.text || scenes[i].narration_text || '';
+                const ttsText = sub.text || scene.narration_text || '';
                 
                 if (!ttsText.trim()) {
-                    narrationClipPaths.push(null);
                     timeline[i].final_dur = 0.1;
-                    continue;
+                    return;
                 }
 
                 const outPath = path.join(sourcesDir, `${jobId}_tts_${i}.wav`);
@@ -394,12 +438,13 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     } catch(e) {}
                     const dur = durStr ? parseFloat(durStr) : 2.0;
                     timeline[i].final_dur = dur;
-                    narrationClipPaths.push(outPath);
+                    narrationClipPaths[i] = outPath;
                 } else {
-                    narrationClipPaths.push(null);
                     timeline[i].final_dur = 0.1;
                 }
-            }
+            });
+
+            await limitConcurrency(ttsTasks, 5);
 
             fs.writeFileSync(authoritativeTimelinePath, JSON.stringify(timeline, null, 2));
 
@@ -413,22 +458,20 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 console.error("[AI Recap] Failed to probe sourceVideoPath duration", e);
             }
 
-            const videoSegmentPaths = [];
-            for (let i = 0; i < scenes.length; i++) {
+            const videoSegmentPaths = new Array(scenes.length).fill(null);
+            const videoTasks = scenes.map((scene, i) => async () => {
                 if (!narrationClipPaths[i]) {
-                    videoSegmentPaths.push(null);
-                    continue;
+                    return;
                 }
 
-                if (originalVideoDur > 0 && scenes[i].source_end > originalVideoDur) {
-                    scenes[i].source_end = originalVideoDur;
+                if (originalVideoDur > 0 && scene.source_end > originalVideoDur) {
+                    scene.source_end = originalVideoDur;
                 }
                 
-                const source_dur = scenes[i].source_end - scenes[i].source_start;
+                const source_dur = scene.source_end - scene.source_start;
                 if (source_dur <= 0) {
-                    videoSegmentPaths.push(null);
                     narrationClipPaths[i] = null;
-                    continue;
+                    return;
                 }
 
                 const target_dur = timeline[i].final_dur;
@@ -440,12 +483,12 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     // first target_dur seconds — never speed up footage.
                     segArgs = [
                         '-y',
-                        '-ss', scenes[i].source_start.toString(),
+                        '-ss', scene.source_start.toString(),
                         '-t', target_dur.toString(),
                         '-i', sourceVideoPath,
                         '-an',
                         '-c:v', 'libx264',
-                        '-preset', 'fast',
+                        '-preset', 'superfast',
                         '-f', 'mpegts',
                         segPath
                     ];
@@ -456,7 +499,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     const speed = Math.max(0.7, source_dur / target_dur);
                     segArgs = [
                         '-y',
-                        '-ss', scenes[i].source_start.toString(),
+                        '-ss', scene.source_start.toString(),
                         '-t', source_dur.toString(),
                         '-i', sourceVideoPath,
                         '-an',
@@ -464,7 +507,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                         '-map', '[v]',
                         '-t', target_dur.toString(),
                         '-c:v', 'libx264',
-                        '-preset', 'fast',
+                        '-preset', 'superfast',
                         '-f', 'mpegts',
                         segPath
                     ];
@@ -473,18 +516,18 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 try {
                     await runFFmpeg(segArgs, sourcesDir, () => {});
                     if (fs.existsSync(segPath) && fs.statSync(segPath).size > 0) {
-                        videoSegmentPaths.push(segPath);
+                        videoSegmentPaths[i] = segPath;
                     } else {
                         console.warn(`[AI Recap] Segment ${i} failed or 0 bytes.`);
-                        videoSegmentPaths.push(null);
                         narrationClipPaths[i] = null;
                     }
                 } catch (e) {
                     console.warn(`[AI Recap] ffmpeg error on segment ${i}`, e);
-                    videoSegmentPaths.push(null);
                     narrationClipPaths[i] = null;
                 }
-            }
+            });
+
+            await limitConcurrency(videoTasks, 3);
 
             const validVideoPaths = videoSegmentPaths.filter(p => p && fs.existsSync(p));
             const silentVideoPath = path.join(sourcesDir, jobId + '_video_silent.mp4');
@@ -520,60 +563,25 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             const finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
             if (fs.existsSync(silentVideoPath) && fs.existsSync(previewAudioPath)) {
-                await runFFmpeg([
-                    '-y',
-                    '-i', silentVideoPath,
-                    '-i', previewAudioPath,
-                    '-map', '0:v',
-                    '-map', '1:a',
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-shortest',
-                    finalVideoPath
-                ], sourcesDir, () => {});
-            }
-
-            // Cleanup temps
-            if (fs.existsSync(videoConcatListPath)) fs.unlinkSync(videoConcatListPath);
-            if (fs.existsSync(audioConcatListPath)) fs.unlinkSync(audioConcatListPath);
-            if (fs.existsSync(silentVideoPath)) fs.unlinkSync(silentVideoPath);
-            if (fs.existsSync(previewAudioPath)) fs.unlinkSync(previewAudioPath);
-            
-            for (const p of videoSegmentPaths) {
-                if (p && fs.existsSync(p)) fs.unlinkSync(p);
-            }
-            for (const p of narrationClipPaths) {
-                if (p && fs.existsSync(p)) fs.unlinkSync(p);
-            }
-            if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
-
-            if (!fs.existsSync(finalVideoPath) || fs.statSync(finalVideoPath).size === 0) {
-                throw new Error("Video assembly failed: no valid segments produced");
-            }
-
-            // --- NEW: BLUR / WATERMARK / SUBTITLE PASSES ---
-            
-            let vidW = 1080;
-            let vidH = 1920;
-            try {
-                const probeSize = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${finalVideoPath}"`).toString().trim();
-                const parts = probeSize.split('x');
-                if (parts.length === 2) {
-                    vidW = parseInt(parts[0], 10);
-                    vidH = parseInt(parts[1], 10);
-                }
-            } catch(e) {}
-
-            if (blurBoxes && blurBoxes.length > 0) {
+                let filterComplex = '';
+                let lastMap = '[0:v]';
+                let vidW = 1080;
+                let vidH = 1920;
                 try {
-                    const blurTmpPath = path.join(sourcesDir, `${jobId}_blur.mp4`);
-                    let filterComplex = '';
-                    let lastMap = '[0:v]';
-                    let mainSplit = '';
+                    const probeSize = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${silentVideoPath}"`).toString().trim();
+                    const parts = probeSize.split('x');
+                    if (parts.length === 2) {
+                        vidW = parseInt(parts[0], 10);
+                        vidH = parseInt(parts[1], 10);
+                    }
+                } catch(e) {}
 
+                // 1. Blur Pass
+                if (blurBoxes && blurBoxes.length > 0) {
+                    let mainSplit = '';
                     for (let i = 0; i < blurBoxes.length; i++) {
                         const box = blurBoxes[i];
-                        const nextMap = `[out${i}]`;
+                        const nextMap = `[out_blur_${i}]`;
                         mainSplit = `[main${i}]`;
                         const blurSplit = `[blur${i}]`;
 
@@ -584,7 +592,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                         const w = Math.max(2, x2 - x);
                         const h = Math.max(2, y2 - y);
 
-                        const strength = Math.min(30, Math.max(1, box.strength || 10));
+                        const strength = Math.min(20, Math.max(1, box.strength || 10));
                         const eff = Math.min(50, Math.round(strength * 1.5) + 5);
                         const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
                         const expand = maskBlur + 2;
@@ -611,36 +619,16 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
                         filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
                         filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
-                        filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                        filterComplex += `${blurCrop}boxblur=${eff}:1${blurDone};`;
                         filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
                         filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
 
                         lastMap = nextMap;
                     }
+                }
 
-                    if (filterComplex) {
-                        await runFFmpeg([
-                            '-y',
-                            '-i', finalVideoPath,
-                            '-filter_complex', filterComplex.replace(/;\s*$/, ""),
-                            '-map', lastMap, '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            blurTmpPath
-                        ], sourcesDir, () => {});
-
-                        if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                            fs.unlinkSync(finalVideoPath);
-                            fs.renameSync(blurTmpPath, finalVideoPath);
-                        }
-                    }
-                } catch(e) { console.error("[AI Recap] Blur error", e); }
-            }
-
-            if (watermarkText) {
-                try {
-                    const wmTmpPath = path.join(sourcesDir, `${jobId}_wm.mp4`);
+                // 2. Watermark Pass
+                if (watermarkText) {
                     const escapedText = watermarkText
                         .replace(/\\/g, "\\\\")
                         .replace(/:/g, "\\:")
@@ -652,27 +640,15 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
                     const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
 
-                    await runFFmpeg([
-                        '-y',
-                        '-i', finalVideoPath,
-                        '-vf', drawtextFilter,
-                        '-c:a', 'copy',
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        wmTmpPath
-                    ], sourcesDir, () => {});
+                    const nextMap = `[wm_out]`;
+                    if (filterComplex) filterComplex += ';';
+                    filterComplex += `${lastMap}${drawtextFilter}${nextMap}`;
+                    lastMap = nextMap;
+                }
 
-                    if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
-                        fs.unlinkSync(finalVideoPath);
-                        fs.renameSync(wmTmpPath, finalVideoPath);
-                    }
-                } catch(e) { console.error("[AI Recap] Watermark error", e); }
-            }
-
-            if (burnSubtitles) {
-                try {
-                    const subTmpPath = path.join(sourcesDir, `${jobId}_sub.mp4`);
-                    
+                // 3. Subtitle Pass
+                let assPath = null;
+                if (burnSubtitles) {
                     let cumulativeTime = 0;
                     const subtitleCues = [];
                     for (let i = 0; i < scenes.length; i++) {
@@ -754,33 +730,61 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                             }
                         });
 
-                        const assPath = path.join(sourcesDir, `${jobId}.ass`);
+                        assPath = path.join(sourcesDir, `${jobId}.ass`);
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
 
-                        const filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-
-                        await runFFmpeg([
-                            '-y',
-                            '-i', finalVideoPath,
-                            '-filter_complex', filterComplex,
-                            '-map', '[v]',
-                            '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            subTmpPath
-                        ], sourcesDir, () => {});
-
-                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                            fs.unlinkSync(finalVideoPath);
-                            fs.renameSync(subTmpPath, finalVideoPath);
-                        }
-                        
-                        if (fs.existsSync(assPath)) fs.unlinkSync(assPath);
+                        const nextMap = `[sub_out]`;
+                        if (filterComplex) filterComplex += ';';
+                        filterComplex += `${lastMap}ass='${assPath.replace(/:/g, '\\\\:')}'${nextMap}`;
+                        lastMap = nextMap;
                     }
-                } catch(e) { console.error("[AI Recap] Subtitle error", e); }
+                }
+
+                const ffmpegArgs = [
+                    '-y',
+                    '-i', silentVideoPath,
+                    '-i', previewAudioPath
+                ];
+                
+                if (filterComplex) {
+                    ffmpegArgs.push('-filter_complex', filterComplex.replace(/;\s*$/, ""));
+                    ffmpegArgs.push('-map', lastMap);
+                    ffmpegArgs.push('-map', '1:a');
+                    ffmpegArgs.push('-c:v', 'libx264');
+                    ffmpegArgs.push('-preset', 'fast');
+                } else {
+                    ffmpegArgs.push('-map', '0:v');
+                    ffmpegArgs.push('-map', '1:a');
+                    ffmpegArgs.push('-c:v', 'copy');
+                }
+                
+                ffmpegArgs.push('-c:a', 'aac');
+                ffmpegArgs.push('-b:a', '192k');
+                ffmpegArgs.push('-shortest');
+                ffmpegArgs.push(finalVideoPath);
+                
+                await runFFmpeg(ffmpegArgs, sourcesDir, () => {});
+                
+                if (assPath && fs.existsSync(assPath)) fs.unlinkSync(assPath);
             }
 
+            // Cleanup temps
+            if (fs.existsSync(videoConcatListPath)) fs.unlinkSync(videoConcatListPath);
+            if (fs.existsSync(audioConcatListPath)) fs.unlinkSync(audioConcatListPath);
+            if (fs.existsSync(silentVideoPath)) fs.unlinkSync(silentVideoPath);
+            if (fs.existsSync(previewAudioPath)) fs.unlinkSync(previewAudioPath);
+            
+            for (const p of videoSegmentPaths) {
+                if (p && fs.existsSync(p)) fs.unlinkSync(p);
+            }
+            for (const p of narrationClipPaths) {
+                if (p && fs.existsSync(p)) fs.unlinkSync(p);
+            }
+            if (fs.existsSync(authoritativeTimelinePath)) fs.unlinkSync(authoritativeTimelinePath);
+
+            if (!fs.existsSync(finalVideoPath) || fs.statSync(finalVideoPath).size === 0) {
+                throw new Error("Video assembly failed: no valid segments produced");
+            }
             updateProgress(100, 'Done');
             db.prepare(`UPDATE ai_recap_jobs SET generationStatus = 'video_done', finalVideoPath = ?, videoCompletedAt = ? WHERE id = ?`).run(finalVideoPath, Date.now(), jobId);
 

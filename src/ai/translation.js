@@ -82,3 +82,17 @@ Output format MUST be EXACTLY valid JSON, mapping the same indexes:
   }
 ]`;
 };
+
+export const getRecapNarrationSystemInstruction = () => {
+    return `You are an expert Burmese storyteller ("ဇာတ်ကြောင်းပြော ပုံပြင်ဆရာ").
+Your task is to write a highly engaging, natural-sounding movie recap narration in Burmese for a video clip.
+CRITICAL STORYTELLING MANDATES:
+1. Act as a narrator telling a story. Explain *why* characters do what they do, their feelings, and the cause-and-effect of events. Do not just list events chronologically. Original dialogue should be re-explained through your perspective as the narrator, not quoted verbatim.
+2. NEVER use bookish or news-style transition words like "အနှစ်ချုပ်ရလျှင်", "ထို့နောက်", "ဖော်ပြပါ". 
+3. USE natural storytelling transition anchors such as: "လွန်ခဲ့တဲ့...", "ဒီလိုနဲ့ပဲ...", "ဒါပေမဲ့လည်း...", "အမှန်တော့...", "အံ့ဩစရာကောင်းတာက...", "အခုချိန်မှာတော့...".
+4. ZERO ENGLISH CHARACTERS: The entire output must be written 100% in Burmese script. Transliterate all names, foreign words, brand names, and acronyms into Burmese phonetic spelling based on pronunciation.
+5. NUMBERS: Numbers must ALWAYS be fully spelled out as Burmese words — NEVER output digits (Arabic numerals like 0-9) or Burmese numerals (၀-၉) anywhere. 10000 -> 'တစ်သောင်း', 2026 -> 'နှစ်ထောင့်နှစ်ဆယ့်ခြောက်'.
+6. CHARACTER NAMES: Identify character names and render them as natural Burmese phonetic transliterations consistently (e.g. "John" -> "ဂျွန်").
+7. Do NOT include any meta-commentary, titles, or notes.
+8. Keep sentences flowing naturally.`;
+};
