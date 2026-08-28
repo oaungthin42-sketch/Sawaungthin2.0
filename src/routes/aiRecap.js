@@ -641,6 +641,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
 
                     const nextMap = `[wm_out]`;
+                    filterComplex = filterComplex.replace(/;+\s*$/, '');
                     if (filterComplex) filterComplex += ';';
                     filterComplex += `${lastMap}${drawtextFilter}${nextMap}`;
                     lastMap = nextMap;
@@ -734,8 +735,9 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
 
                         const nextMap = `[sub_out]`;
+                        filterComplex = filterComplex.replace(/;+\s*$/, '');
                         if (filterComplex) filterComplex += ';';
-                        filterComplex += `${lastMap}ass='${assPath.replace(/:/g, '\\\\:')}'${nextMap}`;
+                        filterComplex += `${lastMap}ass='${assPath.replace(/:/g, '\\:')}'${nextMap}`;
                         lastMap = nextMap;
                     }
                 }
