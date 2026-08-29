@@ -562,13 +562,14 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     // slower than 0.5x speed, i.e. never more than 2x
                     // slow-motion), then freeze-pad infinitely. -shortest cuts exactly when audio ends.
                     const speed = Math.max(0.5, source_dur / target_dur);
+                    const pad_dur = Math.max(0, target_dur - (source_dur / speed));
                     segArgs = [
                         '-y',
                         '-ss', scene.source_start.toString(),
                         '-t', source_dur.toString(),
                         '-i', sourceVideoPath,
                         '-i', audioPath,
-                        '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone[v]`,
+                        '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${pad_dur.toFixed(4)}[v]`,
                         '-map', '[v]',
                         '-map', '1:a:0',
                         '-shortest',
