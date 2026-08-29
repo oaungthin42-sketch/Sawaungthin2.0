@@ -536,14 +536,15 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
                 if (source_dur >= target_dur) {
                     // Footage is long enough: play it at NORMAL speed.
-                    // We trim video to target_dur, pad infinitely with tpad, then use -shortest 
-                    // with the audio track so the segment duration exactly matches the audio duration.
+                    // We play video for its natural scene duration, then use -shortest 
+                    // with the audio track so the final segment duration is capped.
                     segArgs = [
                         '-y',
                         '-ss', scene.source_start.toString(),
+                        '-t', source_dur.toString(),
                         '-i', sourceVideoPath,
                         '-i', audioPath,
-                        '-filter_complex', `[0:v]trim=0:${target_dur},setpts=PTS-STARTPTS,tpad=stop_mode=clone[v]`,
+                        '-filter_complex', `[0:v]setpts=PTS-STARTPTS,tpad=stop_mode=clone[v]`,
                         '-map', '[v]',
                         '-map', '1:a:0',
                         '-shortest',
