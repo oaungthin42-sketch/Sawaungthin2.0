@@ -534,7 +534,9 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 const segPath = path.join(sourcesDir, `${jobId}_seg_${i}.ts`);
                 const audioPath = narrationClipPaths[i];
 
+                let branchName;
                 if (source_dur >= target_dur) {
+                    branchName = 'normal';
                     // Footage is long enough: play it at NORMAL speed.
                     // We play video for its natural scene duration, then use -shortest 
                     // with the audio track so the final segment duration is capped.
@@ -555,6 +557,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                         segPath
                     ];
                 } else {
+                    branchName = 'slowdown';
                     // Footage is shorter than needed: mild slow-down only (never
                     // slower than 0.5x speed, i.e. never more than 2x
                     // slow-motion), then freeze-pad infinitely. -shortest cuts exactly when audio ends.
@@ -577,10 +580,19 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     ];
                 }
 
+                console.log(`[AI Recap] Segment ${i}: branch=${branchName} source_dur=${source_dur.toFixed(2)} target_dur=${target_dur.toFixed(2)} start=${scene.source_start.toFixed(2)} end=${scene.source_end.toFixed(2)}`);
+
                 try {
                     await runFFmpeg(segArgs, sourcesDir, () => {});
                     if (fs.existsSync(segPath) && fs.statSync(segPath).size > 0) {
                         videoSegmentPaths[i] = segPath;
+                        try {
+                            const durStr = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${segPath}"`).toString().trim();
+                            const actualDur = parseFloat(durStr);
+                            if (!isNaN(actualDur)) {
+                                console.log(`[AI Recap] Segment ${i} actual output duration: ${actualDur.toFixed(2)}s`);
+                            }
+                        } catch (probeErr) {}
                     } else {
                         console.warn(`[AI Recap] Segment ${i} failed or 0 bytes.`);
                         narrationClipPaths[i] = null;
