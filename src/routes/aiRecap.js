@@ -239,8 +239,8 @@ Every source_start/source_end in "segments" must fall within the bounds of at le
     let parsed = null;
     let retryAttempt = 0;
     
-    while (retryAttempt < 2) {
-        const currentPrompt = buildPrompt(retryAttempt === 1 ? "Your previous output was too short. This time, ensure you generate at least 35-40% of the source runtime in spoken narration length by adding more detailed storytelling and events." : "");
+    while (retryAttempt < 3) {
+        const currentPrompt = buildPrompt(retryAttempt > 0 ? "Your previous output was too short. This time, ensure you generate at least 35-40% of the source runtime in spoken narration length by adding more detailed storytelling and events." : "");
         console.log(`[AI Recap] Calling generateContent for narration script (Attempt ${retryAttempt + 1})...`);
         const response = await ai.models.generateContent({
             model: "gemini-3.6-flash",
@@ -297,15 +297,44 @@ Every source_start/source_end in "segments" must fall within the bounds of at le
             const timeline = Array.isArray(responseObj.timeline) ? responseObj.timeline : [];
             parsed = responseObj.segments;
 
-            // Validation/logging only — does not block or drop anything, just helps us monitor accuracy.
+            // Validation/logging and snapping ungrounded timestamps to nearest timeline entry
             if (timeline.length > 0) {
                 let ungroundedCount = 0;
+                let lastTimestamp = -1;
                 for (const seg of parsed) {
                     const grounded = timeline.some(t => seg.source_start >= t.start - 0.5 && seg.source_end <= t.end + 0.5);
-                    if (!grounded) ungroundedCount++;
+                    if (!grounded) {
+                        let closest = null;
+                        let minDistance = Infinity;
+
+                        for (const t of timeline) {
+                            let dist = 0;
+                            if (seg.source_start < t.start) {
+                                dist = t.start - seg.source_start;
+                            } else if (seg.source_start > t.end) {
+                                dist = seg.source_start - t.end;
+                            }
+
+                            if (dist < minDistance) {
+                                minDistance = dist;
+                                closest = t;
+                            } else if (dist === minDistance && closest) {
+                                if (t.start >= lastTimestamp && closest.start < lastTimestamp) {
+                                    closest = t;
+                                }
+                            }
+                        }
+
+                        if (closest) {
+                            seg.source_start = closest.start;
+                            seg.source_end = closest.end;
+                        }
+                        ungroundedCount++;
+                    }
+                    lastTimestamp = seg.source_end;
                 }
                 if (ungroundedCount > 0) {
-                    console.warn(`[AI Recap] ${ungroundedCount}/${parsed.length} segments used a timestamp not grounded in the generated timeline.`);
+                    console.warn(`[AI Recap] Corrected ${ungroundedCount}/${parsed.length} ungrounded segments by snapping to nearest timeline entry.`);
                 }
             }
 
@@ -313,16 +342,21 @@ Every source_start/source_end in "segments" must fall within the bounds of at le
             const totalWords = parsed.reduce((sum, scene) => sum + (scene.narration_text.split(/\s+/).length), 0);
             const estDuration = totalWords / 2.5; 
             
-            if (retryAttempt === 0 && sourceDuration > 0 && estDuration < sourceDuration * 0.35) {
-                console.log(`[AI Recap] Generated script estimated at ${estDuration}s, less than 35% of source (${sourceDuration}s). Retrying...`);
-                retryAttempt++;
-                continue;
+            if (sourceDuration > 0 && estDuration < sourceDuration * 0.35) {
+                if (retryAttempt < 2) {
+                    console.log(`[AI Recap] Generated script estimated at ${estDuration}s, less than 35% of source (${sourceDuration}s). Retrying...`);
+                    retryAttempt++;
+                    continue;
+                } else {
+                    console.warn(`[AI Recap] Final script estimated at ${estDuration}s (${(estDuration / sourceDuration * 100).toFixed(1)}% of source), still below 35% threshold. Proceeding with best attempt.`);
+                    break;
+                }
             } else {
                 break;
             }
         } catch (e) {
             console.error(`[AI Recap] Failed to parse Gemini response on attempt ${retryAttempt + 1}:`, e);
-            if (retryAttempt === 0) {
+            if (retryAttempt < 2) {
                 retryAttempt++;
                 continue;
             } else {
@@ -498,37 +532,45 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 const target_dur = timeline[i].final_dur;
                 let segArgs;
                 const segPath = path.join(sourcesDir, `${jobId}_seg_${i}.ts`);
+                const audioPath = narrationClipPaths[i];
 
                 if (source_dur >= target_dur) {
-                    // Footage is long enough: play it at NORMAL speed, just take the
-                    // first target_dur seconds — never speed up footage.
+                    // Footage is long enough: play it at NORMAL speed.
+                    // We trim video to target_dur, pad infinitely with tpad, then use -shortest 
+                    // with the audio track so the segment duration exactly matches the audio duration.
                     segArgs = [
                         '-y',
                         '-ss', scene.source_start.toString(),
-                        '-t', target_dur.toString(),
                         '-i', sourceVideoPath,
-                        '-an',
+                        '-i', audioPath,
+                        '-filter_complex', `[0:v]trim=0:${target_dur},setpts=PTS-STARTPTS,tpad=stop_mode=clone[v]`,
+                        '-map', '[v]',
+                        '-map', '1:a:0',
+                        '-shortest',
                         '-c:v', 'libx264',
                         '-preset', 'superfast',
+                        '-c:a', 'aac',
                         '-f', 'mpegts',
                         segPath
                     ];
                 } else {
                     // Footage is shorter than needed: mild slow-down only (never
                     // slower than 0.5x speed, i.e. never more than 2x
-                    // slow-motion), then freeze-pad any remaining shortfall.
+                    // slow-motion), then freeze-pad infinitely. -shortest cuts exactly when audio ends.
                     const speed = Math.max(0.5, source_dur / target_dur);
                     segArgs = [
                         '-y',
                         '-ss', scene.source_start.toString(),
                         '-t', source_dur.toString(),
                         '-i', sourceVideoPath,
-                        '-an',
-                        '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone:stop_duration=${target_dur}[v]`,
+                        '-i', audioPath,
+                        '-filter_complex', `[0:v]setpts=${(1/speed).toFixed(4)}*PTS,tpad=stop_mode=clone[v]`,
                         '-map', '[v]',
-                        '-t', target_dur.toString(),
+                        '-map', '1:a:0',
+                        '-shortest',
                         '-c:v', 'libx264',
                         '-preset', 'superfast',
+                        '-c:a', 'aac',
                         '-f', 'mpegts',
                         segPath
                     ];
@@ -551,7 +593,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             await limitConcurrency(videoTasks, 3);
 
             const validVideoPaths = videoSegmentPaths.filter(p => p && fs.existsSync(p));
-            const silentVideoPath = path.join(sourcesDir, jobId + '_video_silent.mp4');
+            const mergedVideoPath = path.join(sourcesDir, jobId + '_merged.mp4');
             const videoConcatListPath = path.join(sourcesDir, `concat_v_${jobId}.txt`);
             
             if (validVideoPaths.length > 0) {
@@ -562,34 +604,18 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     '-safe', '0',
                     '-i', videoConcatListPath,
                     '-c', 'copy',
-                    silentVideoPath
-                ], sourcesDir, () => {});
-            }
-
-            const validAudioPaths = narrationClipPaths.filter(p => p && fs.existsSync(p));
-            const previewAudioPath = path.join(sourcesDir, jobId + '_narration_preview.wav');
-            const audioConcatListPath = path.join(sourcesDir, `concat_a_${jobId}.txt`);
-
-            if (validAudioPaths.length > 0) {
-                fs.writeFileSync(audioConcatListPath, validAudioPaths.map(f => `file '${f}'`).join("\n"));
-                await runFFmpeg([
-                    '-y',
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-i', audioConcatListPath,
-                    '-c', 'copy',
-                    previewAudioPath
+                    mergedVideoPath
                 ], sourcesDir, () => {});
             }
 
             const finalVideoPath = path.join(sourcesDir, jobId + '_final.mp4');
-            if (fs.existsSync(silentVideoPath) && fs.existsSync(previewAudioPath)) {
+            if (fs.existsSync(mergedVideoPath)) {
                 let filterComplex = '';
                 let lastMap = '[0:v]';
                 let vidW = 1080;
                 let vidH = 1920;
                 try {
-                    const probeSize = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${silentVideoPath}"`).toString().trim();
+                    const probeSize = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${mergedVideoPath}"`).toString().trim();
                     const parts = probeSize.split('x');
                     if (parts.length === 2) {
                         vidW = parseInt(parts[0], 10);
@@ -765,19 +791,18 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
                 const ffmpegArgs = [
                     '-y',
-                    '-i', silentVideoPath,
-                    '-i', previewAudioPath
+                    '-i', mergedVideoPath
                 ];
                 
                 if (filterComplex) {
                     ffmpegArgs.push('-filter_complex', filterComplex.replace(/;\s*$/, ""));
                     ffmpegArgs.push('-map', lastMap);
-                    ffmpegArgs.push('-map', '1:a');
+                    ffmpegArgs.push('-map', '0:a');
                     ffmpegArgs.push('-c:v', 'libx264');
                     ffmpegArgs.push('-preset', 'fast');
                 } else {
                     ffmpegArgs.push('-map', '0:v');
-                    ffmpegArgs.push('-map', '1:a');
+                    ffmpegArgs.push('-map', '0:a');
                     ffmpegArgs.push('-c:v', 'copy');
                 }
                 
@@ -792,10 +817,8 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
             }
 
             // Cleanup temps
-            if (fs.existsSync(videoConcatListPath)) fs.unlinkSync(videoConcatListPath);
-            if (fs.existsSync(audioConcatListPath)) fs.unlinkSync(audioConcatListPath);
-            if (fs.existsSync(silentVideoPath)) fs.unlinkSync(silentVideoPath);
-            if (fs.existsSync(previewAudioPath)) fs.unlinkSync(previewAudioPath);
+            if (typeof videoConcatListPath !== 'undefined' && fs.existsSync(videoConcatListPath)) fs.unlinkSync(videoConcatListPath);
+            if (typeof mergedVideoPath !== 'undefined' && fs.existsSync(mergedVideoPath)) fs.unlinkSync(mergedVideoPath);
             
             for (const p of videoSegmentPaths) {
                 if (p && fs.existsSync(p)) fs.unlinkSync(p);
