@@ -222,7 +222,7 @@ SOURCE VIDEO LENGTH: The source video is exactly ${durationMinutes} minutes long
 TARGET NARRATION LENGTH: Your combined narration, when spoken aloud at a natural pace, should total roughly 40-55% of the source video's runtime (about ${targetMin} to ${targetMax} minutes of speaking).
 To achieve this, write roughly one segment per 8-15 seconds of source content, but do not sacrifice narrative coherence for segment count.
 
-Break the narration into short segments (1-2 natural spoken sentences each). Narration segments must be in the order they should be spoken, and their source_start/source_end should generally follow the movie's chronological order, except when a segment intentionally references an earlier moment (flashback-style narration).
+Write each narration segment so that its spoken duration roughly matches the duration of its corresponding timeline scene when spoken aloud at a natural pace (assume ~2.5 Burmese words per second). A short scene (2-4s) gets a short phrase; a longer scene (10-20s) gets multiple sentences to fill that time. Do not sacrifice narrative coherence, and never pad with filler just to hit a duration. Narration segments must be in the order they should be spoken, and their source_start/source_end should generally follow the movie's chronological order, except when a segment intentionally references an earlier moment (flashback-style narration).
 
 REQUIRED OUTPUT FORMAT:
 Output a single JSON object with exactly two fields:
