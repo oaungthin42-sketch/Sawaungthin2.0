@@ -548,10 +548,10 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                     segArgs = [
                         '-y',
                         '-ss', scene.source_start.toString(),
-                        '-t', source_dur.toString(),
+                        '-t', target_dur.toString(),
                         '-i', sourceVideoPath,
                         '-i', audioPath,
-                        '-filter_complex', `[0:v]trim=0:${target_dur},setpts=PTS-STARTPTS,tpad=stop_mode=clone[v]`,
+                        '-filter_complex', `[0:v]setpts=PTS-STARTPTS,tpad=stop_mode=clone[v]`,
                         '-map', '[v]',
                         '-map', '1:a:0',
                         '-shortest',
