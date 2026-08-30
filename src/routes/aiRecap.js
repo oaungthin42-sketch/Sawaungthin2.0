@@ -222,10 +222,10 @@ SOURCE VIDEO LENGTH: The source video is exactly ${durationMinutes} minutes long
 TARGET NARRATION LENGTH: Your combined narration, when spoken aloud at a natural pace, should total roughly 40-55% of the source video's runtime (about ${targetMin} to ${targetMax} minutes of speaking).
 To achieve this, write roughly one segment per 8-15 seconds of source content, but do not sacrifice narrative coherence for segment count.
 
-Write each narration segment so that its spoken duration roughly matches the duration of its corresponding timeline scene when spoken aloud at a natural pace (assume ~2.5 Burmese words per second). The chosen footage span (source_start/source_end) must be long enough that it needs no more than about 1.5x slow-motion stretching to match that segment's spoken narration length. Freezing on a static frame to fill time is NOT acceptable; the video must keep moving naturally.
-- If a story beat has naturally short footage, write short, concise narration.
-- If more narration is genuinely needed, select a longer continuous footage span from your STEP 1 timeline that shows more ongoing action, rather than a short isolated clip.
-- Never invent a footage span that isn't grounded in the STEP 1 timeline just to make it longer.
+1. For each narration segment, first decide which STEP 1 timeline entry (or contiguous span of entries) the segment's visuals will come from, and note that entry's actual duration in seconds.
+2. Then write the narration text so that its spoken length (at ~2.5 Burmese words/second) fits within roughly 1.0x to at most 1.5x of that chosen footage span's duration — treat 1.5x as a hard ceiling, not a target. This means: for a short footage span (e.g. 2-3 seconds), the narration for that segment must itself be short (roughly 3-7 words) — do not write a long, detailed narration sentence and expect a short clip to stretch to fit it.
+3. If the story beat genuinely needs more spoken narration than a 1.5x stretch of the best-matching footage span allows, the correct fix is to choose a LONGER continuous footage span from STEP 1 (or merge adjacent timeline entries covering the same ongoing action) — not to keep the short span and over-stretch it.
+4. Never invent a footage span that isn't grounded in the STEP 1 timeline just to make it longer. Freezing on a static frame to fill time is NOT acceptable; the video must keep moving naturally.
 
 Narration segments must be in the order they should be spoken, and their source_start/source_end should generally follow the movie's chronological order, except when a segment intentionally references an earlier moment (flashback-style narration).
 
