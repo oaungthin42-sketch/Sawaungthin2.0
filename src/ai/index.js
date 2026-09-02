@@ -1,6 +1,8 @@
 import axios from 'axios';
 
 import fs from 'fs';
+import { generateVoxCPMSpeech } from './voxcpmClone.js';
+import db from '../services/db.js';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
@@ -399,15 +401,32 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         if (options && options.useVoiceClone === 1 && options.referenceVoiceId) {
             try {
                 console.log(`[AI] Voice clone is active. Cloning ${processedChunks.length} chunks...`);
-                const { applyVoiceClone } = await import('./voiceClone.js');
                 const oldProcessedChunks = [...processedChunks];
-                const { chunks: clonedChunks, fallbackCount, totalChunks } = await applyVoiceClone(processedChunks, options.referenceVoiceId, { sourceMode: options.sourceMode ?? 'shared' });
-                for (let i = 0; i < processedChunks.length; i++) {
-                    if (clonedChunks[i] && clonedChunks[i] !== processedChunks[i]) {
-                        processedChunks[i] = clonedChunks[i];
-                    }
-                }
                 
+                const row = db.prepare(`SELECT audioPath FROM reference_voices WHERE id = ?`).get(options.referenceVoiceId);
+                let fallbackCount = 0;
+                if (row && row.audioPath && fs.existsSync(row.audioPath)) {
+                    for (let i = 0; i < processedChunks.length; i++) {
+                        const chunkText = mergedBlocks[i].mergedText;
+                        const clonedPath = processedChunks[i].replace(/(\.[^.]+)$/, '_voxcpm$1');
+                        try {
+                            console.log(`[AI] Generating VoxCPM cloned voice for chunk ${i + 1}/${processedChunks.length}`);
+                            await generateVoxCPMSpeech(chunkText, row.audioPath, clonedPath);
+                            if (fs.existsSync(clonedPath) && fs.statSync(clonedPath).size > 0) {
+                                processedChunks[i] = clonedPath;
+                            } else {
+                                fallbackCount++;
+                            }
+                        } catch (e) {
+                            console.error(`[AI] VoxCPM clone failed for chunk ${i}, falling back to Edge TTS audio:`, e.message);
+                            fallbackCount++;
+                        }
+                    }
+                } else {
+                    console.warn(`[AI] Reference voice audio not found, skipping voice clone entirely for this job.`);
+                    fallbackCount = processedChunks.length;
+                }
+
                 if (fallbackCount > 0) {
                     const jobId = path.basename(path.dirname(cachePath));
                     try {
