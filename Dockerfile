@@ -31,8 +31,7 @@ COPY requirements.txt ./
 
 # Create a virtual environment and install faster-whisper and python dependencies
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
-    && /opt/venv/bin/pip install --no-cache-dir --no-deps git+https://github.com/myshell-ai/OpenVoice.git
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 RUN /opt/venv/bin/python3 -c "import curl_cffi; print('curl_cffi OK, version:', curl_cffi.__version__)" || true
 RUN /opt/venv/bin/yt-dlp --list-impersonate-targets || true
@@ -49,9 +48,6 @@ COPY . .
 # Pre-download and cache the faster-whisper model during the build stage
 # This ensures zero runtime downloads and complete offline execution
 RUN /opt/venv/bin/python3 src/ai/download_model.py
-
-# Pre-download and cache the OpenVoice V2 checkpoints during the build stage
-RUN /opt/venv/bin/python3 src/ai/download_openvoice.py
 
 # Build the client-side React code with Vite
 ARG VITE_GOOGLE_CLIENT_ID
