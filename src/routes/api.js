@@ -859,7 +859,6 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
 
     const audioExt = path.extname(req.file.originalname) || '.wav';
     const finalAudioPath = path.join(dataDir, `${refVoiceId}${audioExt}`);
-    const embeddingPath = path.join(dataDir, `${refVoiceId}.pt`);
 
     try {
         // Move the uploaded file from tmp to dataDir
@@ -882,37 +881,22 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
             fs.unlinkSync(finalAudioPath);
             return res.status(400).json({ error: quality.message });
         }
-        await ensureOpenVoiceService();
 
-        // Call python microservice to extract embedding
-        const port = process.env.VOICE_CLONE_PORT || '5001';
-        const serviceUrl = `http://127.0.0.1:${port}/extract-embedding`;
+        // Save to DB
+        const stmt = db.prepare(`
+            INSERT INTO reference_voices (id, userId, name, audioPath, embeddingCachePath)
+            VALUES (?, ?, ?, ?, ?)
+        `);
+        stmt.run(refVoiceId, req.user.id, name.trim(), finalAudioPath, null);
 
-        console.log(`[API] Extracting embedding for reference voice: ${finalAudioPath}`);
-        const response = await axios.post(serviceUrl, {
-            audio_path: path.resolve(finalAudioPath),
-            cache_path: path.resolve(embeddingPath)
-        }, { timeout: 600000 }); // 10 min timeout
-
-        if (response.data && response.data.status === 'success') {
-            // Save to DB
-            const stmt = db.prepare(`
-                INSERT INTO reference_voices (id, userId, name, audioPath, embeddingCachePath)
-                VALUES (?, ?, ?, ?, ?)
-            `);
-            stmt.run(refVoiceId, req.user.id, name.trim(), finalAudioPath, embeddingPath);
-
-            console.log(`[API] Reference voice created successfully: ${refVoiceId}`);
-            return res.json({
-                id: refVoiceId,
-                name: name.trim(),
-                audioPath: finalAudioPath,
-                embeddingCachePath: embeddingPath,
-                ...(quality.status === 'warn' ? { qualityWarning: quality.message } : {})
-            });
-        } else {
-            throw new Error("Python microservice did not return success status.");
-        }
+        console.log(`[API] Reference voice created successfully: ${refVoiceId}`);
+        return res.json({
+            id: refVoiceId,
+            name: name.trim(),
+            audioPath: finalAudioPath,
+            embeddingCachePath: null,
+            ...(quality.status === 'warn' ? { qualityWarning: quality.message } : {})
+        });
     } catch (err) {
         console.error("[API] Failed to create reference voice:", err);
         // Cleanup files if they exist
@@ -921,9 +905,6 @@ router.post('/voice-clones/reference-voices', authMiddleware, adminOnly, handleA
         }
         if (fs.existsSync(finalAudioPath)) {
             try { fs.unlinkSync(finalAudioPath); } catch (e) {}
-        }
-        if (fs.existsSync(embeddingPath)) {
-            try { fs.unlinkSync(embeddingPath); } catch (e) {}
         }
         return res.status(500).json({ error: `Failed to process reference voice: ${err.message}` });
     }
