@@ -63,9 +63,6 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on port ${PORT}`);
 
-    // NOTE: OpenVoice is no longer auto-started here. It is now spawned lazily,
-    // on first use, from src/ai/voiceClone.js (see ensureOpenVoiceService),
-    // and idles itself down automatically after VOICE_CLONE_IDLE_TIMEOUT_MS.
   });
 }
 
