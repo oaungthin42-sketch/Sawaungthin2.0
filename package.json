@@ -14,6 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/genai": "^2.15.0",
+    "@gradio/client": "^2.5.1",
     "@seepine/edge-tts": "^1.4.1",
     "@tailwindcss/vite": "^4.3.2",
     "@types/react": "^19.2.17",
