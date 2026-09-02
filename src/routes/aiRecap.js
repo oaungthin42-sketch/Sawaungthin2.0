@@ -12,7 +12,7 @@ import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
 import { getTranslationSystemInstruction, getRecapNarrationSystemInstruction } from '../ai/translation.js';
 import { EdgeTTS } from 'node-edge-tts';
 import { getVoiceConfig } from '../ai/voices.js';
-import { applyVoiceClone } from '../ai/voiceClone.js';
+import { generateVoxCPMSpeech } from '../ai/voxcpmClone.js';
 
 const router = express.Router();
 
@@ -447,39 +447,43 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 updateProgress(40 + (30 * (i / scenes.length)), `Generating audio for scene ${i + 1}/${scenes.length}`);
                 const sub = timeline[i] || {};
                 const ttsText = sub.text || scene.narration_text || '';
-                
+
                 if (!ttsText.trim()) {
                     timeline[i].final_dur = 0.1;
                     return;
                 }
 
                 const outPath = path.join(sourcesDir, `${jobId}_tts_${i}.wav`);
-                
                 let success = false;
-                try {
-                    console.log(`[AI Recap] Generating Edge TTS for scene ${i}`);
-                    const { edgeVoice, pitch, rate } = getVoiceConfig(voiceId);
-                    const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
-                    await ttsClient.ttsPromise(ttsText, outPath);
-                    if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
-                        success = true;
-                    }
-                } catch(e) {
-                    console.error("[AI Recap] Edge TTS failed", e);
-                }
 
-                if (success && useVoiceClone && referenceVoiceId) {
+                if (useVoiceClone && referenceVoiceId) {
                     try {
-                        const row = db.prepare(`SELECT audioPath, embeddingCachePath FROM reference_voices WHERE id = ?`).get(referenceVoiceId);
-                        if (row && (fs.existsSync(row.audioPath) || (row.embeddingCachePath && fs.existsSync(row.embeddingCachePath)))) {
-                            console.log(`[AI Recap] Applying voice clone for scene ${i}`);
-                            const { chunks } = await applyVoiceClone([outPath], referenceVoiceId, { sourceMode: 'shared' });
-                            if (chunks && chunks[0] && fs.existsSync(chunks[0])) {
-                                fs.copyFileSync(chunks[0], outPath);
+                        const row = db.prepare(`SELECT audioPath FROM reference_voices WHERE id = ?`).get(referenceVoiceId);
+                        if (row && row.audioPath && fs.existsSync(row.audioPath)) {
+                            console.log(`[AI Recap] Generating VoxCPM cloned voice for scene ${i}`);
+                            await generateVoxCPMSpeech(ttsText, row.audioPath, outPath);
+                            if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+                                success = true;
                             }
+                        } else {
+                            console.warn(`[AI Recap] Reference voice audio not found for scene ${i}, falling back to Edge TTS`);
                         }
                     } catch (e) {
-                        console.error("[AI Recap] Clone failed", e);
+                        console.error(`[AI Recap] VoxCPM clone failed for scene ${i}, falling back to Edge TTS:`, e.message);
+                    }
+                }
+
+                if (!success) {
+                    try {
+                        console.log(`[AI Recap] Generating Edge TTS for scene ${i}`);
+                        const { edgeVoice, pitch, rate } = getVoiceConfig(voiceId);
+                        const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate });
+                        await ttsClient.ttsPromise(ttsText, outPath);
+                        if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+                            success = true;
+                        }
+                    } catch(e) {
+                        console.error("[AI Recap] Edge TTS failed", e);
                     }
                 }
 
