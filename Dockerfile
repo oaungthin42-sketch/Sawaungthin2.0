@@ -1,4 +1,4 @@
-# Use an official lightweight Node.js 20 Debian image# Use an official lightweight Node.js 20 Debian image# Use an official lightweight Node.js 20 Debian image
+# Use an official lightweight Node.js 20 Debian image
 FROM node:20-bookworm-slim
 
 # Set production environment variables
@@ -55,7 +55,6 @@ ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN echo ">>> BUILD-TIME CLIENT ID VALUE: [$VITE_GOOGLE_CLIENT_ID]"
 
 RUN npm run build
-
 
 # Start the full-stack server
 CMD ["node", "server.js"]
