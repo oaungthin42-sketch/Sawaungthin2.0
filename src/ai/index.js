@@ -16,6 +16,20 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const limitConcurrency = async (tasks, limit) => {
+    const results = new Array(tasks.length);
+    let i = 0;
+    const workers = new Array(limit).fill(0).map(async () => {
+        while (i < tasks.length) {
+            const index = i++;
+            results[index] = await tasks[index]();
+        }
+    });
+    await Promise.all(workers);
+    return results;
+};
+
+
 export const computeSimilarity = async (text1, text2) => {
     return null;
 };
@@ -406,7 +420,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 const row = db.prepare(`SELECT audioPath FROM reference_voices WHERE id = ?`).get(options.referenceVoiceId);
                 let fallbackCount = 0;
                 if (row && row.audioPath && fs.existsSync(row.audioPath)) {
-                    for (let i = 0; i < processedChunks.length; i++) {
+                    const cloneTasks = processedChunks.map((_, i) => async () => {
                         const chunkText = mergedBlocks[i].mergedText;
                         const clonedPath = processedChunks[i].replace(/(\.[^.]+)$/, '_voxcpm$1');
                         try {
@@ -421,7 +435,8 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                             console.error(`[AI] VoxCPM clone failed for chunk ${i}, falling back to Edge TTS audio:`, e.message);
                             fallbackCount++;
                         }
-                    }
+                    });
+                    await limitConcurrency(cloneTasks, 4);
                 } else {
                     console.warn(`[AI] Reference voice audio not found, skipping voice clone entirely for this job.`);
                     fallbackCount = processedChunks.length;
