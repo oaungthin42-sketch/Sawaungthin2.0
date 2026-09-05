@@ -58,11 +58,18 @@ export async function generateVoxCPMSpeech(text, referenceAudioPath, outputPath)
                 throw error;
             }
 
-            const isTransient = errorMsg.includes("temporarily unstable") || 
-                                errorMsg.includes("busy") || 
+            const isColdStart = errorMsg.includes("Could not resolve app config") ||
+                                errorMsg.includes("206");
+
+            const isTransient = isColdStart ||
+                                errorMsg.includes("temporarily unstable") ||
+                                errorMsg.includes("busy") ||
                                 errorMsg.includes("fetch failed");
 
-            if (isTransient) {
+            if (isColdStart) {
+                console.log(`[VoxCPM] Cold-start detected (HF Space waking up). Waiting 30 seconds before retry...`);
+                await new Promise(resolve => setTimeout(resolve, 30000));
+            } else if (isTransient) {
                 console.log(`[VoxCPM] Transient error detected. Waiting 10 seconds before retry...`);
                 await new Promise(resolve => setTimeout(resolve, 10000));
             } else {
