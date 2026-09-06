@@ -154,7 +154,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         const dialogueVal = getSetting('DIALOGUE_MODE');
         const isDialogue = dialogueVal === 'true' || dialogueVal === '1' || dialogueVal === true;
         const maxGap = isDialogue ? 3.0 : 0.75;
-        const maxDur = isDialogue ? 60 : 12;
+        const maxDur = isDialogue ? 60 : 20;
 
         for (let i = 0; i < sceneNarration.length; i++) {
             const scene = sceneNarration[i];
