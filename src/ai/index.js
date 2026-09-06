@@ -420,6 +420,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 const row = db.prepare(`SELECT audioPath FROM reference_voices WHERE id = ?`).get(options.referenceVoiceId);
                 let fallbackCount = 0;
                 if (row && row.audioPath && fs.existsSync(row.audioPath)) {
+                    const fallbackIndices = [];
                     const cloneTasks = processedChunks.map((_, i) => async () => {
                         const chunkText = mergedBlocks[i].mergedText;
                         const clonedPath = processedChunks[i].replace(/(\.[^.]+)$/, '_voxcpm$1');
@@ -430,13 +431,34 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                                 processedChunks[i] = clonedPath;
                             } else {
                                 fallbackCount++;
+                                fallbackIndices.push(i);
                             }
                         } catch (e) {
                             console.error(`[AI] VoxCPM clone failed for chunk ${i}, falling back to Edge TTS audio:`, e.message);
                             fallbackCount++;
+                            fallbackIndices.push(i);
                         }
                     });
                     await limitConcurrency(cloneTasks, 4);
+
+                    if (fallbackIndices.length > 0) {
+                        console.log(`[AI] ${fallbackIndices.length} chunk(s) fell back on first pass. Retrying them individually with extended patience...`);
+                        for (const i of fallbackIndices) {
+                            const chunkText = mergedBlocks[i].mergedText;
+                            const clonedPath = oldProcessedChunks[i].replace(/(\.[^.]+)$/, '_voxcpm_retry$1');
+                            try {
+                                console.log(`[AI] Second-pass VoxCPM retry for chunk ${i + 1}/${processedChunks.length}`);
+                                await generateVoxCPMSpeech(chunkText, row.audioPath, clonedPath);
+                                if (fs.existsSync(clonedPath) && fs.statSync(clonedPath).size > 0) {
+                                    processedChunks[i] = clonedPath;
+                                    fallbackCount--;
+                                    console.log(`[AI] Second-pass succeeded for chunk ${i + 1}, voice clone recovered.`);
+                                }
+                            } catch (e) {
+                                console.error(`[AI] Second-pass also failed for chunk ${i}, keeping Edge TTS fallback for this chunk:`, e.message);
+                            }
+                        }
+                    }
                 } else {
                     console.warn(`[AI] Reference voice audio not found, skipping voice clone entirely for this job.`);
                     fallbackCount = processedChunks.length;
