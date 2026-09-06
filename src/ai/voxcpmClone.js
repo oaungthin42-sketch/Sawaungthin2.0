@@ -24,7 +24,7 @@ export async function generateVoxCPMSpeech(text, referenceAudioPath, outputPath)
                 handle_file(audioFile),
                 false,
                 "",
-                3.5,
+                3.0,
                 false,
                 false
             ]);
