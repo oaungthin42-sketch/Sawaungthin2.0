@@ -191,12 +191,26 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
 
         // [SILENT-GAP-DETECTION] Diagnostic logging only — does not change any
         // existing variable, timeline, or audio/video output.
+        if (mergedBlocks.length > 0) {
+            const leadingGapDur = mergedBlocks[0].orig_start - 0;
+            if (leadingGapDur >= 0.5) {
+                console.log(`[SILENT-GAP-DETECTION] LEADING gap: 0.000s -> ${mergedBlocks[0].orig_start.toFixed(3)}s (duration ${leadingGapDur.toFixed(3)}s) before block 0`);
+            }
+        }
         for (let i = 0; i < mergedBlocks.length - 1; i++) {
             const gapStart = mergedBlocks[i].orig_end;
             const gapEnd = mergedBlocks[i + 1].orig_start;
             const gapDur = gapEnd - gapStart;
             if (gapDur >= 0.5) {
                 console.log(`[SILENT-GAP-DETECTION] gap #${i}: ${gapStart.toFixed(3)}s -> ${gapEnd.toFixed(3)}s (duration ${gapDur.toFixed(3)}s) between block ${i} and block ${i + 1}`);
+            }
+        }
+        if (mergedBlocks.length > 0 && originalTranscript && originalTranscript.length > 0) {
+            const videoEndEstimate = originalTranscript[originalTranscript.length - 1].timestamp[1];
+            const lastBlock = mergedBlocks[mergedBlocks.length - 1];
+            const trailingGapDur = videoEndEstimate - lastBlock.orig_end;
+            if (trailingGapDur >= 0.5) {
+                console.log(`[SILENT-GAP-DETECTION] TRAILING gap: ${lastBlock.orig_end.toFixed(3)}s -> ${videoEndEstimate.toFixed(3)}s (duration ${trailingGapDur.toFixed(3)}s) after last block`);
             }
         }
 
