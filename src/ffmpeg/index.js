@@ -31,6 +31,15 @@ export const getDuration = (file) => new Promise((resolve, reject) => {
     });
 });
 
+export const getVideoDimensions = (file) => new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(file, (err, meta) => {
+        if (err) return reject(err);
+        const vStream = meta.streams ? meta.streams.find(s => s.codec_type === 'video') : null;
+        if (!vStream || !vStream.width || !vStream.height) return reject(new Error('No video stream/dimensions found'));
+        resolve({ width: vStream.width, height: vStream.height });
+    });
+});
+
 export const getAudioDetails = (file) => new Promise((resolve, reject) => {
     ffmpeg.ffprobe(file, (err, meta) => {
         if (err) return resolve({ codec: 'unknown', sampleRate: 0, channels: 0 });

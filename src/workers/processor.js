@@ -7,7 +7,7 @@ import _ffmpegPath from 'ffmpeg-static';
 let ffmpegPath = _ffmpegPath;
 try { execSync('ffmpeg -version'); ffmpegPath = 'ffmpeg'; } catch (e) {}
 import { updateJob, getJob } from '../services/jobManager.js';
-import { getDuration, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
+import { getDuration, getVideoDimensions, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
@@ -87,6 +87,10 @@ export const processRecapPipeline = async (jobId) => {
                 await extractWav(job.videoPath, videoWavPath);
             }
             state.originalVideoDuration = await getDuration(job.videoPath);
+            const videoDims = await getVideoDimensions(job.videoPath);
+            state.outputWidth = videoDims.width;
+            state.outputHeight = videoDims.height;
+            console.log(`[VIDEO-DIMENSIONS] Detected input resolution: ${state.outputWidth}x${state.outputHeight}. This will be used as the output canvas (no more forced 1080x1920).`);
             saveState();
         }
 
@@ -563,7 +567,7 @@ export const processRecapPipeline = async (jobId) => {
                     const freezeAmount = t.target_dur - ((t.scene_end - t.scene_start) / speed);
                     console.log(`[FREEZE-PADDING] segment ${globalIdx}: speed=${speed.toFixed(2)}, freeze_padding=${freezeAmount.toFixed(2)}s`);
                     const hflipFilter = job.flipped ? 'hflip,' : '';
-                    const filter = `[0:v]${hflipFilter}setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,format=yuv420p[v]`;
+                    const filter = `[0:v]${hflipFilter}setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=${state.outputWidth}:${state.outputHeight}:force_original_aspect_ratio=increase,crop=${state.outputWidth}:${state.outputHeight},fps=30,setsar=1,format=yuv420p[v]`;
                     
                     const segFile = path.join(cacheDir, `seg_${globalIdx}.ts`);
                     const segFileTmp = path.join(cacheDir, `seg_${globalIdx}.ts.tmp`);
@@ -842,12 +846,12 @@ export const processRecapPipeline = async (jobId) => {
                     
                     for (let i = 0; i < parsedBoxes.length; i++) {
                         const box = parsedBoxes[i];
-                        // Note: The video has been hard-scaled/cropped to 1080x1920 in an earlier segment pass, 
-                        // so these hardcoded 1080x1920 dimensions perfectly match the current video canvas.
-                        const x = Math.round((box.xPct / 100) * 1080);
-                        const y = Math.round((box.yPct / 100) * 1920);
-                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * 1080);
-                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * 1920);
+                        // Note: The video has been scaled/cropped to state.outputWidth x state.outputHeight
+                        // in an earlier segment pass, so these dimensions match the current video canvas.
+                        const x = Math.round((box.xPct / 100) * state.outputWidth);
+                        const y = Math.round((box.yPct / 100) * state.outputHeight);
+                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * state.outputWidth);
+                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * state.outputHeight);
                         const w = Math.max(2, x2 - x);
                         const h = Math.max(2, y2 - y);
 
@@ -879,8 +883,8 @@ export const processRecapPipeline = async (jobId) => {
                         
                         const cx = Math.max(0, x - pad);
                         const cy = Math.max(0, y - pad);
-                        const cw = Math.min(1080 - cx, w + pad * 2);
-                        const ch = Math.min(1920 - cy, h + pad * 2);
+                        const cw = Math.min(state.outputWidth - cx, w + pad * 2);
+                        const ch = Math.min(state.outputHeight - cy, h + pad * 2);
                         
                         // Calculate the true offset of the user's box within our padded crop
                         const boxInCropX = x - cx;
@@ -1048,11 +1052,11 @@ export const processRecapPipeline = async (jobId) => {
                             } catch(e) {}
                         }
                         
-                        const marginL = Math.round((pos.xPct / 100) * 1080);
-                        const marginR = Math.round(1080 - ((pos.xPct + pos.widthPct) / 100) * 1080);
-                        const marginV = Math.round((pos.yPct / 100) * 1920);
+                        const marginL = Math.round((pos.xPct / 100) * state.outputWidth);
+                        const marginR = Math.round(state.outputWidth - ((pos.xPct + pos.widthPct) / 100) * state.outputWidth);
+                        const marginV = Math.round((pos.yPct / 100) * state.outputHeight);
                         
-                        let fontsize = Math.round(((pos.heightPct / 100) * 1920) * 0.6);
+                        let fontsize = Math.round(((pos.heightPct / 100) * state.outputHeight) * 0.6);
                         if (fontsize < 24) fontsize = 24;
                         if (fontsize > 80) fontsize = 80;
 
@@ -1074,7 +1078,7 @@ export const processRecapPipeline = async (jobId) => {
                             return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
                         };
                         
-                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${state.outputWidth}\nPlayResY: ${state.outputHeight}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
                         
                         const assLines = subtitles.map(sub => {
                             const startStr = toAssTime(sub.start);
@@ -1086,8 +1090,8 @@ export const processRecapPipeline = async (jobId) => {
                         const assPath = path.join(tmpDir, jobId + ".ass");
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
                         
-                        const cw = Math.max(2, Math.round((pos.widthPct / 100) * 1080));
-                        const ch = Math.max(2, Math.round((pos.heightPct / 100) * 1920));
+                        const cw = Math.max(2, Math.round((pos.widthPct / 100) * state.outputWidth));
+                        const ch = Math.max(2, Math.round((pos.heightPct / 100) * state.outputHeight));
                         const cx = Math.max(0, marginL);
                         const cy = Math.max(0, marginV);
                         
