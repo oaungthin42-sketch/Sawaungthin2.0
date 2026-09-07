@@ -421,6 +421,19 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 let fallbackCount = 0;
                 if (row && row.audioPath && fs.existsSync(row.audioPath)) {
                     const fallbackIndices = [];
+                    const cloneJobId = path.basename(path.dirname(cachePath));
+                    let cloneCompletedCount = 0;
+                    const cloneTotalCount = processedChunks.length;
+                    const reportCloneProgress = async () => {
+                        cloneCompletedCount++;
+                        try {
+                            const { updateJob } = await import('../services/jobManager.js');
+                            const pct = 35 + Math.round((cloneCompletedCount / cloneTotalCount) * 5);
+                            updateJob(cloneJobId, { progress: pct, status: `Cloning voice: ${cloneCompletedCount}/${cloneTotalCount} chunks done` });
+                        } catch (progressErr) {
+                            console.warn(`[AI] Failed to update clone progress: ${progressErr.message}`);
+                        }
+                    };
                     const cloneTasks = processedChunks.map((_, i) => async () => {
                         const chunkText = mergedBlocks[i].mergedText;
                         const clonedPath = processedChunks[i].replace(/(\.[^.]+)$/, '_voxcpm$1');
@@ -437,6 +450,8 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                             console.error(`[AI] VoxCPM clone failed for chunk ${i}, falling back to Edge TTS audio:`, e.message);
                             fallbackCount++;
                             fallbackIndices.push(i);
+                        } finally {
+                            await reportCloneProgress();
                         }
                     });
                     await limitConcurrency(cloneTasks, 4);

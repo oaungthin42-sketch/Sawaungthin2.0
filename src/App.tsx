@@ -132,6 +132,7 @@ function App() {
 
   const [status, setStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'>('idle');
   const [progressPct, setProgressPct] = useState<number>(0);
+  const [statusText, setStatusText] = useState<string>('');
   const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [analysisData, setAnalysisData] = useState<any>(null);
@@ -678,6 +679,7 @@ function App() {
           localStorage.removeItem('superclick_active_job');
         } else {
           setProgressPct(job.progress || 0);
+          setStatusText(job.status || '');
         }
       } catch (e) {
          pollErrors++;
@@ -1356,6 +1358,12 @@ function App() {
                       <div className="w-full max-w-md mx-auto space-y-4">
                         <div className="flex justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest px-1"><span>Global Progress</span><span>{Math.round(progressPct)}%</span></div>
                         <div className="w-full bg-gray-950 h-3 rounded-full overflow-hidden p-0.5 border border-gray-900"><div className="h-full bg-indigo-500 rounded-full transition-all duration-700" style={{ width: `${progressPct}%` }} /></div>
+                        {statusText && (
+                          <div className="flex items-center justify-center gap-2 text-xs text-gray-400 px-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                            <span>{statusText}</span>
+                          </div>
+                        )}
                       </div>
                       <div className="pt-2">
                         <button onClick={reset} className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-gray-400 text-sm font-bold rounded-xl border border-gray-800">
