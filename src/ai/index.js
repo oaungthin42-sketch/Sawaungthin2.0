@@ -189,6 +189,17 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             mergedBlocks.push(currentBlock);
         }
 
+        // [SILENT-GAP-DETECTION] Diagnostic logging only — does not change any
+        // existing variable, timeline, or audio/video output.
+        for (let i = 0; i < mergedBlocks.length - 1; i++) {
+            const gapStart = mergedBlocks[i].orig_end;
+            const gapEnd = mergedBlocks[i + 1].orig_start;
+            const gapDur = gapEnd - gapStart;
+            if (gapDur >= 0.5) {
+                console.log(`[SILENT-GAP-DETECTION] gap #${i}: ${gapStart.toFixed(3)}s -> ${gapEnd.toFixed(3)}s (duration ${gapDur.toFixed(3)}s) between block ${i} and block ${i + 1}`);
+            }
+        }
+
         const chunks = [];
         const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate, saveSubtitles: true });
         
