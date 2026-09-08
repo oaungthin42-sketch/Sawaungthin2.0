@@ -554,6 +554,125 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             }
         }
 
+        // [PASSTHROUGH-GAP-INSERTION] Detect real silent gaps in the SOURCE VIDEO
+        // (leading, between TTS blocks, and trailing) and splice the original
+        // video's own audio into the master narration track for those stretches,
+        // instead of discarding them. This runs strictly at the BLOCK level
+        // (mergedBlocks[b].orig_start/orig_end), never at the individual-scene
+        // level, so processedChunks[b] (one continuous WAV per block, already
+        // finalized above whether cloned or not) is never split or re-sliced —
+        // only reordered/retimed as whole units, with new gap-audio units
+        // inserted between them. If no qualifying gap exists (the common case —
+        // a normal dialogue-only video), this entire block is a no-op and
+        // processedChunks/authoritativeTimeline/runningAudioTime are left
+        // completely untouched.
+        const PASSTHROUGH_GAP_THRESHOLD = 0.5;
+        if (options && options.sourceVideoPath && mergedBlocks.length > 0) {
+            try {
+                const blockEntryGroups = mergedBlocks.map(block =>
+                    authoritativeTimeline.filter(e => block.scenes.includes(e.chunk_index))
+                );
+
+                const gaps = [];
+                if (mergedBlocks[0].orig_start >= PASSTHROUGH_GAP_THRESHOLD) {
+                    gaps.push({ afterBlockIdx: -1, origStart: 0, origEnd: mergedBlocks[0].orig_start });
+                }
+                for (let b = 0; b < mergedBlocks.length - 1; b++) {
+                    const gapStart = mergedBlocks[b].orig_end;
+                    const gapEnd = mergedBlocks[b + 1].orig_start;
+                    if (gapEnd - gapStart >= PASSTHROUGH_GAP_THRESHOLD) {
+                        gaps.push({ afterBlockIdx: b, origStart: gapStart, origEnd: gapEnd });
+                    }
+                }
+                if (Number.isFinite(options.videoDuration)) {
+                    const lastBlock = mergedBlocks[mergedBlocks.length - 1];
+                    if (options.videoDuration - lastBlock.orig_end >= PASSTHROUGH_GAP_THRESHOLD) {
+                        gaps.push({ afterBlockIdx: mergedBlocks.length - 1, origStart: lastBlock.orig_end, origEnd: options.videoDuration });
+                    }
+                }
+
+                if (gaps.length > 0) {
+                    console.log(`[PASSTHROUGH-GAP-INSERTION] Found ${gaps.length} qualifying gap(s) (>= ${PASSTHROUGH_GAP_THRESHOLD}s) in source video.`);
+                    const newProcessedChunks = [];
+                    const newAuthoritativeTimeline = [];
+                    let cursor = 0;
+                    let gapCounter = 0;
+
+                    const emitGap = async (g) => {
+                        const gapLen = g.origEnd - g.origStart;
+                        const gapPath = path.join(ttsDir, `passthrough_gap_${gapCounter++}.wav`);
+                        try {
+                            await runFFmpeg([
+                                '-y',
+                                '-i', options.sourceVideoPath,
+                                '-ss', g.origStart.toFixed(3),
+                                '-to', g.origEnd.toFixed(3),
+                                '-vn',
+                                '-acodec', 'pcm_s16le',
+                                '-ar', '24000',
+                                '-ac', '1',
+                                gapPath
+                            ], ttsDir);
+                        } catch (extractErr) {
+                            console.warn(`[PASSTHROUGH-GAP-INSERTION] Failed to extract audio for gap ${g.origStart.toFixed(3)}-${g.origEnd.toFixed(3)}: ${extractErr.message}. Skipping this gap.`);
+                            return;
+                        }
+                        let gapDur = 0;
+                        try {
+                            gapDur = parseFloat(await getDuration(gapPath));
+                        } catch (e) {
+                            gapDur = 0;
+                        }
+                        if (!Number.isFinite(gapDur) || gapDur <= 0) {
+                            console.warn(`[PASSTHROUGH-GAP-INSERTION] Extracted gap audio ${gapPath} has invalid duration. Skipping this gap.`);
+                            return;
+                        }
+                        newProcessedChunks.push(gapPath);
+                        newAuthoritativeTimeline.push({
+                            is_passthrough: true,
+                            chunk_index: -1,
+                            orig_start: g.origStart,
+                            orig_end: g.origEnd,
+                            orig_dur: gapLen,
+                            final_audio_start: cursor,
+                            final_audio_end: cursor + gapDur,
+                            final_dur: gapDur,
+                            text: ""
+                        });
+                        cursor += gapDur;
+                    };
+
+                    const leadingGap = gaps.find(g => g.afterBlockIdx === -1);
+                    if (leadingGap) await emitGap(leadingGap);
+
+                    for (let b = 0; b < mergedBlocks.length; b++) {
+                        newProcessedChunks.push(processedChunks[b]);
+                        for (const entry of blockEntryGroups[b]) {
+                            const shiftedDur = entry.final_dur;
+                            newAuthoritativeTimeline.push({
+                                ...entry,
+                                final_audio_start: cursor,
+                                final_audio_end: cursor + shiftedDur
+                            });
+                            cursor += shiftedDur;
+                        }
+                        const gapAfter = gaps.find(g => g.afterBlockIdx === b);
+                        if (gapAfter) await emitGap(gapAfter);
+                    }
+
+                    processedChunks.length = 0;
+                    processedChunks.push(...newProcessedChunks);
+                    authoritativeTimeline.length = 0;
+                    authoritativeTimeline.push(...newAuthoritativeTimeline);
+                    runningAudioTime = cursor;
+
+                    console.log(`[PASSTHROUGH-GAP-INSERTION] Done. New authoritative timeline duration: ${runningAudioTime.toFixed(3)}s`);
+                }
+            } catch (passthroughErr) {
+                console.error(`[PASSTHROUGH-GAP-INSERTION] Failed, continuing without passthrough gaps:`, passthroughErr.message);
+            }
+        }
+
         if (processedChunks.length === 0) {
             console.warn("[WARNING] No audio chunks to concatenate. Generating 100ms silent audio...");
             const gapPath = path.join(ttsDir, 'gap_empty.wav');
