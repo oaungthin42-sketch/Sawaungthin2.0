@@ -6,7 +6,7 @@ import db from '../services/db.js';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
-import { EdgeTTS } from 'node-edge-tts';
+import { edgeTtsToFile } from './edgeTtsPy.js';
 import ffprobePath from 'ffprobe-static';
 import { getVoiceConfig } from './voices.js';
 import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
@@ -215,7 +215,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         }
 
         const chunks = [];
-        const ttsClient = new EdgeTTS({ voice: edgeVoice, pitch, rate, saveSubtitles: true });
+        const ttsOptions = { voice: edgeVoice, pitch, rate };
         
         let concurrencyLimit = 3;
         if (process.env.TTS_CONCURRENCY) {
@@ -252,7 +252,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                             const timeoutPromise = new Promise((_, reject) => {
                                 timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 30000);
                             });
-                            await Promise.race([ttsClient.ttsPromise(chunkText, chunkPath), timeoutPromise]);
+                            await Promise.race([edgeTtsToFile(chunkText, ttsOptions, chunkPath, 30000), timeoutPromise]);
                         } finally {
                             if (timeoutId) clearTimeout(timeoutId);
                         }

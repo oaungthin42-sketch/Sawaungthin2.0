@@ -9,7 +9,7 @@ import { createJob, getJob, updateJob } from '../services/jobManager.js';
 import { addJobToQueue } from '../services/queue.js';
 import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../services/settings.js';
 import { VOICES, getVoiceConfig } from '../ai/voices.js';
-import { EdgeTTS } from '@seepine/edge-tts';
+import { edgeTtsToFile } from '../ai/edgeTtsPy.js';
 import db from '../services/db.js';
 import { authMiddleware, adminOnly } from './auth.js';
 import { decrypt } from '../services/settings.js';
@@ -285,22 +285,18 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
 
         const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
 
-        const ttsClient = new EdgeTTS({
-            voice: config.edgeVoice,
-            pitch: config.pitch,
-            rate: config.rate
-        });
-
-        const callPromise = ttsClient.call(previewText);
-        let timeoutId;
+        const previewTmpPath = path.join(process.cwd(), 'data', `preview_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
         let resAudio;
         try {
-            const timeoutPromise = new Promise((_, reject) => {
-                timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 15000);
-            });
-            resAudio = await Promise.race([callPromise, timeoutPromise]);
+            await edgeTtsToFile(previewText, {
+                voice: config.edgeVoice,
+                pitch: config.pitch,
+                rate: config.rate
+            }, previewTmpPath, 15000);
+            resAudio = { data: fs.readFileSync(previewTmpPath) };
         } finally {
-            clearTimeout(timeoutId);
+            try { fs.unlinkSync(previewTmpPath); } catch (_) {}
+            try { fs.unlinkSync(previewTmpPath + '.json'); } catch (_) {}
         }
 
         if (!resAudio.data || resAudio.data.length === 0) {

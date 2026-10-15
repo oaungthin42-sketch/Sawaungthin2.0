@@ -38,4 +38,6 @@ RUN /opt/venv/bin/python3 src/ai/download_model.py
 
 RUN npm run build
 
+RUN /opt/venv/bin/pip install --no-cache-dir edge-tts
+
 CMD ["node", "server.js"]
