@@ -12,7 +12,7 @@ import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
-import { GoogleGenAI } from '@google/genai';
+import { callLLM } from '../services/llm.js';
 import { getTranslationSystemInstruction } from '../ai/translation.js';
 
 // Pipeline steps
@@ -133,19 +133,10 @@ export const processRecapPipeline = async (jobId) => {
                 state.translatedTranscript = [];
                 fs.writeFileSync(translatedTranscriptCache, JSON.stringify([], null, 2));
             } else {
-                const geminiApiKey = getSetting('GEMINI_API_KEY');
-                if (!geminiApiKey || !geminiApiKey.trim()) {
-                    throw new Error("Gemini API key is not configured. Please add your GEMINI_API_KEY in Settings.");
+                const openrouterApiKey = getSetting('OPENROUTER_API_KEY');
+                if (!openrouterApiKey || !openrouterApiKey.trim()) {
+                    throw new Error("OpenRouter API key is not configured. Please add your OPENROUTER_API_KEY in Settings.");
                 }
-
-                const ai = new GoogleGenAI({
-                    apiKey: geminiApiKey,
-                    httpOptions: {
-                        headers: {
-                            'User-Agent': 'aistudio-build',
-                        }
-                    }
-                });
 
                 const translationInput = state.originalTranscript.map((t, index) => ({
                     index,
@@ -163,17 +154,14 @@ export const processRecapPipeline = async (jobId) => {
                 while (attempts < maxAttempts) {
                     try {
                         attempts++;
-                        response = await ai.models.generateContent({
-                            model: 'gemini-3.6-flash',
+                        response = await callLLM({
                             contents: JSON.stringify(translationInput),
-                            config: {
-                                systemInstruction: systemInstruction,
-                                responseMimeType: 'application/json'
-                            }
+                            systemInstruction: systemInstruction,
+                            responseMimeType: 'application/json'
                         });
                         
                         if (!response || !response.text) {
-                            throw new Error("Empty response from Gemini API");
+                            throw new Error("Empty response from OpenRouter API");
                         }
 
                         const translatedItems = JSON.parse(response.text.trim());
@@ -201,7 +189,7 @@ export const processRecapPipeline = async (jobId) => {
                         break;
                     } catch (err) {
                         lastError = err;
-                        console.warn(`[TRANSLATION] Gemini translation/validation attempt ${attempts} failed:`, err);
+                        console.warn(`[TRANSLATION] OpenRouter translation/validation attempt ${attempts} failed:`, err);
                         if (attempts < maxAttempts) {
                             const errStr = err ? (err.message ? err.message.toLowerCase() : String(err).toLowerCase()) : '';
                             if (errStr.includes('503') || errStr.includes('unavailable')) {
@@ -214,7 +202,7 @@ export const processRecapPipeline = async (jobId) => {
                 }
 
                 if (!state.translatedTranscript) {
-                    throw new Error(`Gemini translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
+                    throw new Error(`OpenRouter translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
                 }
             }
 
@@ -1166,23 +1154,11 @@ export const processRecapPipeline = async (jobId) => {
         let generatedCaption = null;
         try {
             if (state.translatedTranscript && state.translatedTranscript.length > 0) {
-                const geminiApiKey = getSetting('GEMINI_API_KEY');
-                if (geminiApiKey && geminiApiKey.trim()) {
-                    const ai = new GoogleGenAI({
-                        apiKey: geminiApiKey,
-                        httpOptions: {
-                            headers: {
-                                'User-Agent': 'aistudio-build',
-                            }
-                        }
-                    });
-                    
-                    const response = await ai.models.generateContent({
-                        model: 'gemini-3.6-flash',
+                const openrouterApiKey = getSetting('OPENROUTER_API_KEY');
+                if (openrouterApiKey && openrouterApiKey.trim()) {
+                    const response = await callLLM({
                         contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
-                        config: {
-                            systemInstruction: "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese."
-                        }
+                        systemInstruction: "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese."
                     });
                     
                     if (response && response.text) {
