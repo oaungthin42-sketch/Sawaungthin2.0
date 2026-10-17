@@ -7,7 +7,7 @@ import _ffmpegPath from 'ffmpeg-static';
 let ffmpegPath = _ffmpegPath;
 try { execSync('ffmpeg -version'); ffmpegPath = 'ffmpeg'; } catch (e) {}
 import { updateJob, getJob } from '../services/jobManager.js';
-import { getDuration, getVideoDimensions, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails } from '../ffmpeg/index.js';
+import { getDuration, getVideoDimensions, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails, cropVideo } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
@@ -78,6 +78,41 @@ export const processRecapPipeline = async (jobId) => {
 
     try {
         console.log(`[Job ${jobId}] Pipeline started. Current Step: ${job.currentStep || STEPS.UPLOAD}`);
+
+        // 0. CROP SOURCE VIDEO (if cropRect specified)
+        if (state.croppedVideoPath && fs.existsSync(state.croppedVideoPath)) {
+            job.videoPath = state.croppedVideoPath;
+        } else if (job.cropRect) {
+            let parsedCrop = null;
+            try {
+                parsedCrop = typeof job.cropRect === 'string' ? JSON.parse(job.cropRect) : job.cropRect;
+            } catch (e) {
+                console.warn(`[Job ${jobId}] Failed to parse cropRect:`, e.message);
+            }
+
+            if (parsedCrop && typeof parsedCrop === 'object' && parsedCrop.widthPct > 0 && parsedCrop.heightPct > 0) {
+                const isFullFrame = (parsedCrop.xPct ?? 0) <= 0.01 && 
+                                    (parsedCrop.yPct ?? 0) <= 0.01 && 
+                                    (parsedCrop.widthPct ?? 100) >= 99.9 && 
+                                    (parsedCrop.heightPct ?? 100) >= 99.9;
+
+                if (!isFullFrame) {
+                    console.log(`[Job ${jobId}] Applying source video crop:`, parsedCrop);
+                    const croppedVideoPath = path.join(cacheDir, 'cropped_source.mp4');
+                    await cropVideo(job.videoPath, croppedVideoPath, parsedCrop);
+                    if (fs.existsSync(croppedVideoPath) && fs.statSync(croppedVideoPath).size > 0) {
+                        state.croppedVideoPath = croppedVideoPath;
+                        state.originalUncroppedVideoPath = job.videoPath;
+                        job.videoPath = croppedVideoPath;
+                        updateJob(jobId, { videoPath: croppedVideoPath });
+                        saveState();
+                        console.log(`[Job ${jobId}] Source video successfully cropped to ${croppedVideoPath}`);
+                    } else {
+                        console.error(`[Job ${jobId}] Cropped file missing or empty, continuing with original video`);
+                    }
+                }
+            }
+        }
 
         // 1. EXTRACT VIDEO WAV
         const videoWavPath = path.join(cacheDir, 'video.wav');
@@ -1241,6 +1276,9 @@ export const processRecapPipeline = async (jobId) => {
             
             if (currentJob && currentJob.status === 'complete' && currentJob.audioPath) filesToRemove.push(currentJob.audioPath);
             if (currentJob && currentJob.status === 'complete' && currentJob.videoPath) filesToRemove.push(currentJob.videoPath);
+            if (currentJob && currentJob.status === 'complete' && state.originalUncroppedVideoPath && typeof state.originalUncroppedVideoPath === 'string') {
+                filesToRemove.push(state.originalUncroppedVideoPath);
+            }
 
             for (const f of filesToRemove) {
                 if (fs.existsSync(f)) {

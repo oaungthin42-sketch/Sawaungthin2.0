@@ -1,5 +1,6 @@
 
 import fs from 'fs';
+import path from 'path';
 import { spawn } from 'child_process';
 import ffmpeg from 'fluent-ffmpeg';
 import _ffmpegPath from 'ffmpeg-static';
@@ -273,4 +274,58 @@ export const runFFmpeg = (args, cwd, onProgress, timeoutMs = 1200000) => {
             safeReject(err);
         });
     });
+};
+
+export const cropVideo = async (inputPath, outputPath, cropRect) => {
+    const { width: origWidth, height: origHeight } = await getVideoDimensions(inputPath);
+    
+    let x = Math.round(((cropRect.xPct || 0) / 100) * origWidth);
+    let y = Math.round(((cropRect.yPct || 0) / 100) * origHeight);
+    let w = Math.round(((cropRect.widthPct || 100) / 100) * origWidth);
+    let h = Math.round(((cropRect.heightPct || 100) / 100) * origHeight);
+
+    // Clamp coordinates within video boundary
+    x = Math.max(0, Math.min(origWidth - 2, x));
+    y = Math.max(0, Math.min(origHeight - 2, y));
+    w = Math.max(2, Math.min(origWidth - x, w));
+    h = Math.max(2, Math.min(origHeight - y, h));
+
+    // FFmpeg libx264 yuv420p requires even width and height
+    w = Math.floor(w / 2) * 2;
+    h = Math.floor(h / 2) * 2;
+    x = Math.floor(x / 2) * 2;
+    y = Math.floor(y / 2) * 2;
+
+    if (x + w > origWidth) {
+        w = Math.floor((origWidth - x) / 2) * 2;
+    }
+    if (y + h > origHeight) {
+        h = Math.floor((origHeight - y) / 2) * 2;
+    }
+
+    if (w <= 0 || h <= 0) {
+        throw new Error(`Invalid crop dimensions calculated: ${w}x${h}`);
+    }
+
+    console.log(`[FFmpeg] Cropping video ${inputPath} (${origWidth}x${origHeight}) to ${w}x${h} at (${x},${y}) -> ${outputPath}`);
+
+    const baseArgs = [
+        '-y',
+        '-i', inputPath,
+        '-vf', `crop=${w}:${h}:${x}:${y}`,
+        '-map', '0:v',
+        '-map', '0:a?',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '18'
+    ];
+
+    try {
+        await runFFmpeg([...baseArgs, '-c:a', 'copy', outputPath], path.dirname(outputPath));
+    } catch (copyErr) {
+        console.warn(`[FFmpeg] Crop with -c:a copy failed (${copyErr.message}), falling back to AAC audio encode`);
+        await runFFmpeg([...baseArgs, '-c:a', 'aac', '-b:a', '192k', outputPath], path.dirname(outputPath));
+    }
+
+    return { width: w, height: h };
 };

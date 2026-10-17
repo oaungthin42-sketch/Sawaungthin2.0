@@ -9,9 +9,10 @@ import { AIRecapTool } from './components/AIRecapTool';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Play, Menu, 
-  Volume2, ArrowRight, Check, X, CreditCard, Star, Copy
+  Volume2, ArrowRight, Check, X, CreditCard, Star, Copy, Crop
 } from 'lucide-react';
 import axios from 'axios';
+import { CropEditor, CropRect } from './components/CropEditor';
 
 declare global {
   interface Window {
@@ -116,8 +117,10 @@ function App() {
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
   const [outputSpeed, setOutputSpeed] = useState<number>(1.0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
-  
-  
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
+  const [showCropModal, setShowCropModal] = useState<boolean>(false);
+  const [videoNativeDims, setVideoNativeDims] = useState<{ width: number; height: number } | null>(null);
+  const isCropped = !!(cropRect && (cropRect.widthPct < 99.9 || cropRect.heightPct < 99.9 || cropRect.xPct > 0.1 || cropRect.yPct > 0.1));
   const [showVoiceDrawer, setShowVoiceDrawer] = useState(false);
   const [credits, setCredits] = useState<number | null>(null);
   const [activeView, setActiveView] = useState('dashboard');
@@ -363,12 +366,16 @@ function App() {
   const updateVideoRect = () => {
     if (!previewContainerRef.current || !videoRef.current) return;
     const container = previewContainerRef.current.getBoundingClientRect();
-    const videoW = videoRef.current.videoWidth;
-    const videoH = videoRef.current.videoHeight;
+    const videoW = videoRef.current.videoWidth || (videoNativeDims ? videoNativeDims.width : 0);
+    const videoH = videoRef.current.videoHeight || (videoNativeDims ? videoNativeDims.height : 0);
     if (!videoW || !videoH) return;
 
+    let videoRatio = videoW / videoH;
+    if (isCropped && cropRect && cropRect.widthPct > 0 && cropRect.heightPct > 0) {
+      videoRatio = (videoW * (cropRect.widthPct / 100)) / (videoH * (cropRect.heightPct / 100));
+    }
+
     const containerRatio = container.width / container.height;
-    const videoRatio = videoW / videoH;
 
     let displayWidth, displayHeight;
     if (videoRatio > containerRatio) {
@@ -390,6 +397,10 @@ function App() {
   };
 
   useEffect(() => {
+    updateVideoRect();
+  }, [cropRect]);
+
+  useEffect(() => {
     window.addEventListener('resize', updateVideoRect);
     return () => window.removeEventListener('resize', updateVideoRect);
   }, []);
@@ -404,6 +415,8 @@ function App() {
   }, [activeView, user]);
 
   useEffect(() => {
+    setCropRect(null);
+    setBlurBoxes([]);
     if (videoFile) {
       const url = URL.createObjectURL(videoFile);
       setVideoPreviewUrl(url);
@@ -602,6 +615,9 @@ function App() {
       if (videoFile) {
         const formData = new FormData();
         formData.append('video', videoFile);
+        if (cropRect) {
+          formData.append('cropRect', JSON.stringify(cropRect));
+        }
         formData.append('blurBoxes', JSON.stringify(blurBoxes));
         formData.append('watermarkText', watermarkText);
         formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
@@ -620,6 +636,7 @@ function App() {
       } else {
         response = await axios.post('/api/process-recap-from-token', {
           token: urlVideoToken,
+          cropRect: cropRect ? JSON.stringify(cropRect) : null,
           blurBoxes: JSON.stringify(blurBoxes),
           watermarkText: watermarkText,
           subtitlePosition: JSON.stringify(subtitlePosition),
@@ -1057,11 +1074,60 @@ function App() {
                                     {hasVideo && videoPreviewUrl ? (
                                         <div className="flex flex-col w-full">
                                             <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={(e) => e.stopPropagation()}>
-                                                <video ref={videoRef} src={videoPreviewUrl} muted playsInline preload="metadata" style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} className="w-full h-full object-contain" />
-                                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                                    <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between">
-                                                        <div><span className="text-sm font-semibold text-white block truncate">{videoDisplayName}</span><span className="text-xs text-gray-300">{videoDisplaySizeMB} MB</span></div>
-                                                        <button onClick={(e) => { e.stopPropagation(); setVideoFile(null); setUrlVideoToken(null); setUrlVideoMeta(null); setVideoUrlInput(''); }} className="p-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition-all"><X size={16} /></button>
+                                                <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px`, overflow: 'hidden', transform: isFlipped ? 'scaleX(-1)' : 'none' }}>
+                                                    <video
+                                                        ref={videoRef}
+                                                        src={videoPreviewUrl}
+                                                        muted
+                                                        playsInline
+                                                        preload="metadata"
+                                                        style={{
+                                                            position: isCropped ? 'absolute' : 'relative',
+                                                            width: isCropped && cropRect ? `${10000 / cropRect.widthPct}%` : '100%',
+                                                            height: isCropped && cropRect ? `${10000 / cropRect.heightPct}%` : '100%',
+                                                            left: isCropped && cropRect ? `-${(cropRect.xPct * 100) / cropRect.widthPct}%` : '0',
+                                                            top: isCropped && cropRect ? `-${(cropRect.yPct * 100) / cropRect.heightPct}%` : '0',
+                                                            maxWidth: 'none',
+                                                            maxHeight: 'none'
+                                                        }}
+                                                        onLoadedMetadata={() => {
+                                                            if (videoRef.current) {
+                                                                videoRef.current.currentTime = 0.1;
+                                                                const vw = videoRef.current.videoWidth;
+                                                                const vh = videoRef.current.videoHeight;
+                                                                if (vw && vh) setVideoNativeDims({ width: vw, height: vh });
+                                                            }
+                                                            updateVideoRect();
+                                                        }}
+                                                        className={isCropped ? '' : 'w-full h-full object-contain'}
+                                                    />
+                                                </div>
+                                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 flex flex-col justify-end p-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity pointer-events-none">
+                                                    <div className="bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center justify-between pointer-events-auto">
+                                                        <div>
+                                                            <span className="text-sm font-semibold text-white block truncate">{videoDisplayName}</span>
+                                                            <span className="text-xs text-gray-300">{videoDisplaySizeMB} MB</span>
+                                                            {isCropped && cropRect && (
+                                                                <span className="inline-block mt-1 px-2 py-0.5 bg-indigo-600/40 border border-indigo-400/40 text-[10px] font-mono text-indigo-200 rounded">
+                                                                    ✂️ Cropped ({Math.round(cropRect.widthPct)}% × {Math.round(cropRect.heightPct)}%)
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); setShowCropModal(true); }}
+                                                                className="p-2 bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600 hover:text-white rounded-lg transition-all"
+                                                                title="ဗီဒီယို ဖြတ်ညှပ်ရန် (Crop)"
+                                                            >
+                                                                <Crop size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); setVideoFile(null); setUrlVideoToken(null); setUrlVideoMeta(null); setVideoUrlInput(''); setCropRect(null); setBlurBoxes([]); }}
+                                                                className="p-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition-all"
+                                                            >
+                                                                <X size={16} />
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1103,7 +1169,7 @@ function App() {
                             </div>
                             
                             {hasVideo && (
-                              <div className="flex flex-row justify-center gap-6 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="flex flex-row justify-center items-center flex-wrap gap-4 sm:gap-6 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
                                   <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">အမြန်နှုန်း</span>
                                       <select value={outputSpeed} onChange={(e) => setOutputSpeed(parseFloat(e.target.value))} className="bg-gray-950 border border-gray-700 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500">
@@ -1119,6 +1185,26 @@ function App() {
                                       <button onClick={() => setIsFlipped(!isFlipped)} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isFlipped ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
                                           <ArrowRight size={14} className={`transition-transform duration-300 ${isFlipped ? 'rotate-180' : ''}`} />
                                       </button>
+                                  </div>
+                                  <div className="flex items-center gap-2 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
+                                      <button
+                                          onClick={() => setShowCropModal(true)}
+                                          className={`flex items-center gap-2 text-xs font-bold transition-all ${
+                                              isCropped ? 'text-indigo-400 font-extrabold' : 'text-gray-300 hover:text-white'
+                                          }`}
+                                      >
+                                          <Crop size={14} />
+                                          <span>{isCropped ? 'ဖြတ်ညှပ်ထားသည် (ပြင်မည်)' : 'ဗီဒီယို ဖြတ်ညှပ်ရန်'}</span>
+                                      </button>
+                                      {isCropped && (
+                                          <button
+                                              onClick={() => { setCropRect(null); setBlurBoxes([]); }}
+                                              className="p-1 rounded bg-red-500/20 text-red-400 hover:text-white hover:bg-red-500 transition-colors"
+                                              title="ဖြတ်ညှပ်ထားခြင်း ဖျက်မည်"
+                                          >
+                                              <X size={12} />
+                                          </button>
+                                      )}
                                   </div>
                               </div>
                             )}
@@ -1203,7 +1289,33 @@ function App() {
                               {hasVideo && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                 <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
-                                  <video ref={videoRef} src={videoPreviewUrl} muted playsInline onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-contain" />
+                                  <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px`, overflow: 'hidden', transform: isFlipped ? 'scaleX(-1)' : 'none' }}>
+                                    <video
+                                      ref={videoRef}
+                                      src={videoPreviewUrl}
+                                      muted
+                                      playsInline
+                                      onLoadedMetadata={() => {
+                                        if (videoRef.current) {
+                                          videoRef.current.currentTime = 0.1;
+                                          const vw = videoRef.current.videoWidth;
+                                          const vh = videoRef.current.videoHeight;
+                                          if (vw && vh) setVideoNativeDims({ width: vw, height: vh });
+                                        }
+                                        updateVideoRect();
+                                      }}
+                                      style={{
+                                        position: isCropped ? 'absolute' : 'relative',
+                                        width: isCropped && cropRect ? `${10000 / cropRect.widthPct}%` : '100%',
+                                        height: isCropped && cropRect ? `${10000 / cropRect.heightPct}%` : '100%',
+                                        left: isCropped && cropRect ? `-${(cropRect.xPct * 100) / cropRect.widthPct}%` : '0',
+                                        top: isCropped && cropRect ? `-${(cropRect.yPct * 100) / cropRect.heightPct}%` : '0',
+                                        maxWidth: 'none',
+                                        maxHeight: 'none'
+                                      }}
+                                      className={isCropped ? '' : 'w-full h-full object-contain'}
+                                    />
+                                  </div>
                                   <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                                     {blurBoxes.map((box) => (
                                       <div
@@ -1270,7 +1382,33 @@ function App() {
                               {hasVideo && videoPreviewUrl ? (
                                 <div className="flex flex-col w-full">
                                   <div ref={previewContainerRef} className="relative w-full aspect-[9/16] max-h-[50vh] sm:max-h-[70vh] mx-auto rounded-xl overflow-hidden group bg-black" onClick={() => setSelectedElement(null)}>
-                                    <video ref={videoRef} src={videoPreviewUrl} muted playsInline onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = 0.1; updateVideoRect(); }} style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }} className="w-full h-full object-contain" />
+                                    <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px`, overflow: 'hidden', transform: isFlipped ? 'scaleX(-1)' : 'none' }}>
+                                      <video
+                                        ref={videoRef}
+                                        src={videoPreviewUrl}
+                                        muted
+                                        playsInline
+                                        onLoadedMetadata={() => {
+                                          if (videoRef.current) {
+                                            videoRef.current.currentTime = 0.1;
+                                            const vw = videoRef.current.videoWidth;
+                                            const vh = videoRef.current.videoHeight;
+                                            if (vw && vh) setVideoNativeDims({ width: vw, height: vh });
+                                          }
+                                          updateVideoRect();
+                                        }}
+                                        style={{
+                                          position: isCropped ? 'absolute' : 'relative',
+                                          width: isCropped && cropRect ? `${10000 / cropRect.widthPct}%` : '100%',
+                                          height: isCropped && cropRect ? `${10000 / cropRect.heightPct}%` : '100%',
+                                          left: isCropped && cropRect ? `-${(cropRect.xPct * 100) / cropRect.widthPct}%` : '0',
+                                          top: isCropped && cropRect ? `-${(cropRect.yPct * 100) / cropRect.heightPct}%` : '0',
+                                          maxWidth: 'none',
+                                          maxHeight: 'none'
+                                        }}
+                                        className={isCropped ? '' : 'w-full h-full object-contain'}
+                                      />
+                                    </div>
                                     <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
                                       <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')} className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors flex items-center justify-center touch-none`} style={{ left: `${subtitlePosition.xPct}%`, top: `${subtitlePosition.yPct}%`, width: `${subtitlePosition.widthPct}%`, height: `${subtitlePosition.heightPct}%` }}>
                                         <span className="text-white font-bold text-center w-full drop-shadow-md" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)`, color: subtitleColor }}>နမူနာ စာတန်း</span>
@@ -1508,6 +1646,19 @@ function App() {
                 </div>
             </div>
         </div>
+      )}
+
+      {showCropModal && videoPreviewUrl && (
+        <CropEditor
+          videoUrl={videoPreviewUrl}
+          initialCrop={cropRect}
+          onApply={(newCrop) => {
+            setCropRect(newCrop);
+            setShowCropModal(false);
+            setBlurBoxes([]);
+          }}
+          onCancel={() => setShowCropModal(false)}
+        />
       )}
     </div>
   );

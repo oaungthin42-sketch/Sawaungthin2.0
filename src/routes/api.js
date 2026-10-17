@@ -379,6 +379,8 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         db.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').run(requiredCredits, user.id);
     }
 
+    const cropRect = body.cropRect || null;
+
     createJob(jobId, {
         videoPath: localVideoPath,
         audioPath: null,
@@ -390,7 +392,8 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         subtitleColor: subtitleColor,
         speed: speed,
         flipped: flipped,
-        userId: user.id
+        userId: user.id,
+        cropRect: cropRect
     });
 
     updateJob(jobId, { 
@@ -755,6 +758,8 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          db.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').run(requiredCredits, user.id);
      }
 
+     const cropRect = req.body.cropRect || null;
+
      createJob(jobId, { 
          videoPath: videoFile.path, 
          audioPath: audioFile ? audioFile.path : null, 
@@ -766,7 +771,8 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          subtitleColor: subtitleColor,
          speed: speed,
          flipped: flipped,
-         userId: user.id
+         userId: user.id,
+         cropRect: cropRect
      });
 
      updateJob(jobId, { 
