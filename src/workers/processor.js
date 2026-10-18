@@ -849,197 +849,413 @@ export const processRecapPipeline = async (jobId) => {
             advanceStep(STEPS.EXPORT, 99, 'Export Complete');
         }
 
-        // TODO(future optimization): Merge the blur pass and subtitle-burn pass into a SINGLE ffmpeg filter_complex call instead of two separate full re-encodes, to avoid stacking generation loss and to save processing time.
-        // 11.5 BLUR BOXES
-        if (!hasCompletedStep(job.currentStep, STEPS.BLUR_BOXES)) {
-            if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
-            try {
-                let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
-                if (Array.isArray(parsedBoxes) && parsedBoxes.length > 0) {
-                    console.log(`[BLUR] Applying ${parsedBoxes.length} blur boxes...`);
-                    const blurTmpPath = path.join(tmpDir, `${jobId}_blur.mp4`);
-                    
-                    let filterComplex = '';
-                    let lastMap = '[0:v]';
-                    let splitInputs = '';
-                    let overlayChains = '';
-                    
-                    // Split the input video for each blur box
-                    // e.g. [0:v]split=2[v0][base]; [v0]crop=...[b0]; [b0]boxblur=...[bb0]; [base][bb0]overlay=...[out]
-                    // The prompt specifically says "Use ffmpeg's per-region boxblur pattern: split the region out with crop, apply boxblur=strength ... then overlay it back"
-                    // Chain multiple boxes by overlaying sequentially.
-                    
-                    for (let i = 0; i < parsedBoxes.length; i++) {
-                        const box = parsedBoxes[i];
-                        // Note: The video has been scaled/cropped to state.outputWidth x state.outputHeight
-                        // in an earlier segment pass, so these dimensions match the current video canvas.
-                        const x = Math.round((box.xPct / 100) * state.outputWidth);
-                        const y = Math.round((box.yPct / 100) * state.outputHeight);
-                        const x2 = Math.round(((box.xPct + box.widthPct) / 100) * state.outputWidth);
-                        const y2 = Math.round(((box.yPct + box.heightPct) / 100) * state.outputHeight);
-                        const w = Math.max(2, x2 - x);
-                        const h = Math.max(2, y2 - y);
+        const runSequentialOverlays = async () => {
+            // 11.5 BLUR BOXES
+            if (!hasCompletedStep(job.currentStep, STEPS.BLUR_BOXES)) {
+                if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
+                try {
+                    let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
+                    if (Array.isArray(parsedBoxes) && parsedBoxes.length > 0) {
+                        console.log(`[BLUR] Applying ${parsedBoxes.length} blur boxes...`);
+                        const blurTmpPath = path.join(tmpDir, `${jobId}_blur.mp4`);
+                        
+                        let filterComplex = '';
+                        let lastMap = '[0:v]';
+                        let splitInputs = '';
+                        let overlayChains = '';
+                        
+                        // Split the input video for each blur box
+                        // e.g. [0:v]split=2[v0][base]; [v0]crop=...[b0]; [b0]boxblur=...[bb0]; [base][bb0]overlay=...[out]
+                        // The prompt specifically says "Use ffmpeg's per-region boxblur pattern: split the region out with crop, apply boxblur=strength ... then overlay it back"
+                        // Chain multiple boxes by overlaying sequentially.
+                        
+                        for (let i = 0; i < parsedBoxes.length; i++) {
+                            const box = parsedBoxes[i];
+                            // Note: The video has been scaled/cropped to state.outputWidth x state.outputHeight
+                            // in an earlier segment pass, so these dimensions match the current video canvas.
+                            const x = Math.round((box.xPct / 100) * state.outputWidth);
+                            const y = Math.round((box.yPct / 100) * state.outputHeight);
+                            const x2 = Math.round(((box.xPct + box.widthPct) / 100) * state.outputWidth);
+                            const y2 = Math.round(((box.yPct + box.heightPct) / 100) * state.outputHeight);
+                            const w = Math.max(2, x2 - x);
+                            const h = Math.max(2, y2 - y);
 
-                        // The strength slider is 1-30.
-                        const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
-                        
-                        // New Strength Mapping:
-                        // To ensure typical subtitle text is fully illegible at strength 8-10, we make the curve start higher and scale faster.
-                        // A boxblur radius of ~15-20 applied twice completely wipes out fine detail.
-                        // Formula: eff = strength * 1.5 + 5
-                        // At strength=1: eff=7 (soft). At strength=10: eff=20 (very strong). At strength=30: eff=50 (ffmpeg limit safe).
-                        const eff = Math.min(50, Math.round(strength * 1.5) + 5);
-                        
-                        // New Mask Geometry & Padding:
-                        // To avoid a visible rectangle shape, we need a very wide feather transition, so we increase maskBlur.
-                        // We set maskBlur significantly larger than eff to guarantee a smooth, natural fade.
-                        const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
-                        
-                        // To prevent ghosting, the 100% opacity zone MUST cover the user's box.
-                        // A boxblur of radius R spreads inward by R pixels.
-                        // Thus, we must expand the solid white mask by AT LEAST maskBlur so the fading edge starts exactly AT the user's box boundary.
-                        // We set expand = maskBlur + 2 for a tiny safety margin of full opacity just outside the box.
-                        const expand = maskBlur + 2; 
-                        
-                        // The crop padding must hold the expanded mask PLUS the outward feather spread (which also equals maskBlur).
-                        // pad = expand (inward safety) + maskBlur (outward fade) + 2 (buffer)
-                        // At strength=10, eff=20, maskBlur=34, expand=36, pad=72. This is well within safe bounds for a 1080x1920 canvas.
-                        const pad = expand + maskBlur + 2;
-                        
-                        const cx = Math.max(0, x - pad);
-                        const cy = Math.max(0, y - pad);
-                        const cw = Math.min(state.outputWidth - cx, w + pad * 2);
-                        const ch = Math.min(state.outputHeight - cy, h + pad * 2);
-                        
-                        // Calculate the true offset of the user's box within our padded crop
-                        const boxInCropX = x - cx;
-                        const boxInCropY = y - cy;
-                        
-                        // Calculate the expanded mask coordinates, clamped to the crop boundaries
-                        const maskX = Math.max(0, boxInCropX - expand);
-                        const maskY = Math.max(0, boxInCropY - expand);
-                        const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
-                        const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
-                        
-                        const nextMap = `[v${i}]`;
-                        const mainSplit = `[main${i}]`;
-                        const blurSplit = `[blur${i}]`;
-                        
-                        // 1. [mask_base] draws the padded crop completely black, then draws the EXPANDED white box.
-                        // 2. We blur this mask with `maskBlur:1`. Note that boxblur's second parameter is power (repeat count),
-                        //    not a second radius, and must stay a small fixed number (1), never scaled with strength. Because the 
-                        //    white box was expanded by `maskBlur`, the fading boundary exactly meets the user's original box.
-                        // 3. We apply this mask to the blurred crop via alphamerge.
-                        const maskBase = `[mask_base${i}]`;
-                        const mask = `[mask${i}]`;
-                        const blurCrop = `[blur_crop${i}]`;
-                        const blurDone = `[blur_done${i}]`;
-                        const alphaBlur = `[alpha_blur${i}]`;
+                            // The strength slider is 1-30.
+                            const strength = Math.min(30, Math.max(1, box.strength || 10)); // 1-30 limit
+                            
+                            // New Strength Mapping:
+                            // To ensure typical subtitle text is fully illegible at strength 8-10, we make the curve start higher and scale faster.
+                            // A boxblur radius of ~15-20 applied twice completely wipes out fine detail.
+                            // Formula: eff = strength * 1.5 + 5
+                            // At strength=1: eff=7 (soft). At strength=10: eff=20 (very strong). At strength=30: eff=50 (ffmpeg limit safe).
+                            const eff = Math.min(50, Math.round(strength * 1.5) + 5);
+                            
+                            // New Mask Geometry & Padding:
+                            // To avoid a visible rectangle shape, we need a very wide feather transition, so we increase maskBlur.
+                            // We set maskBlur significantly larger than eff to guarantee a smooth, natural fade.
+                            const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
+                            
+                            // To prevent ghosting, the 100% opacity zone MUST cover the user's box.
+                            // A boxblur of radius R spreads inward by R pixels.
+                            // Thus, we must expand the solid white mask by AT LEAST maskBlur so the fading edge starts exactly AT the user's box boundary.
+                            // We set expand = maskBlur + 2 for a tiny safety margin of full opacity just outside the box.
+                            const expand = maskBlur + 2; 
+                            
+                            // The crop padding must hold the expanded mask PLUS the outward feather spread (which also equals maskBlur).
+                            // pad = expand (inward safety) + maskBlur (outward fade) + 2 (buffer)
+                            // At strength=10, eff=20, maskBlur=34, expand=36, pad=72. This is well within safe bounds for a 1080x1920 canvas.
+                            const pad = expand + maskBlur + 2;
+                            
+                            const cx = Math.max(0, x - pad);
+                            const cy = Math.max(0, y - pad);
+                            const cw = Math.min(state.outputWidth - cx, w + pad * 2);
+                            const ch = Math.min(state.outputHeight - cy, h + pad * 2);
+                            
+                            // Calculate the true offset of the user's box within our padded crop
+                            const boxInCropX = x - cx;
+                            const boxInCropY = y - cy;
+                            
+                            // Calculate the expanded mask coordinates, clamped to the crop boundaries
+                            const maskX = Math.max(0, boxInCropX - expand);
+                            const maskY = Math.max(0, boxInCropY - expand);
+                            const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
+                            const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
+                            
+                            const nextMap = `[v${i}]`;
+                            const mainSplit = `[main${i}]`;
+                            const blurSplit = `[blur${i}]`;
+                            
+                            // 1. [mask_base] draws the padded crop completely black, then draws the EXPANDED white box.
+                            // 2. We blur this mask with `maskBlur:1`. Note that boxblur's second parameter is power (repeat count),
+                            //    not a second radius, and must stay a small fixed number (1), never scaled with strength. Because the 
+                            //    white box was expanded by `maskBlur`, the fading boundary exactly meets the user's original box.
+                            // 3. We apply this mask to the blurred crop via alphamerge.
+                            const maskBase = `[mask_base${i}]`;
+                            const mask = `[mask${i}]`;
+                            const blurCrop = `[blur_crop${i}]`;
+                            const blurDone = `[blur_done${i}]`;
+                            const alphaBlur = `[alpha_blur${i}]`;
 
-                        filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
+                            filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
+                            
+                            // Crop and split the region for both blurring and mask generation
+                            filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
+                            
+                            // Generate the feathered mask using the enlarged white box coordinates
+                            filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
+                            
+                            // Blur the cropped video content.
+                            // We use TWO passes of power=1 (boxblur=eff:1,boxblur=eff:1) rather than one, because 
+                            // convolving a box filter with itself produces a triangle filter, which gives a smoother, 
+                            // more Gaussian-like blur without blocky artifacts at high strengths.
+                            filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                            
+                            // Merge the alpha mask and overlay
+                            filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
+                            filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
+                            
+                            lastMap = nextMap;
+                        }
                         
-                        // Crop and split the region for both blurring and mask generation
-                        filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
+                        console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
+                        console.log("[BLUR] filterComplex:", filterComplex);
                         
-                        // Generate the feathered mask using the enlarged white box coordinates
-                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
-                        
-                        // Blur the cropped video content.
-                        // We use TWO passes of power=1 (boxblur=eff:1,boxblur=eff:1) rather than one, because 
-                        // convolving a box filter with itself produces a triangle filter, which gives a smoother, 
-                        // more Gaussian-like blur without blocky artifacts at high strengths.
-                        filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
-                        
-                        // Merge the alpha mask and overlay
-                        filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
-                        filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
-                        
-                        lastMap = nextMap;
-                    }
-                    
-                    console.log("[BLUR] Parsed boxes:", JSON.stringify(parsedBoxes));
-                    console.log("[BLUR] filterComplex:", filterComplex);
-                    
-                    if (!filterComplex || filterComplex.trim() === '') {
-                        console.error('[BLUR] filterComplex was empty, skipping blur step.');
-                    } else {
-                        const blurArgs = [
-                            '-i', finalOutPath,
-                            '-filter_complex', filterComplex.replace(/;\s*$/, ""),
-                            '-map', lastMap, '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            '-y', blurTmpPath
-                        ];
-                        
-                        await runFFmpeg(blurArgs, tmpDir);
-                        
-                        if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
-                            fs.unlinkSync(finalOutPath);
-                            safeMoveFile(blurTmpPath, finalOutPath);
+                        if (!filterComplex || filterComplex.trim() === '') {
+                            console.error('[BLUR] filterComplex was empty, skipping blur step.');
                         } else {
-                            console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
-                            state.warnings.push("⚠ Blur could not be applied: FFmpeg failed to produce output file");
+                            const blurArgs = [
+                                '-i', finalOutPath,
+                                '-filter_complex', filterComplex.replace(/;\s*$/, ""),
+                                '-map', lastMap, '-map', '0:a?',
+                                '-c:a', 'copy',
+                                '-c:v', 'libx264',
+                                '-preset', 'fast',
+                                '-y', blurTmpPath
+                            ];
+                            
+                            await runFFmpeg(blurArgs, tmpDir);
+                            
+                            if (fs.existsSync(blurTmpPath) && fs.statSync(blurTmpPath).size > 0) {
+                                fs.unlinkSync(finalOutPath);
+                                safeMoveFile(blurTmpPath, finalOutPath);
+                            } else {
+                                console.error("[BLUR] Error: blur adjustment failed to produce output file, skipping.");
+                                state.warnings.push("⚠ Blur could not be applied: FFmpeg failed to produce output file");
+                            }
                         }
                     }
+                } catch(e) {
+                    console.error("[BLUR] Error applying blur boxes:", e);
                 }
-            } catch(e) {
-                console.error("[BLUR] Error applying blur boxes:", e);
             }
+            advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
         }
-        advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
-    }
 
-        // 11.6 WATERMARK
-        if (job.watermarkText && job.watermarkText.trim() !== '') {
-            try {
-                const watermarkText = job.watermarkText.trim();
-                console.log(`[WATERMARK] Applying watermark: ${watermarkText}`);
-                const wmTmpPath = path.join(tmpDir, `${jobId}_watermark.mp4`);
-                
-                // Escape rules for drawtext:
-                // text must escape backslashes, colons, single quotes
-                let escapedText = watermarkText
-                    .replace(/\\/g, "\\\\")
-                    .replace(/:/g, "\\:")
-                    .replace(/'/g, "\\'")
-                    .replace(/%/g, "\\%");
+            // 11.6 WATERMARK
+            if (job.watermarkText && job.watermarkText.trim() !== '') {
+                try {
+                    const watermarkText = job.watermarkText.trim();
+                    console.log(`[WATERMARK] Applying watermark: ${watermarkText}`);
+                    const wmTmpPath = path.join(tmpDir, `${jobId}_watermark.mp4`);
                     
-                const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
-                
-                // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
-                const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
-                const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
-                
-                const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
-                
-                const wmArgs = [
-                    '-i', finalOutPath,
-                    '-vf', drawtextFilter,
-                    '-c:a', 'copy',
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-y', wmTmpPath
-                ];
-                
-                await runFFmpeg(wmArgs, tmpDir);
-                
-                if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
-                    fs.unlinkSync(finalOutPath);
-                    safeMoveFile(wmTmpPath, finalOutPath);
-                } else {
-                    console.error("[WATERMARK] Error: watermark adjustment failed to produce output file, skipping.");
-                    state.warnings.push("⚠ Watermark could not be applied: FFmpeg failed to produce output file");
+                    // Escape rules for drawtext:
+                    // text must escape backslashes, colons, single quotes
+                    let escapedText = watermarkText
+                        .replace(/\\/g, "\\\\")
+                        .replace(/:/g, "\\:")
+                        .replace(/'/g, "\\'")
+                        .replace(/%/g, "\\%");
+                        
+                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    
+                    // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
+                    const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
+                    const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
+                    
+                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+                    
+                    const wmArgs = [
+                        '-i', finalOutPath,
+                        '-vf', drawtextFilter,
+                        '-c:a', 'copy',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-y', wmTmpPath
+                    ];
+                    
+                    await runFFmpeg(wmArgs, tmpDir);
+                    
+                    if (fs.existsSync(wmTmpPath) && fs.statSync(wmTmpPath).size > 0) {
+                        fs.unlinkSync(finalOutPath);
+                        safeMoveFile(wmTmpPath, finalOutPath);
+                    } else {
+                        console.error("[WATERMARK] Error: watermark adjustment failed to produce output file, skipping.");
+                        state.warnings.push("⚠ Watermark could not be applied: FFmpeg failed to produce output file");
+                    }
+                } catch (e) {
+                    console.error("[WATERMARK] Error applying watermark:", e.message || e);
+                    state.warnings.push("⚠ Watermark could not be applied: " + (e.message || "FFmpeg error"));
                 }
-            } catch (e) {
-                console.error("[WATERMARK] Error applying watermark:", e.message || e);
-                state.warnings.push("⚠ Watermark could not be applied: " + (e.message || "FFmpeg error"));
             }
-        }
 
-        // 11.7 SUBTITLE BURN
-        if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
+            // 11.7 SUBTITLE BURN
+            if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
+                if (state.srtFile && fs.existsSync(state.srtFile)) {
+                    try {
+                        const srtContent = fs.readFileSync(state.srtFile, 'utf8');
+                        const blocks = srtContent.trim().split(/\n\s*\n/);
+                        let subtitles = [];
+                        for (const block of blocks) {
+                            const lines = block.split('\n');
+                            if (lines.length >= 3) {
+                                const timeLine = lines[1];
+                                const textLines = lines.slice(2).join('\n').trim();
+                                const timeParts = timeLine.split(' --> ');
+                                if (timeParts.length === 2) {
+                                    const parseTime = (t) => {
+                                        const [hms, ms] = t.split(',');
+                                        const [h, m, s] = hms.split(':');
+                                        return parseInt(h)*3600 + parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
+                                    };
+                                    const start = parseTime(timeParts[0]);
+                                    const end = parseTime(timeParts[1]);
+                                    if (textLines) {
+                                        subtitles.push({ start, end, text: textLines });
+                                    }
+                                }
+                            }
+                        }
+
+                        if (subtitles.length > 0) {
+                            console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
+                            const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
+                            
+                            let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+                            if (job.subtitlePosition && job.subtitlePosition !== 'null') {
+                                try {
+                                    pos = typeof job.subtitlePosition === 'string' ? JSON.parse(job.subtitlePosition) : job.subtitlePosition;
+                                } catch(e) {}
+                            }
+                            
+                            const marginL = Math.round((pos.xPct / 100) * state.outputWidth);
+                            const marginR = Math.round(state.outputWidth - ((pos.xPct + pos.widthPct) / 100) * state.outputWidth);
+                            const marginV = Math.round((pos.yPct / 100) * state.outputHeight);
+                            
+                            let fontsize = Math.round(((pos.heightPct / 100) * state.outputHeight) * 0.6);
+                            if (fontsize < 24) fontsize = 24;
+                            if (fontsize > 80) fontsize = 80;
+
+                            let fontName = "Padauk";
+
+                            let primaryColor = "&H00FFFFFF"; // white (default)
+                            if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
+                            if (job.subtitleColor === "cyan") primaryColor = "&H00FFFF00";
+                            if (job.subtitleColor === "lime") primaryColor = "&H0000FF00";
+                            if (job.subtitleColor === "magenta") primaryColor = "&H00FF00FF";
+
+                            console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
+                            
+                            const toAssTime = (sec) => {
+                                const h = Math.floor(sec / 3600);
+                                const m = Math.floor((sec % 3600) / 60);
+                                const s = Math.floor(sec % 60);
+                                const cs = Math.floor((sec % 1) * 100);
+                                return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+                            };
+                            
+                            const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${state.outputWidth}\nPlayResY: ${state.outputHeight}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+                            
+                            const assLines = subtitles.map(sub => {
+                                const startStr = toAssTime(sub.start);
+                                const endStr = toAssTime(sub.end);
+                                const assText = sub.text.replace(/\n/g, '\\N');
+                                return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                            });
+                            
+                            const assPath = path.join(tmpDir, jobId + ".ass");
+                            fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
+                            
+                            const cw = Math.max(2, Math.round((pos.widthPct / 100) * state.outputWidth));
+                            const ch = Math.max(2, Math.round((pos.heightPct / 100) * state.outputHeight));
+                            const cx = Math.max(0, marginL);
+                            const cy = Math.max(0, marginV);
+                            
+                            let filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
+                            
+                            const subArgs = [
+                                '-i', finalOutPath,
+                                '-filter_complex', filterComplex,
+                                '-map', '[v]',
+                                '-map', '0:a?',
+                                '-c:a', 'copy',
+                                '-c:v', 'libx264',
+                                '-preset', 'fast',
+                                '-y', subTmpPath
+                            ];
+                            
+                            try {
+                                await runFFmpeg(subArgs, tmpDir);
+                                
+                                if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                                    fs.unlinkSync(finalOutPath);
+                                    safeMoveFile(subTmpPath, finalOutPath);
+                                } else {
+                                    throw new Error("FFmpeg failed to produce output file");
+                                }
+                            } catch (e) {
+                                console.error("[SUBTITLE] Error burning subtitles:", e.message || e);
+                                state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
+                            }
+                        }
+                    } catch(e) {
+                        console.error("[SUBTITLE] Error burning subtitles setup:", e);
+                        state.warnings.push("⚠ Subtitles could not be burned in setup: " + e.message);
+                    }
+                }
+                advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
+            }
+        };
+
+        const runCombinedOverlays = async () => {
+            const tmpOutPath = path.join(tmpDir, `${jobId}_combined_overlays.mp4`);
+            let current = '[0:v]';
+            const filterParts = [];
+            let hasBlur = false;
+            let hasWatermark = false;
+            let subCount = 0;
+
+            // 1. Blur
+            if (job.blurBoxes && job.blurBoxes !== '[]' && job.blurBoxes !== 'null') {
+                try {
+                    let parsedBoxes = typeof job.blurBoxes === 'string' ? JSON.parse(job.blurBoxes) : job.blurBoxes;
+                    if (Array.isArray(parsedBoxes) && parsedBoxes.length > 0) {
+                        let filterComplex = '';
+                        let lastMap = '[0:v]';
+
+                        for (let i = 0; i < parsedBoxes.length; i++) {
+                            const box = parsedBoxes[i];
+                            const x = Math.round((box.xPct / 100) * state.outputWidth);
+                            const y = Math.round((box.yPct / 100) * state.outputHeight);
+                            const x2 = Math.round(((box.xPct + box.widthPct) / 100) * state.outputWidth);
+                            const y2 = Math.round(((box.yPct + box.heightPct) / 100) * state.outputHeight);
+                            const w = Math.max(2, x2 - x);
+                            const h = Math.max(2, y2 - y);
+
+                            const strength = Math.min(30, Math.max(1, box.strength || 10));
+                            const eff = Math.min(50, Math.round(strength * 1.5) + 5);
+                            const maskBlur = Math.min(50, Math.round(eff * 1.2) + 10);
+                            const expand = maskBlur + 2;
+                            const pad = expand + maskBlur + 2;
+
+                            const cx = Math.max(0, x - pad);
+                            const cy = Math.max(0, y - pad);
+                            const cw = Math.min(state.outputWidth - cx, w + pad * 2);
+                            const ch = Math.min(state.outputHeight - cy, h + pad * 2);
+
+                            const boxInCropX = x - cx;
+                            const boxInCropY = y - cy;
+
+                            const maskX = Math.max(0, boxInCropX - expand);
+                            const maskY = Math.max(0, boxInCropY - expand);
+                            const maskW = Math.min(cw, boxInCropX + w + expand) - maskX;
+                            const maskH = Math.min(ch, boxInCropY + h + expand) - maskY;
+
+                            const nextMap = `[v${i}]`;
+                            const mainSplit = `[main${i}]`;
+                            const blurSplit = `[blur${i}]`;
+
+                            const maskBase = `[mask_base${i}]`;
+                            const mask = `[mask${i}]`;
+                            const blurCrop = `[blur_crop${i}]`;
+                            const blurDone = `[blur_done${i}]`;
+                            const alphaBlur = `[alpha_blur${i}]`;
+
+                            filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
+                            filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
+                            filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
+                            filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                            filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
+                            filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
+
+                            lastMap = nextMap;
+                        }
+
+                        if (filterComplex && filterComplex.trim() !== '') {
+                            filterParts.push(filterComplex.replace(/;\s*$/, ''));
+                            current = lastMap;
+                            hasBlur = true;
+                        }
+                    }
+                } catch (e) {
+                    console.error("[OVERLAYS] Error preparing blur filter:", e);
+                }
+            }
+
+            // 2. Watermark
+            if (job.watermarkText && job.watermarkText.trim() !== '') {
+                try {
+                    const watermarkText = job.watermarkText.trim();
+                    let escapedText = watermarkText
+                        .replace(/\\/g, "\\\\")
+                        .replace(/:/g, "\\:")
+                        .replace(/'/g, "\\'")
+                        .replace(/%/g, "\\%");
+
+                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
+                    const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
+
+                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+
+                    filterParts.push(`${current}${drawtextFilter}[vwm]`);
+                    current = '[vwm]';
+                    hasWatermark = true;
+                } catch (e) {
+                    console.error("[OVERLAYS] Error preparing watermark filter:", e);
+                }
+            }
+
+            // 3. Subtitles
             if (state.srtFile && fs.existsSync(state.srtFile)) {
                 try {
                     const srtContent = fs.readFileSync(state.srtFile, 'utf8');
@@ -1067,20 +1283,19 @@ export const processRecapPipeline = async (jobId) => {
                     }
 
                     if (subtitles.length > 0) {
-                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
-                        const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
-                        
+                        subCount = subtitles.length;
+
                         let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
                         if (job.subtitlePosition && job.subtitlePosition !== 'null') {
                             try {
                                 pos = typeof job.subtitlePosition === 'string' ? JSON.parse(job.subtitlePosition) : job.subtitlePosition;
                             } catch(e) {}
                         }
-                        
+
                         const marginL = Math.round((pos.xPct / 100) * state.outputWidth);
                         const marginR = Math.round(state.outputWidth - ((pos.xPct + pos.widthPct) / 100) * state.outputWidth);
                         const marginV = Math.round((pos.yPct / 100) * state.outputHeight);
-                        
+
                         let fontsize = Math.round(((pos.heightPct / 100) * state.outputHeight) * 0.6);
                         if (fontsize < 24) fontsize = 24;
                         if (fontsize > 80) fontsize = 80;
@@ -1093,8 +1308,6 @@ export const processRecapPipeline = async (jobId) => {
                         if (job.subtitleColor === "lime") primaryColor = "&H0000FF00";
                         if (job.subtitleColor === "magenta") primaryColor = "&H00FF00FF";
 
-                        console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
-                        
                         const toAssTime = (sec) => {
                             const h = Math.floor(sec / 3600);
                             const m = Math.floor((sec % 3600) / 60);
@@ -1102,57 +1315,76 @@ export const processRecapPipeline = async (jobId) => {
                             const cs = Math.floor((sec % 1) * 100);
                             return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
                         };
-                        
+
                         const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${state.outputWidth}\nPlayResY: ${state.outputHeight}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-                        
+
                         const assLines = subtitles.map(sub => {
                             const startStr = toAssTime(sub.start);
                             const endStr = toAssTime(sub.end);
                             const assText = sub.text.replace(/\n/g, '\\N');
                             return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
                         });
-                        
+
                         const assPath = path.join(tmpDir, jobId + ".ass");
                         fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
-                        
-                        const cw = Math.max(2, Math.round((pos.widthPct / 100) * state.outputWidth));
-                        const ch = Math.max(2, Math.round((pos.heightPct / 100) * state.outputHeight));
-                        const cx = Math.max(0, marginL);
-                        const cy = Math.max(0, marginV);
-                        
-                        let filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                        
-                        const subArgs = [
-                            '-i', finalOutPath,
-                            '-filter_complex', filterComplex,
-                            '-map', '[v]',
-                            '-map', '0:a?',
-                            '-c:a', 'copy',
-                            '-c:v', 'libx264',
-                            '-preset', 'fast',
-                            '-y', subTmpPath
-                        ];
-                        
-                        try {
-                            await runFFmpeg(subArgs, tmpDir);
-                            
-                            if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                                fs.unlinkSync(finalOutPath);
-                                safeMoveFile(subTmpPath, finalOutPath);
-                            } else {
-                                throw new Error("FFmpeg failed to produce output file");
-                            }
-                        } catch (e) {
-                            console.error("[SUBTITLE] Error burning subtitles:", e.message || e);
-                            state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
-                        }
+
+                        const escapedAssPath = assPath.replace(/:/g, '\\:');
+                        filterParts.push(`${current}ass='${escapedAssPath}'[vsub]`);
+                        current = '[vsub]';
                     }
-                    } catch(e) {
-                        console.error("[SUBTITLE] Error burning subtitles setup:", e);
-                        state.warnings.push("⚠ Subtitles could not be burned in setup: " + e.message);
-                    }
+                } catch (e) {
+                    console.error("[OVERLAYS] Error preparing subtitles filter:", e);
+                }
             }
+
+            if (filterParts.length === 0) {
+                advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
+                advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
+                return;
+            }
+
+            const chain = filterParts.join(';');
+            const combinedArgs = [
+                '-i', finalOutPath,
+                '-filter_complex', chain,
+                '-map', current,
+                '-map', '0:a?',
+                '-c:a', 'copy',
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-y', tmpOutPath
+            ];
+
+            console.log(`[OVERLAYS] Combined pass: blur=${hasBlur} watermark=${hasWatermark} subtitles=${subCount}`);
+            const startTime = Date.now();
+            await runFFmpeg(combinedArgs, tmpDir);
+            const durationSec = Math.round((Date.now() - startTime) / 1000);
+            console.log(`[OVERLAYS] Combined pass done in ${durationSec}s`);
+
+            if (fs.existsSync(tmpOutPath) && fs.statSync(tmpOutPath).size > 0) {
+                fs.unlinkSync(finalOutPath);
+                safeMoveFile(tmpOutPath, finalOutPath);
+            } else {
+                throw new Error('Combined overlays failed to produce output file');
+            }
+
+            advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
             advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
+        };
+
+        if (!hasCompletedStep(job.currentStep, STEPS.BLUR_BOXES)) {
+            try {
+                await runCombinedOverlays();
+            } catch (e) {
+                console.error('[OVERLAYS] Combined pass failed (' + (e.message || e) + '), falling back to sequential passes');
+                const combinedTmp = path.join(tmpDir, `${jobId}_combined_overlays.mp4`);
+                if (fs.existsSync(combinedTmp)) {
+                    try { fs.unlinkSync(combinedTmp); } catch (_) {}
+                }
+                await runSequentialOverlays();
+            }
+        } else {
+            await runSequentialOverlays();
         }
         // 12. SPEED ADJUST
         if (!hasCompletedStep(job.currentStep, STEPS.SPEED_ADJUST)) {

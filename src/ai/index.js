@@ -566,7 +566,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         // a normal dialogue-only video), this entire block is a no-op and
         // processedChunks/authoritativeTimeline/runningAudioTime are left
         // completely untouched.
-        const PASSTHROUGH_GAP_THRESHOLD = 0.5;
+        const PASSTHROUGH_GAP_THRESHOLD = 2.0;
         if (options && options.sourceVideoPath && mergedBlocks.length > 0) {
             try {
                 const blockEntryGroups = mergedBlocks.map(block =>
