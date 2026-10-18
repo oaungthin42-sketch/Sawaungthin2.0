@@ -13,7 +13,7 @@ import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/in
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM } from '../services/llm.js';
-import { getTranslationSystemInstruction } from '../ai/translation.js';
+import { getTranslationSystemInstruction, getNarratorSystemInstruction } from '../ai/translation.js';
 
 // Pipeline steps
 const STEPS = {
@@ -178,7 +178,7 @@ export const processRecapPipeline = async (jobId) => {
                     text: t.text
                 }));
 
-                const systemInstruction = getTranslationSystemInstruction();
+                const systemInstruction = job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction();
 
                 // Retry on transient API errors or validation errors
                 let response;

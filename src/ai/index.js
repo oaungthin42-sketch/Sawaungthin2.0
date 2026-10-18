@@ -567,6 +567,8 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         // processedChunks/authoritativeTimeline/runningAudioTime are left
         // completely untouched.
         const PASSTHROUGH_GAP_THRESHOLD = 2.0;
+        const TRIM_LONG_GAP_MIN = 20;   // gaps shorter than this many seconds are kept in full
+        const TRIM_KEEP_RATIO = 0.6;    // for longer gaps keep this fraction of the gap
         if (options && options.keepOriginalGaps && options.sourceVideoPath && mergedBlocks.length > 0) {
             try {
                 const blockEntryGroups = mergedBlocks.map(block =>
@@ -598,23 +600,29 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                     let cursor = 0;
                     let gapCounter = 0;
 
-                    const emitGap = async (g) => {
-                        const gapLen = g.origEnd - g.origStart;
+                    const emitPiece = async (pStart, pEnd, fadeFilter) => {
+                        const pLen = pEnd - pStart;
                         const gapPath = path.join(ttsDir, `passthrough_gap_${gapCounter++}.wav`);
+                        const ffmpegArgs = [
+                            '-y',
+                            '-i', options.sourceVideoPath,
+                            '-ss', pStart.toFixed(3),
+                            '-to', pEnd.toFixed(3),
+                            '-vn'
+                        ];
+                        if (fadeFilter) {
+                            ffmpegArgs.push('-af', fadeFilter);
+                        }
+                        ffmpegArgs.push(
+                            '-acodec', 'pcm_s16le',
+                            '-ar', '24000',
+                            '-ac', '1',
+                            gapPath
+                        );
                         try {
-                            await runFFmpeg([
-                                '-y',
-                                '-i', options.sourceVideoPath,
-                                '-ss', g.origStart.toFixed(3),
-                                '-to', g.origEnd.toFixed(3),
-                                '-vn',
-                                '-acodec', 'pcm_s16le',
-                                '-ar', '24000',
-                                '-ac', '1',
-                                gapPath
-                            ], ttsDir);
+                            await runFFmpeg(ffmpegArgs, ttsDir);
                         } catch (extractErr) {
-                            console.warn(`[PASSTHROUGH-GAP-INSERTION] Failed to extract audio for gap ${g.origStart.toFixed(3)}-${g.origEnd.toFixed(3)}: ${extractErr.message}. Skipping this gap.`);
+                            console.warn(`[PASSTHROUGH-GAP-INSERTION] Failed to extract audio for gap ${pStart.toFixed(3)}-${pEnd.toFixed(3)}: ${extractErr.message}. Skipping this gap.`);
                             return;
                         }
                         let gapDur = 0;
@@ -631,15 +639,37 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                         newAuthoritativeTimeline.push({
                             is_passthrough: true,
                             chunk_index: -1,
-                            orig_start: g.origStart,
-                            orig_end: g.origEnd,
-                            orig_dur: gapLen,
+                            orig_start: pStart,
+                            orig_end: pEnd,
+                            orig_dur: pLen,
                             final_audio_start: cursor,
                             final_audio_end: cursor + gapDur,
                             final_dur: gapDur,
                             text: ""
                         });
                         cursor += gapDur;
+                    };
+
+                    const emitGap = async (g) => {
+                        const gapLen = g.origEnd - g.origStart;
+                        if (gapLen < TRIM_LONG_GAP_MIN) {
+                            await emitPiece(g.origStart, g.origEnd, null);
+                        } else {
+                            const keepLen = gapLen * TRIM_KEEP_RATIO;
+                            const half = keepLen / 2;
+                            const formatNum = (n) => (typeof n === 'number' ? (Number.isInteger(n) ? n : parseFloat(n.toFixed(3))) : n);
+                            console.log(`[PASSTHROUGH-GAP-INSERTION] Trimmed gap ${formatNum(g.origStart)}-${formatNum(g.origEnd)} (${formatNum(gapLen)} s) to keep ${formatNum(keepLen)} s.`);
+                            const headStart = g.origStart;
+                            const headEnd = g.origStart + half;
+                            const headDur = headEnd - headStart;
+                            const headFade = `afade=t=out:st=${(headDur - 0.15).toFixed(3)}:d=0.15`;
+                            await emitPiece(headStart, headEnd, headFade);
+
+                            const tailStart = g.origEnd - half;
+                            const tailEnd = g.origEnd;
+                            const tailFade = 'afade=t=in:d=0.15';
+                            await emitPiece(tailStart, tailEnd, tailFade);
+                        }
                     };
 
                     const leadingGap = gaps.find(g => g.afterBlockIdx === -1);
