@@ -117,6 +117,7 @@ function App() {
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
   const [outputSpeed, setOutputSpeed] = useState<number>(1.0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
+  const [keepOriginalGaps, setKeepOriginalGaps] = useState<boolean>(false);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [showCropModal, setShowCropModal] = useState<boolean>(false);
   const [videoNativeDims, setVideoNativeDims] = useState<{ width: number; height: number } | null>(null);
@@ -624,6 +625,7 @@ function App() {
         formData.append('subtitleColor', subtitleColor);
         formData.append('speed', outputSpeed.toString());
         formData.append('flipped', isFlipped.toString());
+        formData.append('keepOriginalGaps', keepOriginalGaps.toString());
         
         if (user?.role === 'admin' && voiceCloneEnabled) {
           formData.append('useVoiceClone', useVoiceClone ? 'true' : 'false');
@@ -643,6 +645,7 @@ function App() {
           subtitleColor: subtitleColor,
           speed: outputSpeed.toString(),
           flipped: isFlipped.toString(),
+          keepOriginalGaps: keepOriginalGaps.toString(),
           ...(user?.role === 'admin' && voiceCloneEnabled ? {
             useVoiceClone: useVoiceClone ? 'true' : 'false',
             referenceVoiceId: selectedReferenceVoiceId || ''
@@ -1184,6 +1187,17 @@ function App() {
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">ဗီဒီယို လှည့်ရန်</span>
                                       <button onClick={() => setIsFlipped(!isFlipped)} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isFlipped ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
                                           <ArrowRight size={14} className={`transition-transform duration-300 ${isFlipped ? 'rotate-180' : ''}`} />
+                                      </button>
+                                  </div>
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title="စကားမပြောတဲ့ ၂ စက္ကန့်ထက်ရှည်တဲ့ အခန်းတွေမှာ မူရင်းနောက်ခံအသံ (တီးလုံး၊ ပေါက်ကွဲသံ စသည်) ကို ထိန်းထားမည်">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">နောက်ခံအသံ ထိန်းမည်</span>
+                                      <button 
+                                          type="button"
+                                          onClick={() => setKeepOriginalGaps(!keepOriginalGaps)} 
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${keepOriginalGaps ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                          title="စကားမပြောတဲ့ ၂ စက္ကန့်ထက်ရှည်တဲ့ အခန်းတွေမှာ မူရင်းနောက်ခံအသံ (တီးလုံး၊ ပေါက်ကွဲသံ စသည်) ကို ထိန်းထားမည်"
+                                      >
+                                          {keepOriginalGaps ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
                                   <div className="flex items-center gap-2 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">

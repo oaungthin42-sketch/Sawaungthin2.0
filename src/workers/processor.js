@@ -259,7 +259,8 @@ export const processRecapPipeline = async (jobId) => {
                 useVoiceClone: job.useVoiceClone,
                 referenceVoiceId: job.referenceVoiceId,
                 sourceVideoPath: job.videoPath,
-                videoDuration: state.originalVideoDuration
+                videoDuration: state.originalVideoDuration,
+                keepOriginalGaps: !!job.keepOriginalGaps
             });
             saveState();
         }

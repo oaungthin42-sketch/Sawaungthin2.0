@@ -567,7 +567,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         // processedChunks/authoritativeTimeline/runningAudioTime are left
         // completely untouched.
         const PASSTHROUGH_GAP_THRESHOLD = 2.0;
-        if (options && options.sourceVideoPath && mergedBlocks.length > 0) {
+        if (options && options.keepOriginalGaps && options.sourceVideoPath && mergedBlocks.length > 0) {
             try {
                 const blockEntryGroups = mergedBlocks.map(block =>
                     authoritativeTimeline.filter(e => block.scenes.includes(e.chunk_index))

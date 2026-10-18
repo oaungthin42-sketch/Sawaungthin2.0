@@ -365,6 +365,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const subtitleColor = body.subtitleColor || "white";
     const speed = parseFloat(body.speed) || 1.0;
     const flipped = body.flipped === 'true' ? 1 : 0;
+    const keepOriginalGaps = body.keepOriginalGaps === 'true' ? 1 : 0;
     const useVoiceCloneRaw = body.useVoiceClone === 'true' || body.useVoiceClone === true || body.useVoiceClone === 1 || body.useVoiceClone === '1';
     let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
     let referenceVoiceId = body.referenceVoiceId || null;
@@ -392,6 +393,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         subtitleColor: subtitleColor,
         speed: speed,
         flipped: flipped,
+        keepOriginalGaps: keepOriginalGaps,
         userId: user.id,
         cropRect: cropRect
     });
@@ -744,6 +746,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const subtitleColor = req.body.subtitleColor || "white";
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
+     const keepOriginalGaps = req.body.keepOriginalGaps === 'true' ? 1 : 0;
      const useVoiceCloneRaw = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1';
      let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
      let referenceVoiceId = req.body.referenceVoiceId || null;
@@ -771,6 +774,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          subtitleColor: subtitleColor,
          speed: speed,
          flipped: flipped,
+         keepOriginalGaps: keepOriginalGaps,
          userId: user.id,
          cropRect: cropRect
      });
