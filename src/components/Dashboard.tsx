@@ -1,6 +1,7 @@
 import React from 'react';
 import { CreditGauge } from './CreditGauge';
-import { Video, CreditCard, History, ArrowRight, Play, AlertTriangle } from 'lucide-react';
+import { CreditCard, AlertTriangle, Zap } from 'lucide-react';
+import { ZawGyiHero, MyanmarStrip } from './BrandFx';
 
 interface DashboardProps {
     credits: number | null;
@@ -10,87 +11,58 @@ interface DashboardProps {
     onViewRecent: () => void;
 }
 
+const RULES = [
+    { c: 1, t: '1 မိနစ် 15 စက္ကန့်အထိ' },
+    { c: 2, t: '2 မိနစ် 15 စက္ကန့်အထိ' },
+    { c: 3, t: '3 မိနစ် 15 စက္ကန့်အထိ' },
+];
+
 export const Dashboard: React.FC<DashboardProps> = ({ credits, userName, userRole, onStartNew, onViewRecent }) => {
+    void userName; void onViewRecent;
     return (
-        <div className="space-y-8 animate-in fade-in duration-700">
-            {/* Welcome Banner */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 p-8 sm:p-12 text-white">
-                <div className="relative z-10 space-y-4 max-w-2xl">
-                    <h2 className="text-4xl sm:text-5xl font-bold font-display tracking-tight">ပြန်လည်ကြိုဆိုပါသည်, {userName}!</h2>
-                    <p className="text-indigo-100 text-lg sm:text-xl font-medium opacity-90">
-                        အခြားဗီဒီယိုတစ်ခုကို ထပ်မံလုပ်ဆောင်ရန် အသင့်ဖြစ်ပြီလား။ သင့် AI လုပ်ငန်းခွင် အသင့်ရှိနေပါသည်။
-                    </p>
-                    <div className="pt-4">
-                        <button 
-                            onClick={onStartNew}
-                            className="inline-flex items-center gap-3 bg-white text-indigo-600 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-indigo-50 transition-all shadow-xl shadow-indigo-900/20 active:scale-95"
-                        >
-                            <Play className="w-6 h-6 fill-indigo-600" />
-                            လုပ်ငန်းအသစ် စတင်မည်
-                        </button>
-                    </div>
+        <div className="space-y-5 animate-in fade-in duration-700">
+            <div className="relative overflow-hidden rounded-[26px] min-h-[300px] md:h-[316px] border border-[rgba(255,160,60,0.28)] shadow-[0_24px_60px_rgba(214,31,60,0.22)]"
+                style={{ background: 'radial-gradient(120% 140% at 80% 40%,#7A1E10 0%,#3A0E0A 45%,#150708 100%)' }}>
+                <ZawGyiHero className="absolute right-[-40px] md:right-0 top-0 h-full w-auto opacity-50 md:opacity-100 pointer-events-none select-none" />
+                <div className="relative z-10 p-7 sm:p-11 pb-12">
+                    <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-white/10 text-[#FFD9A8]">SuperClick AI</span>
+                    <h2 className="sc-title3d font-bold leading-[1.15] mt-3 text-[34px] sm:text-[54px]">မြန်မာဗားစင်း</h2>
+                    <div className="sc-title3d font-display font-bold leading-[1.15] text-[30px] sm:text-[46px]">Movie Recap</div>
+                    <button type="button" onClick={onStartNew} className="btn-brand mt-6 inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm">
+                        <Zap className="w-4 h-4" />စတင်မည်
+                    </button>
                 </div>
-                
-                {/* Decorative background element */}
-                <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/4 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
-                <div className="absolute bottom-0 left-0 translate-y-1/2 -translate-x-1/4 w-64 h-64 bg-indigo-400/20 rounded-full blur-2xl" />
+                <MyanmarStrip className="absolute left-0 bottom-0" />
             </div>
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-6">
-                    <div className="flex items-center justify-between">
-                        <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl">
-                            <CreditCard className="w-6 h-6" />
-                        </div>
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">လက်ကျန်ငွေ</span>
+            <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-5">
+                <div className="bg-gray-900 border border-gray-800 p-6 rounded-[20px] flex flex-col justify-center gap-3">
+                    <div className="flex items-center gap-3 text-gray-500 text-[13px]">
+                        <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl"><CreditCard className="w-5 h-5" /></div>
+                        လက်ကျန်ငွေ
                     </div>
                     <div className="flex flex-col items-center">
                         {userRole === 'admin'
-                            ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2 mt-4">∞ Unlimited</div>
+                            ? <div className="sc-gradient-text font-display font-bold text-4xl mt-2">∞ Unlimited</div>
                             : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-5xl font-bold font-mono text-white tracking-tighter">...</div>)}
                     </div>
                 </div>
 
-                <div className="bg-gray-900 border border-amber-500/20 p-8 rounded-3xl flex flex-col justify-between">
-                    <div className="flex items-center justify-between">
-                        <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl">
-                            <AlertTriangle className="w-6 h-6" />
-                        </div>
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Credit စည်းမျဉ်း</span>
+                <div className="bg-gray-900 border border-gray-800 p-6 rounded-[20px]">
+                    <div className="flex items-center gap-3 mb-3">
+                        <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl"><AlertTriangle className="w-5 h-5" /></div>
+                        <b className="text-white text-base">Credit စည်းမျဉ်း</b>
                     </div>
-                    <div className="space-y-2">
-                        <span className="text-white font-bold">⚠️ Credit သုံးစွဲမှု စည်းမျဉ်း</span>
-                        <p className="text-gray-400 text-sm leading-relaxed">
-                            Credit 1 ခုလျှင် video 1 မိနစ် 15 စက္ကန့်အထိ ထည့်နိုင်ပါသည်။
-                            Credit 2 ခုလျှင် 2 မိနစ် 15 စက္ကန့်အထိ၊ Credit 3 ခုလျှင် 3 မိနစ် 15 စက္ကန့်အထိ —
-                            ဤအတိုင်း credit အရေအတွက်နှင့် video မိနစ်ရှည်လျားမှု အချိုးကျ တိုးလာပါမည်။
-                            Credit မလုံလောက်ပါက video ကို လုပ်ဆောင်၍ မရပါ။
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            {/* Recent Activity Placeholder */}
-            <div className="bg-gray-900 border border-gray-800 rounded-3xl overflow-hidden">
-                <div className="px-8 py-6 border-b border-gray-800 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <History className="w-5 h-5 text-gray-400" />
-                        <h3 className="font-bold text-white">မကြာသေးမီက လုပ်ငန်းများ</h3>
-                    </div>
-                    <button onClick={onViewRecent} className="text-sm text-gray-500 hover:text-white transition-colors">အားလုံး ကြည့်ရန်</button>
-                </div>
-                <div className="p-12 text-center text-gray-500 space-y-4">
-                    <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Video className="w-8 h-8 opacity-20" />
-                    </div>
-                    <p className="font-medium">မကြာသေးမီက လုပ်ငန်းများကို သင်၏ ဒေါင်းလုဒ် မီနူးတွင် ကြည့်နိုင်သည်။</p>
-                    <button 
-                        onClick={onViewRecent}
-                        className="text-indigo-400 font-bold flex items-center gap-2 mx-auto hover:gap-3 transition-all"
-                    >
-                        မကြာသေးမီက ဒေါင်းလုဒ်များသို့ သွားမည် <ArrowRight className="w-4 h-4" />
-                    </button>
+                    <ul className="space-y-1">
+                        {RULES.map(r => (
+                            <li key={r.c} className="flex items-center gap-3 py-1.5 text-sm text-gray-300">
+                                <span className="btn-brand px-3 py-1 rounded-full text-xs font-bold" style={{ boxShadow: 'none' }}>{r.c} Credit</span>
+                                {r.t}
+                            </li>
+                        ))}
+                    </ul>
+                    <p className="text-[13px] text-gray-500 mt-2">… ဤအတိုင်း တိုးသွားမည်</p>
+                    <p className="text-[13px] font-semibold text-red-400 mt-1">Credit မလုံလောက်ပါက လုပ်ဆောင်၍ မရပါ</p>
                 </div>
             </div>
         </div>

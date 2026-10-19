@@ -1,9 +1,13 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Myanmar:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
 @import "tailwindcss";
 
+@custom-variant light (&:where(.light, .light *));
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
+  --font-sans: "Plus Jakarta Sans", "Noto Sans Myanmar", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Noto Sans Myanmar", ui-sans-serif, sans-serif;
+  --color-indigo-50:#FFF4EC; --color-indigo-100:#FFE6D5; --color-indigo-200:#FFCDAA; --color-indigo-300:#FFB080; --color-indigo-400:#FF8A4C; --color-indigo-500:#F05A0E; --color-indigo-600:#E03A24; --color-indigo-700:#C42B2B; --color-indigo-800:#8F1F20; --color-indigo-900:#5C1416; --color-indigo-950:#2E0A0C;
+  --color-gray-100:#F5F5F7; --color-gray-200:#E6E6EC; --color-gray-300:#CFCFD8; --color-gray-400:#B0B0BE; --color-gray-500:#9A9AAA; --color-gray-600:#6E6E7E; --color-gray-700:#2A2A35; --color-gray-800:#1D1D26; --color-gray-900:#14141A; --color-gray-950:#0B0B0F;
 }
 
 html, body {
@@ -34,3 +38,29 @@ html, body {
 .logo-glow {
   animation: logoGlowPulse 2.2s ease-in-out infinite;
 }
+
+:root { --brand-gradient: linear-gradient(135deg,#F05A0E 0%,#E03A24 52%,#D61F3C 100%); }
+html { color-scheme: dark; }
+html.light {
+  color-scheme: light;
+  --color-white:#17171C;
+  --color-gray-100:#17171C; --color-gray-200:#25252D; --color-gray-300:#3D3D47; --color-gray-400:#55555F; --color-gray-500:#6B6B78; --color-gray-600:#8D8A84; --color-gray-700:#D8D4CD; --color-gray-800:#E9E6E1; --color-gray-900:#FFFFFF; --color-gray-950:#F5F4F2;
+  --color-red-400:#DC2626; --color-green-400:#15803D; --color-emerald-400:#047857; --color-amber-400:#B45309; --color-indigo-300:#C2410C; --color-indigo-400:#E2540C;
+}
+html.light :is(.bg-indigo-500,.bg-indigo-600,.bg-indigo-700,.bg-red-500,.bg-red-600,.bg-green-500,.bg-green-600,.bg-emerald-500,.bg-emerald-600,.bg-amber-500,.bg-amber-600,.btn-brand,.sc-node.is-active) { color:#fff; }
+html.light :is(.bg-indigo-500,.bg-indigo-600,.bg-indigo-700,.bg-red-500,.bg-red-600,.bg-green-500,.bg-green-600,.bg-emerald-500,.bg-emerald-600,.bg-amber-500,.bg-amber-600,.btn-brand,.sc-node.is-active) .text-white { color:#fff; }
+
+.btn-brand, button.bg-indigo-600, a.bg-indigo-600 { background-image: var(--brand-gradient); color:#fff !important; box-shadow:0 10px 28px rgba(224,58,36,.35); }
+button.bg-indigo-600:disabled { opacity:.5; box-shadow:none; }
+.sc-gradient-text { background: var(--brand-gradient); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.sc-title3d { color:#FFF1DC; text-shadow:0 1px 0 #E8741F,0 2px 0 #D5560F,0 3px 0 #C0430B,0 4px 0 #A93509,0 5px 0 #8F2A07,0 14px 22px rgba(0,0,0,.55); }
+.sc-node { width:2.5rem; height:2.5rem; border-radius:9999px; display:grid; place-items:center; flex:none; font-weight:700; font-size:.8rem; background:var(--color-gray-900); border:2px solid var(--color-gray-700); color:var(--color-gray-500); transition:all .2s; }
+.sc-node.is-done { border-color:#F05A0E; color:#F05A0E; box-shadow:0 0 18px rgba(240,90,14,.45); }
+.sc-node.is-active { background:var(--brand-gradient); border-color:transparent; color:#fff; animation:sc-pulse 1.8s infinite; }
+.sc-bar { background:repeating-linear-gradient(115deg,#F05A0E 0 14px,#E03A24 14px 28px); background-size:40px 12px; animation:sc-shine .6s linear infinite; box-shadow:0 0 16px rgba(240,90,14,.6); }
+@keyframes sc-flow { to { stroke-dashoffset:-48; } }
+@keyframes sc-spin { to { transform:rotate(360deg); } }
+@keyframes sc-shine { to { background-position:40px 0; } }
+@keyframes sc-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(240,90,14,.55); } 50% { box-shadow:0 0 0 14px rgba(240,90,14,0); } }
+@keyframes sc-flick { 0%,100% { opacity:1; } 42% { opacity:.25; } 50% { opacity:1; } 68% { opacity:.45; } }
+@media (prefers-reduced-motion: reduce) { .sc-node, .sc-bar, [style*="sc-"] { animation:none !important; } }

@@ -77,10 +77,10 @@ export const Navigation: React.FC<NavigationProps> = ({
             )}
 
             {/* Sidebar */}
-            <aside className={`fixed top-0 left-0 bottom-0 w-[280px] bg-gray-950 border-r border-gray-900 z-[70] transition-transform duration-300 ease-out lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+            <aside className={`fixed top-0 left-0 bottom-0 w-[280px] bg-gray-900 border-r border-gray-800 z-[70] transition-transform duration-300 ease-out lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                 <div className="flex flex-col h-full">
                     {/* Header */}
-                    <div className="h-20 px-6 border-b border-gray-900 flex items-center justify-between">
+                    <div className="h-20 px-6 border-b border-gray-800 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-lg flex items-center justify-center logo-glow">
                                 <img src="/logo-superclick.png" alt="SuperClick" className="w-6 h-6 object-contain" />
@@ -96,29 +96,37 @@ export const Navigation: React.FC<NavigationProps> = ({
                     <div className="flex-1 overflow-y-auto py-6 px-4 space-y-8">
                         <div className="space-y-1">
                             <span className="text-[10px] font-bold text-gray-600 uppercase tracking-[0.2em] px-4 mb-2 block">မီနူး</span>
-                            {NAV_ITEMS.filter(item => !item.adminOnly).map(item => (
-                                <button
-                                    key={item.id}
-                                    onClick={() => { onNavigate(item.id); onClose(); }}
-                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'}`}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <item.icon className="w-5 h-5" />
-                                        {item.label}
-                                    </div>
-                                    {item.id === 'feedback' && unreadFeedbackCount > 0 && (
-                                        <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
-                                            {unreadFeedbackCount}
-                                        </span>
-                                    )}
-                                </button>
-                            ))}
+                            {NAV_ITEMS.filter(item => !item.adminOnly).map(item => {
+                                const isActive = activeView === item.id;
+                                return (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => { onNavigate(item.id); onClose(); }}
+                                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm transition-all ${isActive ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-white hover:bg-gray-800'}`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <item.icon className={`w-5 h-5 ${isActive ? 'text-indigo-500' : ''}`} />
+                                            {item.label}
+                                        </div>
+                                        {item.id === 'ai-recap-beta' && (
+                                            <span className="bg-indigo-500/15 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                                BETA
+                                            </span>
+                                        )}
+                                        {item.id === 'feedback' && unreadFeedbackCount > 0 && (
+                                            <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
+                                                {unreadFeedbackCount}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
                             {telegramLink && (
                                 <a
                                     href={telegramLink}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-gray-400 hover:text-white hover:bg-gray-900 transition-all"
+                                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-gray-500 hover:text-white hover:bg-gray-800 transition-all"
                                 >
                                     <Send className="w-5 h-5" />
                                     Telegram - အကူအညီတောင်းရန်
@@ -129,29 +137,32 @@ export const Navigation: React.FC<NavigationProps> = ({
                         {isAdmin && (
                             <div className="space-y-1">
                                 <span className="text-[10px] font-bold text-indigo-500/50 uppercase tracking-[0.2em] px-4 mb-2 block text-center bg-indigo-500/5 py-1 rounded-md">စီမံခန့်ခွဲသူ ဧရိယာ</span>
-                                {NAV_ITEMS.filter(item => item.adminOnly).map(item => (
-                                    <button
-                                        key={item.id}
-                                        onClick={() => { onNavigate(item.id); onClose(); }}
-                                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'}`}
-                                    >
-                                        <item.icon className="w-5 h-5" />
-                                        {item.label}
-                                    </button>
-                                ))}
+                                {NAV_ITEMS.filter(item => item.adminOnly).map(item => {
+                                    const isActive = activeView === item.id;
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => { onNavigate(item.id); onClose(); }}
+                                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${isActive ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-white hover:bg-gray-800'}`}
+                                        >
+                                            <item.icon className={`w-5 h-5 ${isActive ? 'text-indigo-500' : ''}`} />
+                                            {item.label}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
 
                     {/* Footer */}
-                    <div className="p-4 border-t border-gray-900 space-y-4">
-                        <div className="flex items-center gap-3 px-2">
-                            <div className="w-10 h-10 rounded-full bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold uppercase">
+                    <div className="p-4 border-t border-gray-800 space-y-3">
+                        <div className="bg-gray-800 p-3 rounded-2xl flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold uppercase shrink-0">
                                 {user?.name?.charAt(0) || '?'}
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-white truncate">{user?.name || 'User'}</p>
-                                <p className="text-[10px] text-gray-500 truncate">{user?.email || 'No email'}</p>
+                                <p className="text-[10px] text-gray-400 truncate">{user?.email || 'No email'}</p>
                             </div>
                         </div>
                         <button 

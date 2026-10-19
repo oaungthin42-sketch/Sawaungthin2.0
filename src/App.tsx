@@ -6,10 +6,13 @@ import { RecentDownloads } from './components/RecentDownloads';
 import { FeedbackForm } from './components/FeedbackForm';
 import { CreditGauge } from './components/CreditGauge';
 import { AIRecapTool } from './components/AIRecapTool';
+import { ThemeToggle } from './components/ThemeToggle';
+import { BoltConnector, ProcessingOrb } from './components/BrandFx';
 import { 
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Play, Menu, 
-  Volume2, ArrowRight, Check, X, CreditCard, Star, Copy, Crop
+  Volume2, ArrowRight, Check, X, CreditCard, Star, Copy, Crop,
+  Zap
 } from 'lucide-react';
 import axios from 'axios';
 import { CropEditor, CropRect } from './components/CropEditor';
@@ -1047,16 +1050,14 @@ function App() {
                               if (status === 'idle' && isClickable) setCurrentStep(stepNum);
                           }}
                           disabled={!isClickable}
-                          className={`flex flex-col items-center gap-2 ${isActive ? 'text-indigo-400' : isCompleted ? 'text-emerald-400 cursor-pointer hover:text-emerald-300' : 'text-gray-600'}`}
+                          className={`flex flex-col items-center gap-2 ${isActive ? 'text-indigo-400' : isCompleted ? 'text-indigo-300 cursor-pointer hover:text-indigo-200' : 'text-gray-600'}`}
                         >
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${isActive ? 'bg-indigo-950/50 border-indigo-500 shadow-lg shadow-indigo-500/20' : isCompleted ? 'bg-emerald-950/30 border-emerald-500' : 'bg-gray-900 border-gray-800'}`}>
-                            {isCompleted ? <Check className="w-4 h-4" /> : stepNum}
+                          <div className={`sc-node ${isCompleted ? 'is-done' : ''} ${isActive ? 'is-active' : ''}`}>
+                            {isCompleted ? <Check className="w-5 h-5" /> : isActive ? <Zap className="w-5 h-5" /> : stepNum}
                           </div>
                           <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
                         </button>
-                        {i < 3 && (
-                          <div className={`flex-1 h-[2px] mx-2 rounded-full transition-all min-w-[10px] sm:min-w-[20px] ${isCompleted ? 'bg-emerald-500/50' : 'bg-gray-800'}`} />
-                        )}
+                        {i < 3 && <BoltConnector active={isCompleted} className="mx-2 text-gray-600" />}
                       </div>
                     );
                   })}
@@ -1502,28 +1503,25 @@ function App() {
               {/* Status screens */}
               {(status === 'uploading' || status === 'analyzing') && (
                   <div className="max-w-3xl mx-auto bg-gray-900/40 border border-gray-900 rounded-3xl p-12 text-center space-y-8 shadow-2xl">
-                      <div className="relative w-24 h-24 mx-auto">
-                        <Loader2 className="w-full h-full text-indigo-500 animate-spin" />
-                        <div className="absolute inset-4 bg-indigo-500/10 rounded-full border border-indigo-500/20" />
-                      </div>
+                      <ProcessingOrb />
                       <div className="space-y-3">
                         <h2 className="text-3xl font-bold text-white font-display tracking-tight">{status === 'uploading' ? 'တင်နေသည်...' : 'လုပ်ဆောင်နေသည်...'}</h2>
                         <p className="text-gray-500 text-sm max-w-xs mx-auto">
                             {(() => {
                                 if (!analysisStartTime || progressPct <= 2) {
-                                    return 'သင့်ဗီဒီယိုကို AI ဖြင့် လုပ်ဆောင်နေပါသည်။ ခဏစောင့်ပေးပါ။';
+                                    return 'AI ဖြင့် လုပ်ဆောင်နေသည်။ ခဏစောင့်ပါ။';
                                 }
                                 const elapsedSec = (Date.now() - analysisStartTime) / 1000;
                                 const estTotalSec = elapsedSec / (progressPct / 100);
                                 const remainingSec = Math.max(0, estTotalSec - elapsedSec);
                                 const remainingMin = Math.max(1, Math.round(remainingSec / 60));
-                                return `သင့်ဗီဒီယိုကို AI ဖြင့် လုပ်ဆောင်နေပါသည်။ ခန့်မှန်းခြေ ${remainingMin} မိနစ်ခန့် ကျန်ရှိပါသည်။`;
+                                return `ခန့်မှန်း ${remainingMin} မိနစ် ကျန်သည်။`;
                             })()}
                         </p>
                       </div>
                       <div className="w-full max-w-md mx-auto space-y-4">
-                        <div className="flex justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest px-1"><span>Global Progress</span><span>{Math.round(progressPct)}%</span></div>
-                        <div className="w-full bg-gray-950 h-3 rounded-full overflow-hidden p-0.5 border border-gray-900"><div className="h-full bg-indigo-500 rounded-full transition-all duration-700" style={{ width: `${progressPct}%` }} /></div>
+                        <div className="flex justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest px-1"><span>တိုးတက်မှု</span><span>{Math.round(progressPct)}%</span></div>
+                        <div className="relative w-full bg-gray-800 h-3 rounded-full"><div className="sc-bar h-full rounded-full transition-all duration-700" style={{ width: `${progressPct}%` }} /><div className="btn-brand absolute -top-[7px] w-[26px] h-[26px] rounded-full grid place-items-center transition-all duration-700" style={{ left: `calc(${Math.min(Math.max(progressPct, 2), 98)}% - 13px)` }}><Zap className="w-3.5 h-3.5" /></div></div>
                         {statusText && (
                           <div className="flex items-center justify-center gap-2 text-xs text-gray-400 px-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
@@ -1533,7 +1531,7 @@ function App() {
                       </div>
                       <div className="pt-2">
                         <button onClick={reset} className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-gray-400 text-sm font-bold rounded-xl border border-gray-800">
-                          ပယ်ဖျက်ပြီး အစသို့ ပြန်သွားမည်
+                          ပယ်ဖျက်မည်
                         </button>
                       </div>
                   </div>
@@ -1593,9 +1591,9 @@ function App() {
   };
 
   const NAV_ITEMS = [
-    { id: 'dashboard', label: 'Dashboard', icon: Menu },
-    { id: 'tool', label: 'Video Tool', icon: Play },
-    { id: 'recent', label: 'Recent Downloads', icon: Download },
+    { id: 'dashboard', label: 'ပင်မစာမျက်နှာ', icon: Menu },
+    { id: 'tool', label: 'ဗီဒီယို ကိရိယာ', icon: Play },
+    { id: 'recent', label: 'မကြာသေးမီက ဒေါင်းလုဒ်များ', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
     { id: 'ai-recap-beta', label: 'AI Movie Recap (Beta)', icon: Play },
   ];
@@ -1621,6 +1619,7 @@ function App() {
                 <h1 className="text-lg font-bold font-display tracking-tight text-white">{NAV_ITEMS.find(i => i.id === activeView)?.label || 'SuperClick'}</h1>
               </div>
               <div className="flex items-center gap-4">
+                <ThemeToggle />
                 <button
                   onClick={() => setActiveView('ai-recap-beta')}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg shadow-indigo-900/20 transition-all border border-indigo-500 hidden sm:block"
