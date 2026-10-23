@@ -13,7 +13,7 @@ import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/in
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM } from '../services/llm.js';
-import { getTranslationSystemInstruction, getNarratorSystemInstruction } from '../ai/translation.js';
+import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
 
 // Pipeline steps
 const STEPS = {
@@ -162,7 +162,7 @@ export const processRecapPipeline = async (jobId) => {
         // 4.5. TRANSLATE TO BURMESE
         const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
-            advanceStep(STEPS.TRANSLATE_BURMESE, 30, 'Translating to Burmese');
+            advanceStep(STEPS.TRANSLATE_BURMESE, 30, job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese');
             
             if (!state.originalTranscript || state.originalTranscript.length === 0) {
                 state.translatedTranscript = [];
@@ -178,7 +178,9 @@ export const processRecapPipeline = async (jobId) => {
                     text: t.text
                 }));
 
-                const systemInstruction = job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction();
+                const systemInstruction = job.targetLanguage === 'th'
+                    ? (job.narrationStyle === 'narrator' ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
+                    : (job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
 
                 // Retry on transient API errors or validation errors
                 let response;
@@ -247,14 +249,16 @@ export const processRecapPipeline = async (jobId) => {
         // 4.5 GENERATE TTS
         const ttsAudioCache = path.join(cacheDir, 'narration_tts.wav');
         if (!hasCompletedStep(job.currentStep, STEPS.GENERATE_TTS)) {
-            advanceStep(STEPS.GENERATE_TTS, 35, 'Generating Burmese TTS Audio');
+            advanceStep(STEPS.GENERATE_TTS, 35, job.targetLanguage === 'th' ? 'Generating Thai TTS Audio' : 'Generating Burmese TTS Audio');
             const mappedTranscript = state.translatedTranscript.map(t => ({
                 narration_text: t.text,
                 scene_start: t.timestamp[0],
                 scene_end: t.timestamp[1]
             }));
 
-            const voiceId = getSetting('EDGE_TTS_VOICE') || 'male-young-adult';
+            const voiceId = job.targetLanguage === 'th'
+                ? (getSetting('EDGE_TTS_VOICE_TH') || 'th-male-default')
+                : (getSetting('EDGE_TTS_VOICE') || 'male-young-adult');
             state.ttsAudioPath = await generateNarrationTTS(mappedTranscript, ttsAudioCache, voiceId, state.originalTranscript, {
                 useVoiceClone: job.useVoiceClone,
                 referenceVoiceId: job.referenceVoiceId,
@@ -485,25 +489,55 @@ export const processRecapPipeline = async (jobId) => {
                 const text = (chunk.text || '').trim();
                 if (!text) return;
                 
-                const words = text.split(/\s+/);
                 const pieces = [];
-                let currentPiece = '';
-                
-                for (const word of words) {
-                    if (!word) continue;
-                    if (!currentPiece) {
-                        currentPiece = word;
+                if (job.targetLanguage === 'th') {
+                    let words = [];
+                    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                        const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
+                        for (const seg of segmenter.segment(text)) {
+                            words.push(seg.segment);
+                        }
                     } else {
-                        if (currentPiece.length + 1 + word.length > 40) {
-                            pieces.push(currentPiece);
-                            currentPiece = word;
+                        words = text.split('');
+                    }
+
+                    let currentPiece = '';
+                    for (const token of words) {
+                        if (!token) continue;
+                        if (!currentPiece) {
+                            currentPiece = token;
                         } else {
-                            currentPiece += ' ' + word;
+                            if (currentPiece.length + token.length > 40) {
+                                pieces.push(currentPiece);
+                                currentPiece = token;
+                            } else {
+                                currentPiece += token;
+                            }
                         }
                     }
-                }
-                if (currentPiece) {
-                    pieces.push(currentPiece);
+                    if (currentPiece) {
+                        pieces.push(currentPiece);
+                    }
+                } else {
+                    const words = text.split(/\s+/);
+                    let currentPiece = '';
+                    
+                    for (const word of words) {
+                        if (!word) continue;
+                        if (!currentPiece) {
+                            currentPiece = word;
+                        } else {
+                            if (currentPiece.length + 1 + word.length > 40) {
+                                pieces.push(currentPiece);
+                                currentPiece = word;
+                            } else {
+                                currentPiece += ' ' + word;
+                            }
+                        }
+                    }
+                    if (currentPiece) {
+                        pieces.push(currentPiece);
+                    }
                 }
                 
                 if (pieces.length <= 1) {
@@ -1007,7 +1041,11 @@ export const processRecapPipeline = async (jobId) => {
                         .replace(/'/g, "\\'")
                         .replace(/%/g, "\\%");
                         
-                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    let fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    if (job.targetLanguage === 'th') {
+                        const thaiFont = '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf';
+                        if (fs.existsSync(thaiFont)) fontfile = thaiFont;
+                    }
                     
                     // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
                     const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
@@ -1086,7 +1124,7 @@ export const processRecapPipeline = async (jobId) => {
                             if (fontsize < 24) fontsize = 24;
                             if (fontsize > 80) fontsize = 80;
 
-                            let fontName = "Padauk";
+                            let fontName = job.targetLanguage === 'th' ? "Noto Sans Thai" : "Padauk";
 
                             let primaryColor = "&H00FFFFFF"; // white (default)
                             if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
@@ -1242,7 +1280,11 @@ export const processRecapPipeline = async (jobId) => {
                         .replace(/'/g, "\\'")
                         .replace(/%/g, "\\%");
 
-                    const fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    let fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
+                    if (job.targetLanguage === 'th') {
+                        const thaiFont = '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf';
+                        if (fs.existsSync(thaiFont)) fontfile = thaiFont;
+                    }
                     const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
                     const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
 
@@ -1301,7 +1343,7 @@ export const processRecapPipeline = async (jobId) => {
                         if (fontsize < 24) fontsize = 24;
                         if (fontsize > 80) fontsize = 80;
 
-                        let fontName = "Padauk";
+                        let fontName = job.targetLanguage === 'th' ? "Noto Sans Thai" : "Padauk";
 
                         let primaryColor = "&H00FFFFFF"; // white (default)
                         if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
@@ -1424,9 +1466,12 @@ export const processRecapPipeline = async (jobId) => {
             if (state.translatedTranscript && state.translatedTranscript.length > 0) {
                 const openrouterApiKey = getSetting('OPENROUTER_API_KEY');
                 if (openrouterApiKey && openrouterApiKey.trim()) {
+                    const captionPrompt = job.targetLanguage === 'th'
+                        ? "Write a catchy, high-engagement headline/caption in Thai suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural spoken Thai."
+                        : "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese.";
                     const response = await callLLM({
                         contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
-                        systemInstruction: "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese."
+                        systemInstruction: captionPrompt
                     });
                     
                     if (response && response.text) {

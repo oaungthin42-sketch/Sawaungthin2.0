@@ -283,7 +283,7 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
         const config = getVoiceConfig(voiceId);
         if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
 
-        const previewText = "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
+        const previewText = config.lang === 'th' ? "ยินดีต้อนรับสู่ซูเปอร์คลิก" : "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
 
         const previewTmpPath = path.join(process.cwd(), 'data', `preview_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
         let resAudio;
@@ -367,6 +367,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const flipped = body.flipped === 'true' ? 1 : 0;
     const keepOriginalGaps = body.keepOriginalGaps === 'true' ? 1 : 0;
     const narrationStyle = body.narrationStyle === 'narrator' ? 'narrator' : 'translate';
+    const targetLanguage = body.targetLanguage === 'th' ? 'th' : 'my';
     const useVoiceCloneRaw = body.useVoiceClone === 'true' || body.useVoiceClone === true || body.useVoiceClone === 1 || body.useVoiceClone === '1';
     let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
     let referenceVoiceId = body.referenceVoiceId || null;
@@ -396,6 +397,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         flipped: flipped,
         keepOriginalGaps: keepOriginalGaps,
         narrationStyle: narrationStyle,
+        targetLanguage: targetLanguage,
         userId: user.id,
         cropRect: cropRect
     });
@@ -750,6 +752,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const flipped = req.body.flipped === 'true' ? 1 : 0;
      const keepOriginalGaps = req.body.keepOriginalGaps === 'true' ? 1 : 0;
      const narrationStyle = req.body.narrationStyle === 'narrator' ? 'narrator' : 'translate';
+     const targetLanguage = req.body.targetLanguage === 'th' ? 'th' : 'my';
      const useVoiceCloneRaw = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1';
      let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
      let referenceVoiceId = req.body.referenceVoiceId || null;
@@ -779,6 +782,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          flipped: flipped,
          keepOriginalGaps: keepOriginalGaps,
          narrationStyle: narrationStyle,
+         targetLanguage: targetLanguage,
          userId: user.id,
          cropRect: cropRect
      });

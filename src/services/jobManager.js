@@ -2,8 +2,8 @@ import db from './db.js';
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, cropRect, keepOriginalGaps, narrationStyle)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, cropRect, keepOriginalGaps, narrationStyle, targetLanguage)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
         id, 
@@ -24,7 +24,8 @@ export const createJob = (id, data) => {
         data.userId || null,
         data.cropRect ? (typeof data.cropRect === 'string' ? data.cropRect : JSON.stringify(data.cropRect)) : null,
         data.keepOriginalGaps !== undefined ? data.keepOriginalGaps : 0,
-        data.narrationStyle || 'translate'
+        data.narrationStyle || 'translate',
+        data.targetLanguage === 'th' ? 'th' : 'my'
     );
     return getJob(id);
 };

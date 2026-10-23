@@ -122,6 +122,10 @@ function App() {
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [keepOriginalGaps, setKeepOriginalGaps] = useState<boolean>(false);
   const [narratorMode, setNarratorMode] = useState<boolean>(false);
+  const [targetLanguage, setTargetLanguage] = useState<'my' | 'th'>(() => {
+    const saved = localStorage.getItem('sc_target_language');
+    return saved === 'th' ? 'th' : 'my';
+  });
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [showCropModal, setShowCropModal] = useState<boolean>(false);
   const [videoNativeDims, setVideoNativeDims] = useState<{ width: number; height: number } | null>(null);
@@ -631,6 +635,7 @@ function App() {
         formData.append('flipped', isFlipped.toString());
         formData.append('keepOriginalGaps', keepOriginalGaps.toString());
         formData.append('narrationStyle', narratorMode ? 'narrator' : 'translate');
+        formData.append('targetLanguage', targetLanguage);
         
         if (user?.role === 'admin' && voiceCloneEnabled) {
           formData.append('useVoiceClone', useVoiceClone ? 'true' : 'false');
@@ -652,6 +657,7 @@ function App() {
           flipped: isFlipped.toString(),
           keepOriginalGaps: keepOriginalGaps.toString(),
           narrationStyle: narratorMode ? 'narrator' : 'translate',
+          targetLanguage: targetLanguage,
           ...(user?.role === 'admin' && voiceCloneEnabled ? {
             useVoiceClone: useVoiceClone ? 'true' : 'false',
             referenceVoiceId: selectedReferenceVoiceId || ''
@@ -746,8 +752,10 @@ function App() {
     setCurrentStep(1);
   };
 
-  const currentVoiceId = settings['EDGE_TTS_VOICE']?.value || 'male-young-adult';
-  let selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || 'တက်ကြွသောလူငယ်အသံ';
+  const currentVoiceId = targetLanguage === 'th'
+    ? (settings['EDGE_TTS_VOICE_TH']?.value || 'th-male-default')
+    : (settings['EDGE_TTS_VOICE']?.value || 'male-young-adult');
+  let selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || (targetLanguage === 'th' ? 'ထိုင်း - အမျိုးသားအသံ (ပုံမှန်)' : 'တက်ကြွသောလူငယ်အသံ');
 
   if (authLoading) {
     return (
@@ -1069,6 +1077,46 @@ function App() {
                   <div className="space-y-6">
                       {currentStep === 1 && (
                         <div className="space-y-6">
+                            {/* Language Selector */}
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800 max-w-3xl mx-auto">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">🌐</span>
+                                <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">ဘာသာပြန်မည့်ဘာသာစကား</span>
+                              </div>
+                              <div className="inline-flex rounded-xl bg-gray-950 p-1 border border-gray-800 w-full sm:w-64">
+                                <button
+                                  type="button"
+                                  disabled={status !== 'idle' || isDownloadingUrl}
+                                  onClick={() => {
+                                    setTargetLanguage('my');
+                                    localStorage.setItem('sc_target_language', 'my');
+                                  }}
+                                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                                    targetLanguage === 'my'
+                                      ? 'bg-indigo-600 text-white shadow-md'
+                                      : 'text-gray-400 hover:text-white'
+                                  } disabled:opacity-50`}
+                                >
+                                  မြန်မာ
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={status !== 'idle' || isDownloadingUrl}
+                                  onClick={() => {
+                                    setTargetLanguage('th');
+                                    localStorage.setItem('sc_target_language', 'th');
+                                  }}
+                                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                                    targetLanguage === 'th'
+                                      ? 'bg-indigo-600 text-white shadow-md'
+                                      : 'text-gray-400 hover:text-white'
+                                  } disabled:opacity-50`}
+                                >
+                                  ไทย
+                                </button>
+                              </div>
+                            </div>
+
                             <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                                 <div className="flex items-center gap-2 mb-2">
                                     <span className="text-lg sm:text-xl">🎬</span>
@@ -1250,7 +1298,7 @@ function App() {
                                     <div className="w-12 h-12 bg-indigo-600/10 rounded-xl flex items-center justify-center text-xl">{selectedGender === 'male' ? '👨' : '👩'}</div>
                                     <div className="flex-1">
                                         <span className="text-sm font-bold text-white">{selectedVoiceName}</span>
-                                        <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Active Burmese Recapitulator</p>
+                                        <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">{targetLanguage === 'th' ? 'Active Thai Recapitulator' : 'Active Burmese Recapitulator'}</p>
                                     </div>
                                     <button onClick={() => handlePreviewVoice(currentVoiceId)} disabled={previewingVoice !== null} className="p-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-xl transition-all">{previewingVoice === (currentVoiceId) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}</button>
                                 </div>
@@ -1476,7 +1524,7 @@ function App() {
                                   <Play className="w-10 h-10 fill-current" />
                               </div>
                               <h2 className="text-2xl font-bold text-white mb-2">အသင့်ဖြစ်ပါပြီ</h2>
-                              <p className="text-gray-400 text-sm">မြန်မာ AI အသံထပ်ရန် အသင့်ဖြစ်ပါပြီ။ AI ဖြင့် စတင်လုပ်ဆောင်ပါမည်။</p>
+                              <p className="text-gray-400 text-sm">{targetLanguage === 'th' ? 'ထိုင်း AI အသံထပ်ရန် အသင့်ဖြစ်ပါပြီ။ AI ဖြင့် စတင်လုပ်ဆောင်ပါမည်။' : 'မြန်မာ AI အသံထပ်ရန် အသင့်ဖြစ်ပါပြီ။ AI ဖြင့် စတင်လုပ်ဆောင်ပါမည်။'}</p>
                            </div>
                            {credits !== null && credits <= 0 && user?.role !== 'admin' ? (
                              <div className="w-full p-4 bg-amber-950/20 border border-amber-900/30 rounded-2xl text-center">
@@ -1556,7 +1604,7 @@ function App() {
                           <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center border border-emerald-500/20"><CheckCircle className="w-8 h-8" /></div>
                           <div>
                             <h2 className="text-2xl font-bold text-white font-display">အောင်မြင်ပါပြီ!</h2>
-                            <p className="text-emerald-400/70 text-sm">သင့်မြန်မာဗီဒီယို အသင့်ဖြစ်ပါပြီ။</p>
+                            <p className="text-emerald-400/70 text-sm">{targetLanguage === 'th' ? 'သင့်ထိုင်းဗီဒီယို အသင့်ဖြစ်ပါပြီ။' : 'သင့်မြန်မာဗီဒီယို အသင့်ဖြစ်ပါပြီ။'}</p>
                           </div>
                         </div>
                         <button onClick={reset} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all active:scale-95">အသစ်ပြန်လုပ်မည်</button>
@@ -1568,7 +1616,7 @@ function App() {
                               <video src={analysisData.videoUrl} controls className="w-full h-full object-contain" />
                           </div>
                           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-                              <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> မြန်မာဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်</a>
+                              <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> {targetLanguage === 'th' ? 'ထိုင်းဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်' : 'မြန်မာဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်'}</a>
                           </div>
                           {analysisData.coverText && (
                               <div className="mt-6 bg-gray-900 border border-gray-800 rounded-2xl p-4 flex items-center justify-between gap-3">
@@ -1655,8 +1703,8 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
                     <div className="space-y-3">
                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Voice (Edge TTS)</h3>
-                        {voices.filter(v => v.gender === selectedGender).map(voice => (
-                            <button key={voice.id} onClick={() => { saveSetting('EDGE_TTS_VOICE', voice.id); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${currentVoiceId === voice.id ? 'bg-indigo-500/10 border-indigo-500 text-indigo-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
+                        {voices.filter(v => (v.lang || 'my') === targetLanguage && v.gender === selectedGender).map(voice => (
+                            <button key={voice.id} onClick={() => { saveSetting(targetLanguage === 'th' ? 'EDGE_TTS_VOICE_TH' : 'EDGE_TTS_VOICE', voice.id); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${currentVoiceId === voice.id ? 'bg-indigo-500/10 border-indigo-500 text-indigo-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
                                 <div className="flex items-center gap-4">
                                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${currentVoiceId === voice.id ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>{selectedGender === 'male' ? '👨' : '👩'}</div>
                                     <div><span className="text-sm font-bold group-hover:text-white">{voice.name}</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.id}</p></div>
