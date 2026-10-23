@@ -187,7 +187,7 @@ CRITICAL TRANSLATION MANDATES:
 12. Translate as faithfully and literally as natural spoken Thai allows — this is NOT a creative recap rewrite. Do not summarize, do not expand, do not add narrator commentary. Keep each translated line roughly proportional in length to its original input line.
 
 STYLE GUIDELINES:
-\${styleInstruction}
+${styleInstruction}
 
 Return only the requested translation output in strictly valid JSON array format.
 
