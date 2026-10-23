@@ -12,6 +12,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     g++ \
     make \
     fonts-noto-core \
+    fonts-thai-tlwg \
     fonts-noto-unhinted \
     fonts-sil-padauk \
     chromium \

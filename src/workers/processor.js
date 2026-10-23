@@ -14,6 +14,7 @@ import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM } from '../services/llm.js';
 import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
+import { resolveWatermarkFont } from '../services/fonts.js';
 
 // Pipeline steps
 const STEPS = {
@@ -1041,17 +1042,24 @@ export const processRecapPipeline = async (jobId) => {
                         .replace(/'/g, "\\'")
                         .replace(/%/g, "\\%");
                         
-                    let fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
-                    if (job.targetLanguage === 'th') {
-                        const thaiFont = '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf';
-                        if (fs.existsSync(thaiFont)) fontfile = thaiFont;
+                    const resolved = resolveWatermarkFont(watermarkText, job.targetLanguage);
+                    let fontParam;
+                    if (resolved) {
+                        fontParam = `fontfile=${resolved}`;
+                    } else {
+                        const burmeseCharCount = (watermarkText.match(/[\u1000-\u109F\uA9E0-\uA9FF\uAA60-\uAA7F]/g) || []).length;
+                        const thaiCharCount = (watermarkText.match(/[\u0E00-\u0E7F]/g) || []).length;
+                        const isThai = thaiCharCount > burmeseCharCount || (thaiCharCount === 0 && burmeseCharCount === 0 && job.targetLanguage === 'th');
+                        const fontName = isThai ? 'Noto Sans Thai' : 'Padauk';
+                        console.warn(`[WATERMARK-FONT] No font file found on disk for watermark, falling back to fontconfig pattern: font='${fontName}'`);
+                        fontParam = `font='${fontName}'`;
                     }
                     
                     // formula: x='abs(mod(t*90,2*(W-tw))-(W-tw))', y='abs(mod(t*70,2*(H-th))-(H-th))'
                     const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
                     const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
                     
-                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+                    const drawtextFilter = `drawtext=${fontParam}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
                     
                     const wmArgs = [
                         '-i', finalOutPath,
@@ -1280,15 +1288,22 @@ export const processRecapPipeline = async (jobId) => {
                         .replace(/'/g, "\\'")
                         .replace(/%/g, "\\%");
 
-                    let fontfile = '/usr/share/fonts/truetype/padauk/Padauk-Regular.ttf';
-                    if (job.targetLanguage === 'th') {
-                        const thaiFont = '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf';
-                        if (fs.existsSync(thaiFont)) fontfile = thaiFont;
+                    const resolved = resolveWatermarkFont(watermarkText, job.targetLanguage);
+                    let fontParam;
+                    if (resolved) {
+                        fontParam = `fontfile=${resolved}`;
+                    } else {
+                        const burmeseCharCount = (watermarkText.match(/[\u1000-\u109F\uA9E0-\uA9FF\uAA60-\uAA7F]/g) || []).length;
+                        const thaiCharCount = (watermarkText.match(/[\u0E00-\u0E7F]/g) || []).length;
+                        const isThai = thaiCharCount > burmeseCharCount || (thaiCharCount === 0 && burmeseCharCount === 0 && job.targetLanguage === 'th');
+                        const fontName = isThai ? 'Noto Sans Thai' : 'Padauk';
+                        console.warn(`[WATERMARK-FONT] No font file found on disk for watermark, falling back to fontconfig pattern: font='${fontName}'`);
+                        fontParam = `font='${fontName}'`;
                     }
                     const xExpr = "abs(mod(t*90\\,2*(W-tw))-(W-tw))";
                     const yExpr = "abs(mod(t*70\\,2*(H-th))-(H-th))";
 
-                    const drawtextFilter = `drawtext=fontfile=${fontfile}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
+                    const drawtextFilter = `drawtext=${fontParam}:text='${escapedText}':fontsize=40:fontcolor=white@0.35:bordercolor=black@0.2:borderw=1:x=${xExpr}:y=${yExpr}`;
 
                     filterParts.push(`${current}${drawtextFilter}[vwm]`);
                     current = '[vwm]';
