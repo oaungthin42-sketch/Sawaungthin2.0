@@ -838,10 +838,86 @@ export const processRecapPipeline = async (jobId) => {
                 '-movflags', '+faststart',
                 '-y', finalFileTmp
             ];
-            
-            await runFFmpeg(finalArgs, tmpDir, (pct) => {
-                updateJob(jobId, { progress: 94 + (pct * 0.05) });
-            });
+
+            let muxed = false;
+            if (job.musicPath && fs.existsSync(job.musicPath)) {
+                try {
+                    const concatInput = path.resolve(state.concatFile).replace(/\\/g, '/');
+                    const ttsInput = path.resolve(state.ttsAudioPath).replace(/\\/g, '/');
+                    const musicInput = path.resolve(job.musicPath).replace(/\\/g, '/');
+
+                    const mode = job.musicMode === 'once' ? 'once' : 'loop';
+                    const position = ['start', 'middle', 'end'].includes(job.musicPosition) ? job.musicPosition : 'start';
+                    const vol = (job.musicVolume !== undefined && job.musicVolume !== null ? job.musicVolume : 30) / 100;
+                    const D = state.audioDuration;
+                    const musicDur = await getDuration(job.musicPath);
+
+                    const musicArgs = [
+                        '-f', 'concat',
+                        '-safe', '0',
+                        '-i', concatInput,
+                        '-i', ttsInput
+                    ];
+
+                    if (mode === 'loop') {
+                        musicArgs.push('-stream_loop', '-1');
+                    }
+                    musicArgs.push('-i', musicInput);
+
+                    let bg = '';
+                    let offset = 0;
+                    if (mode === 'loop') {
+                        const outSt = Math.max(0, D - 2);
+                        bg = `[2:a]atrim=duration=${D.toFixed(3)},asetpts=PTS-STARTPTS,volume=${vol.toFixed(3)},afade=t=in:d=1.000,afade=t=out:st=${outSt.toFixed(3)}:d=2.000,aformat=channel_layouts=stereo[bg]`;
+                    } else {
+                        offset = position === 'start' ? 0 : position === 'middle' ? Math.max(0, (D - musicDur) / 2) : Math.max(0, D - musicDur);
+                        const play = Math.min(musicDur, Math.max(0, D - offset));
+                        const playOutSt = Math.max(0, play - 2);
+                        bg = `[2:a]atrim=duration=${play.toFixed(3)},asetpts=PTS-STARTPTS,volume=${vol.toFixed(3)},afade=t=in:d=1.000,afade=t=out:st=${playOutSt.toFixed(3)}:d=2.000`;
+                        if (offset > 0) {
+                            bg += `,adelay=${(offset * 1000).toFixed(3)}:all=1`;
+                        }
+                        bg += ',aformat=channel_layouts=stereo[bg]';
+                    }
+
+                    console.log(`[MUSIC] mode=${mode} position=${position} volume=${vol.toFixed(3)} musicDur=${musicDur.toFixed(3)} D=${D.toFixed(3)} offset=${offset.toFixed(3)}.`);
+
+                    const filter_complex = `[1:a]${loudnormFilter},aformat=channel_layouts=stereo[voice];` + bg + `;[voice][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.97[a]`;
+
+                    musicArgs.push(
+                        '-filter_complex', filter_complex,
+                        '-map', '0:v',
+                        '-map', '[a]',
+                        '-c:v', 'copy',
+                        '-c:a', 'aac',
+                        '-b:a', '192k',
+                        '-movflags', '+faststart',
+                        '-y', finalFileTmp
+                    );
+
+                    await runFFmpeg(musicArgs, tmpDir, (pct) => {
+                        updateJob(jobId, { progress: 94 + (pct * 0.05) });
+                    });
+
+                    if (fs.existsSync(finalFileTmp) && fs.statSync(finalFileTmp).size > 0) {
+                        muxed = true;
+                    } else {
+                        throw new Error("Music output file missing or empty");
+                    }
+                } catch (musicErr) {
+                    console.log("[MUSIC] mix failed, falling back to narration only:", musicErr && musicErr.message ? musicErr.message : musicErr);
+                    state.warnings.push("⚠ Music could not be added");
+                    if (fs.existsSync(finalFileTmp)) {
+                        try { fs.unlinkSync(finalFileTmp); } catch (e) {}
+                    }
+                }
+            }
+
+            if (!muxed) {
+                await runFFmpeg(finalArgs, tmpDir, (pct) => {
+                    updateJob(jobId, { progress: 94 + (pct * 0.05) });
+                });
+            }
             
             safeMoveFile(finalFileTmp, finalOutPath);
             
@@ -1568,6 +1644,7 @@ export const processRecapPipeline = async (jobId) => {
             }
             
             if (currentJob && currentJob.status === 'complete' && currentJob.audioPath) filesToRemove.push(currentJob.audioPath);
+            if (currentJob && currentJob.status === 'complete' && currentJob.musicPath) filesToRemove.push(currentJob.musicPath);
             if (currentJob && currentJob.status === 'complete' && currentJob.videoPath) filesToRemove.push(currentJob.videoPath);
             if (currentJob && currentJob.status === 'complete' && state.originalUncroppedVideoPath && typeof state.originalUncroppedVideoPath === 'string') {
                 filesToRemove.push(state.originalUncroppedVideoPath);

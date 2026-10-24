@@ -2,8 +2,8 @@ import db from './db.js';
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, cropRect, keepOriginalGaps, narrationStyle, targetLanguage)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, cropRect, keepOriginalGaps, narrationStyle, targetLanguage, musicPath, musicVolume, musicMode, musicPosition)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
         id, 
@@ -25,7 +25,11 @@ export const createJob = (id, data) => {
         data.cropRect ? (typeof data.cropRect === 'string' ? data.cropRect : JSON.stringify(data.cropRect)) : null,
         data.keepOriginalGaps !== undefined ? data.keepOriginalGaps : 0,
         data.narrationStyle || 'translate',
-        data.targetLanguage === 'th' ? 'th' : 'my'
+        data.targetLanguage === 'th' ? 'th' : 'my',
+        data.musicPath || null,
+        data.musicVolume !== undefined ? data.musicVolume : 30,
+        data.musicMode || 'loop',
+        data.musicPosition || 'start'
     );
     return getJob(id);
 };

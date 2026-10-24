@@ -226,6 +226,12 @@ const upload = multer({
     limits: { fileSize: maxUploadSize }
 });
 
+const musicUpload = multer({ 
+    dest: tmpDir, 
+    limits: { fileSize: 30 * 1024 * 1024 } 
+});
+const pendingMusic = new Map();
+
 const handleUpload = (req, res, next) => {
     upload.single('video')(req, res, (err) => {
         if (err instanceof multer.MulterError) {
@@ -242,6 +248,91 @@ const handleUpload = (req, res, next) => {
         next();
     });
 };
+
+router.post('/upload-music', authMiddleware, (req, res) => {
+    musicUpload.single('music')(req, res, async (err) => {
+        if (err instanceof multer.MulterError) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                if (req.file && fs.existsSync(req.file.path)) {
+                    try { fs.unlinkSync(req.file.path); } catch (e) {}
+                }
+                return res.status(400).json({ error: "သီချင်းဖိုင်က ကြီးလွန်းတယ် (30MB အထိ)" });
+            }
+            return res.status(400).json({ error: err.message });
+        } else if (err) {
+            return res.status(500).json({ error: "Upload failed." });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ error: "No music file provided" });
+        }
+
+        const ext = path.extname(req.file.originalname || '').toLowerCase();
+        const allowedExts = ['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.flac', '.opus', '.mp4a'];
+        if (!allowedExts.includes(ext)) {
+            if (fs.existsSync(req.file.path)) {
+                try { fs.unlinkSync(req.file.path); } catch (e) {}
+            }
+            return res.status(400).json({ error: "သီချင်းဖိုင် မမှန်ဘူး" });
+        }
+
+        const musicDir = path.join(process.cwd(), 'data', 'music');
+        if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
+
+        const musicId = uuidv4();
+        const finalPath = path.join(musicDir, `${musicId}${ext}`);
+
+        try {
+            fs.copyFileSync(req.file.path, finalPath);
+            try { fs.unlinkSync(req.file.path); } catch (e) {}
+
+            let duration = 0;
+            try {
+                duration = await getDuration(finalPath);
+            } catch (durErr) {
+                duration = 0;
+            }
+
+            if (!Number.isFinite(duration) || duration < 1) {
+                if (fs.existsSync(finalPath)) {
+                    try { fs.unlinkSync(finalPath); } catch (e) {}
+                }
+                return res.status(400).json({ error: "သီချင်းဖိုင် မမှန်ဘူး" });
+            }
+
+            // Before storing, purge pendingMusic entries older than 2 hours (delete their files)
+            const now = Date.now();
+            for (const [id, entry] of pendingMusic.entries()) {
+                if (now - entry.createdAt > 2 * 60 * 60 * 1000) {
+                    if (entry.filePath && fs.existsSync(entry.filePath)) {
+                        try { fs.unlinkSync(entry.filePath); } catch (e) {}
+                    }
+                    pendingMusic.delete(id);
+                }
+            }
+
+            const originalname = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+            pendingMusic.set(musicId, {
+                filePath: finalPath,
+                userId: req.user.id,
+                createdAt: now,
+                name: originalname,
+                duration: duration
+            });
+
+            res.json({ musicId, name: originalname, duration });
+        } catch (uploadErr) {
+            console.error('[API] upload-music error:', uploadErr);
+            if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+                try { fs.unlinkSync(req.file.path); } catch (e) {}
+            }
+            if (fs.existsSync(finalPath)) {
+                try { fs.unlinkSync(finalPath); } catch (e) {}
+            }
+            res.status(500).json({ error: "Failed to process music file." });
+        }
+    });
+});
 
 router.get('/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -368,6 +459,19 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const keepOriginalGaps = body.keepOriginalGaps === 'true' ? 1 : 0;
     const narrationStyle = body.narrationStyle === 'narrator' ? 'narrator' : 'translate';
     const targetLanguage = body.targetLanguage === 'th' ? 'th' : 'my';
+    let musicPath = null;
+    const musicId = body.musicId;
+    if (musicId && pendingMusic.has(musicId)) {
+        const m = pendingMusic.get(musicId);
+        if (m.userId === user.id && fs.existsSync(m.filePath)) {
+            musicPath = m.filePath;
+        }
+    }
+    const parsedVol = parseInt(body.musicVolume, 10);
+    const musicVolume = Number.isFinite(parsedVol) ? Math.min(100, Math.max(0, parsedVol)) : 30;
+    const musicMode = body.musicMode === 'once' ? 'once' : 'loop';
+    const musicPosition = ['start', 'middle', 'end'].includes(body.musicPosition) ? body.musicPosition : 'start';
+
     const useVoiceCloneRaw = body.useVoiceClone === 'true' || body.useVoiceClone === true || body.useVoiceClone === 1 || body.useVoiceClone === '1';
     let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
     let referenceVoiceId = body.referenceVoiceId || null;
@@ -398,9 +502,17 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         keepOriginalGaps: keepOriginalGaps,
         narrationStyle: narrationStyle,
         targetLanguage: targetLanguage,
+        musicPath: musicPath,
+        musicVolume: musicVolume,
+        musicMode: musicMode,
+        musicPosition: musicPosition,
         userId: user.id,
         cropRect: cropRect
     });
+
+    if (musicId && pendingMusic.has(musicId)) {
+        pendingMusic.delete(musicId);
+    }
 
     updateJob(jobId, { 
         creditsCost: user.role === 'admin' ? 0 : requiredCredits,
@@ -753,6 +865,19 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const keepOriginalGaps = req.body.keepOriginalGaps === 'true' ? 1 : 0;
      const narrationStyle = req.body.narrationStyle === 'narrator' ? 'narrator' : 'translate';
      const targetLanguage = req.body.targetLanguage === 'th' ? 'th' : 'my';
+     let musicPath = null;
+     const musicId = req.body.musicId;
+     if (musicId && pendingMusic.has(musicId)) {
+         const m = pendingMusic.get(musicId);
+         if (m.userId === user.id && fs.existsSync(m.filePath)) {
+             musicPath = m.filePath;
+         }
+     }
+     const parsedVol = parseInt(req.body.musicVolume, 10);
+     const musicVolume = Number.isFinite(parsedVol) ? Math.min(100, Math.max(0, parsedVol)) : 30;
+     const musicMode = req.body.musicMode === 'once' ? 'once' : 'loop';
+     const musicPosition = ['start', 'middle', 'end'].includes(req.body.musicPosition) ? req.body.musicPosition : 'start';
+
      const useVoiceCloneRaw = req.body.useVoiceClone === 'true' || req.body.useVoiceClone === true || req.body.useVoiceClone === 1 || req.body.useVoiceClone === '1';
      let useVoiceClone = useVoiceCloneRaw ? 1 : 0;
      let referenceVoiceId = req.body.referenceVoiceId || null;
@@ -783,9 +908,17 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          keepOriginalGaps: keepOriginalGaps,
          narrationStyle: narrationStyle,
          targetLanguage: targetLanguage,
+         musicPath: musicPath,
+         musicVolume: musicVolume,
+         musicMode: musicMode,
+         musicPosition: musicPosition,
          userId: user.id,
          cropRect: cropRect
      });
+
+     if (musicId && pendingMusic.has(musicId)) {
+         pendingMusic.delete(musicId);
+     }
 
      updateJob(jobId, { 
          creditsCost: user.role === 'admin' ? 0 : requiredCredits,

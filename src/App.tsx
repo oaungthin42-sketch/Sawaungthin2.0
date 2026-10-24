@@ -135,6 +135,19 @@ function App() {
   const [activeView, setActiveView] = useState('dashboard');
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+
+  const [musicEnabled, setMusicEnabled] = useState<boolean>(false);
+  const [musicId, setMusicId] = useState<string | null>(null);
+  const [musicName, setMusicName] = useState<string>('');
+  const [musicDuration, setMusicDuration] = useState<number>(0);
+  const [musicVolume, setMusicVolume] = useState<number>(30);
+  const [musicMode, setMusicMode] = useState<'loop' | 'once'>('loop');
+  const [musicPosition, setMusicPosition] = useState<'start' | 'middle' | 'end'>('start');
+  const [musicUploading, setMusicUploading] = useState<boolean>(false);
+  const [musicError, setMusicError] = useState<string>('');
+  const [musicPreviewUrl, setMusicPreviewUrl] = useState<string | null>(null);
+  const musicInputRef = useRef<HTMLInputElement>(null);
+  const musicAudioRef = useRef<HTMLAudioElement>(null);
   
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -607,6 +620,59 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (musicAudioRef.current) {
+      musicAudioRef.current.volume = Math.max(0, Math.min(1, musicVolume / 100));
+    }
+  }, [musicVolume]);
+
+  const formatMusicDuration = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const handleMusicFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    if (musicPreviewUrl) {
+      try { URL.revokeObjectURL(musicPreviewUrl); } catch (err) {}
+    }
+    const previewUrl = URL.createObjectURL(file);
+    setMusicPreviewUrl(previewUrl);
+    setMusicUploading(true);
+    setMusicError('');
+
+    const formData = new FormData();
+    formData.append('music', file);
+    try {
+      const res = await axios.post('/api/upload-music', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setMusicId(res.data.musicId);
+      setMusicName(res.data.name);
+      setMusicDuration(res.data.duration);
+    } catch (err: any) {
+      setMusicError(err.response?.data?.error || err.message || 'တင်မရပါ');
+      setMusicId(null);
+    } finally {
+      setMusicUploading(false);
+    }
+  };
+
+  const handleRemoveMusic = () => {
+    setMusicId(null);
+    setMusicName('');
+    setMusicDuration(0);
+    if (musicPreviewUrl) {
+      try { URL.revokeObjectURL(musicPreviewUrl); } catch (err) {}
+    }
+    setMusicPreviewUrl(null);
+    setMusicError('');
+  };
+
   const startAnalysis = async () => {
     if (!hasVideo) return;
 
@@ -636,6 +702,13 @@ function App() {
         formData.append('keepOriginalGaps', keepOriginalGaps.toString());
         formData.append('narrationStyle', narratorMode ? 'narrator' : 'translate');
         formData.append('targetLanguage', targetLanguage);
+
+        if (musicEnabled && musicId) {
+          formData.append('musicId', musicId);
+          formData.append('musicVolume', musicVolume.toString());
+          formData.append('musicMode', musicMode);
+          formData.append('musicPosition', musicPosition);
+        }
         
         if (user?.role === 'admin' && voiceCloneEnabled) {
           formData.append('useVoiceClone', useVoiceClone ? 'true' : 'false');
@@ -658,6 +731,12 @@ function App() {
           keepOriginalGaps: keepOriginalGaps.toString(),
           narrationStyle: narratorMode ? 'narrator' : 'translate',
           targetLanguage: targetLanguage,
+          ...(musicEnabled && musicId ? {
+            musicId: musicId,
+            musicVolume: musicVolume.toString(),
+            musicMode: musicMode,
+            musicPosition: musicPosition
+          } : {}),
           ...(user?.role === 'admin' && voiceCloneEnabled ? {
             useVoiceClone: useVoiceClone ? 'true' : 'false',
             referenceVoiceId: selectedReferenceVoiceId || ''
@@ -749,6 +828,19 @@ function App() {
     setJobId(null);
     setAnalysisStartTime(null);
     localStorage.removeItem('superclick_active_job');
+    if (musicPreviewUrl) {
+      try { URL.revokeObjectURL(musicPreviewUrl); } catch (e) {}
+    }
+    setMusicEnabled(false);
+    setMusicId(null);
+    setMusicName('');
+    setMusicDuration(0);
+    setMusicVolume(30);
+    setMusicMode('loop');
+    setMusicPosition('start');
+    setMusicUploading(false);
+    setMusicError('');
+    setMusicPreviewUrl(null);
     setCurrentStep(1);
   };
 
@@ -1044,12 +1136,13 @@ function App() {
                     "ဗီဒီယိုနှင့် အသံ",
                     "Blur ပြုလုပ်ခြင်း",
                     "စာတန်းနှင့် ဖောင့်များ",
+                    "သီချင်း",
                     "ထုတ်လုပ်မည်"
                   ].map((stepLabel, i) => {
                     const stepNum = i + 1;
-                    const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 4);
-                    const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 4);
-                    const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 4 && hasVideo));
+                    const isActive = (status === 'idle' && currentStep === stepNum) || (status !== 'idle' && stepNum === 5);
+                    const isCompleted = (status === 'idle' && currentStep > stepNum) || (status !== 'idle' && stepNum < 5);
+                    const isClickable = status === 'idle' && (stepNum <= currentStep || (stepNum <= 5 && hasVideo));
 
                     return (
                       <div key={stepNum} className="flex items-center flex-1 last:flex-none">
@@ -1065,7 +1158,7 @@ function App() {
                           </div>
                           <span className="text-[10px] uppercase font-bold whitespace-nowrap hidden sm:block">{stepLabel}</span>
                         </button>
-                        {i < 3 && <BoltConnector active={isCompleted} className="mx-2 text-gray-600" />}
+                        {i < 4 && <BoltConnector active={isCompleted} className="mx-2 text-gray-600" />}
                       </div>
                     );
                   })}
@@ -1518,6 +1611,189 @@ function App() {
                       )}
 
                       {currentStep === 4 && (
+                        <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg sm:text-xl">🎵</span>
+                            <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">နောက်ခံသီချင်း</h3>
+                          </div>
+
+                          <div className="flex items-center justify-between bg-gray-950/60 p-4 rounded-xl border border-gray-800">
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">နောက်ခံသီချင်း ထည့်မည်</span>
+                            <button
+                              type="button"
+                              onClick={() => setMusicEnabled(!musicEnabled)}
+                              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${
+                                musicEnabled ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                              }`}
+                            >
+                              {musicEnabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+
+                          {!musicEnabled ? (
+                            <p className="text-xs text-gray-500 text-center">မထည့်ရင် ဒီအဆင့်ကို ကျော်ပါ</p>
+                          ) : (
+                            <div className="space-y-4">
+                              <input
+                                type="file"
+                                ref={musicInputRef}
+                                accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus"
+                                className="hidden"
+                                onChange={handleMusicFileChange}
+                              />
+
+                              {!musicId ? (
+                                <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-gray-800 rounded-xl space-y-3">
+                                  <button
+                                    type="button"
+                                    disabled={musicUploading}
+                                    onClick={() => musicInputRef.current?.click()}
+                                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl flex items-center gap-2 transition-all"
+                                  >
+                                    {musicUploading ? (
+                                      <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>သီချင်းတင်နေသည်...</span>
+                                      </>
+                                    ) : (
+                                      <span>သီချင်းရွေးရန်</span>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between bg-gray-950/60 p-4 rounded-xl border border-gray-800 gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-bold text-white truncate">{musicName}</p>
+                                      <p className="text-xs text-gray-400">{formatMusicDuration(musicDuration)}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={musicUploading}
+                                        onClick={() => musicInputRef.current?.click()}
+                                        className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                                      >
+                                        {musicUploading && <Loader2 className="w-3 h-3 animate-spin" />}
+                                        <span>ပြောင်းမည်</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={musicUploading}
+                                        onClick={handleRemoveMusic}
+                                        className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/60 disabled:opacity-50 text-red-400 text-xs font-bold rounded-lg border border-red-900/30 transition-colors"
+                                      >
+                                        ဖျက်မည်
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {musicPreviewUrl && (
+                                    <div className="w-full">
+                                      <audio
+                                        ref={musicAudioRef}
+                                        controls
+                                        src={musicPreviewUrl}
+                                        onLoadedMetadata={(e) => { e.currentTarget.volume = Math.max(0, Math.min(1, musicVolume / 100)); }}
+                                        className="w-full"
+                                      />
+                                    </div>
+                                  )}
+
+                                  {/* Volume */}
+                                  <div className="bg-gray-950/60 p-4 rounded-xl border border-gray-800 space-y-2">
+                                    <div className="flex items-center justify-between text-xs font-bold">
+                                      <span className="text-gray-400 uppercase tracking-widest">အသံ</span>
+                                      <span className="text-indigo-400">{musicVolume}%</span>
+                                    </div>
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max="100"
+                                      value={musicVolume}
+                                      onChange={(e) => setMusicVolume(parseInt(e.target.value) || 0)}
+                                      className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                    />
+                                  </div>
+
+                                  {/* Mode */}
+                                  <div className="bg-gray-950/60 p-4 rounded-xl border border-gray-800 space-y-2">
+                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">ဘယ်လိုဖွင့်မလဲ</span>
+                                    <div className="grid grid-cols-2 gap-2 bg-gray-900 p-1 rounded-xl">
+                                      <button
+                                        type="button"
+                                        onClick={() => setMusicMode('loop')}
+                                        className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                                          musicMode === 'loop' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
+                                        }`}
+                                      >
+                                        ပြန်ပတ်
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setMusicMode('once')}
+                                        className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                                          musicMode === 'once' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
+                                        }`}
+                                      >
+                                        တစ်ခါပဲ
+                                      </button>
+                                    </div>
+                                    <p className="text-[11px] text-gray-500">
+                                      {musicMode === 'loop' ? 'ဗီဒီယိုဆုံးတဲ့အထိ သီချင်းကို ထပ်ခါထပ်ခါ ဖွင့်မယ်' : 'သီချင်းပြီးရင် ရပ်မယ်၊ ထပ်မဖွင့်ဘူး'}
+                                    </p>
+                                  </div>
+
+                                  {/* Position (only when musicMode === 'once') */}
+                                  {musicMode === 'once' && (
+                                    <div className="bg-gray-950/60 p-4 rounded-xl border border-gray-800 space-y-2">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">နေရာ</span>
+                                      <div className="grid grid-cols-3 gap-2 bg-gray-900 p-1 rounded-xl">
+                                        <button
+                                          type="button"
+                                          onClick={() => setMusicPosition('start')}
+                                          className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                                            musicPosition === 'start' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
+                                          }`}
+                                        >
+                                          အစ
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setMusicPosition('middle')}
+                                          className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                                            musicPosition === 'middle' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
+                                          }`}
+                                        >
+                                          အလယ်
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setMusicPosition('end')}
+                                          className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                                            musicPosition === 'end' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
+                                          }`}
+                                        >
+                                          အဆုံး
+                                        </button>
+                                      </div>
+                                      <p className="text-[11px] text-gray-500">
+                                        သီချင်းက ဗီဒီယိုထက် တိုမှ သက်ရောက်တယ်
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {musicError && (
+                                <p className="text-xs text-red-400 text-center">{musicError}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {currentStep === 5 && (
                         <div className="flex flex-col items-center justify-center py-10 max-w-md mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
                            <div className="text-center">
                               <div className="w-20 h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mx-auto mb-4 text-indigo-400">
@@ -1531,7 +1807,20 @@ function App() {
                                <p className="text-amber-400 text-sm font-bold">Credits မလုံလောက်ပါ</p>
                              </div>
                            ) : (
-                             <button onClick={startAnalysis} disabled={!hasVideo} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95">AI ဖြင့် လုပ်ဆောင်မည်</button>
+                             <div className="w-full space-y-3">
+                               <button 
+                                 onClick={startAnalysis} 
+                                 disabled={!hasVideo || (musicEnabled && !musicId) || musicUploading} 
+                                 className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:scale-100 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95"
+                               >
+                                 AI ဖြင့် လုပ်ဆောင်မည်
+                               </button>
+                               {((musicEnabled && !musicId) || musicUploading) && (
+                                 <p className="text-amber-400 text-xs text-center font-medium">
+                                   သီချင်းရွေးပါ၊ ဒါမှမဟုတ် အဆင့် ၄ မှာ ပိတ်ပါ
+                                 </p>
+                               )}
+                             </div>
                            )}
                         </div>
                       )}
@@ -1542,8 +1831,8 @@ function App() {
               {status === 'idle' && (
                 <div className="flex items-center justify-between max-w-3xl mx-auto mt-8 pt-4 border-t border-gray-900">
                   <button onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))} disabled={currentStep === 1} className="px-6 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 font-semibold text-sm disabled:opacity-30">နောက်သို့</button>
-                  {currentStep < 4 && (
-                    <button onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))} disabled={currentStep === 1 && !hasVideo} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">ရှေ့သို့ <ArrowRight size={16} /></button>
+                  {currentStep < 5 && (
+                    <button onClick={() => setCurrentStep(prev => Math.min(5, prev + 1))} disabled={currentStep === 1 && !hasVideo} className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl flex items-center gap-2">ရှေ့သို့ <ArrowRight size={16} /></button>
                   )}
                 </div>
               )}
