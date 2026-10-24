@@ -109,7 +109,7 @@ export const resolveWatermarkFont = (text, targetLanguage) => {
         neededScript = 'thai';
     } else {
         script = 'latin';
-        neededScript = lang === 'th' ? 'thai' : 'burmese';
+        neededScript = 'burmese'; // Padauk contains Latin glyphs; Noto Sans Thai does not
     }
 
     let fontPath;

@@ -1125,7 +1125,7 @@ export const processRecapPipeline = async (jobId) => {
                     } else {
                         const burmeseCharCount = (watermarkText.match(/[\u1000-\u109F\uA9E0-\uA9FF\uAA60-\uAA7F]/g) || []).length;
                         const thaiCharCount = (watermarkText.match(/[\u0E00-\u0E7F]/g) || []).length;
-                        const isThai = thaiCharCount > burmeseCharCount || (thaiCharCount === 0 && burmeseCharCount === 0 && job.targetLanguage === 'th');
+                        const isThai = thaiCharCount > burmeseCharCount;
                         const fontName = isThai ? 'Noto Sans Thai' : 'Padauk';
                         console.warn(`[WATERMARK-FONT] No font file found on disk for watermark, falling back to fontconfig pattern: font='${fontName}'`);
                         fontParam = `font='${fontName}'`;
@@ -1371,7 +1371,7 @@ export const processRecapPipeline = async (jobId) => {
                     } else {
                         const burmeseCharCount = (watermarkText.match(/[\u1000-\u109F\uA9E0-\uA9FF\uAA60-\uAA7F]/g) || []).length;
                         const thaiCharCount = (watermarkText.match(/[\u0E00-\u0E7F]/g) || []).length;
-                        const isThai = thaiCharCount > burmeseCharCount || (thaiCharCount === 0 && burmeseCharCount === 0 && job.targetLanguage === 'th');
+                        const isThai = thaiCharCount > burmeseCharCount;
                         const fontName = isThai ? 'Noto Sans Thai' : 'Padauk';
                         console.warn(`[WATERMARK-FONT] No font file found on disk for watermark, falling back to fontconfig pattern: font='${fontName}'`);
                         fontParam = `font='${fontName}'`;
