@@ -316,7 +316,7 @@ export const cropVideo = async (inputPath, outputPath, cropRect) => {
         '-map', '0:v',
         '-map', '0:a?',
         '-c:v', 'libx264',
-        '-preset', 'fast',
+        '-preset', 'veryfast',
         '-crf', '18'
     ];
 

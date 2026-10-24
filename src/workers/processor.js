@@ -80,6 +80,7 @@ export const processRecapPipeline = async (jobId) => {
     try {
         console.log(`[Job ${jobId}] Pipeline started. Current Step: ${job.currentStep || STEPS.UPLOAD}`);
 
+        updateJob(jobId, { progress: 1, status: 'Preparing Video' });
         // 0. CROP SOURCE VIDEO (if cropRect specified)
         if (state.croppedVideoPath && fs.existsSync(state.croppedVideoPath)) {
             job.videoPath = state.croppedVideoPath;
@@ -100,6 +101,7 @@ export const processRecapPipeline = async (jobId) => {
                 if (!isFullFrame) {
                     console.log(`[Job ${jobId}] Applying source video crop:`, parsedCrop);
                     const croppedVideoPath = path.join(cacheDir, 'cropped_source.mp4');
+                    updateJob(jobId, { progress: 2, status: 'Cropping Video' });
                     await cropVideo(job.videoPath, croppedVideoPath, parsedCrop);
                     if (fs.existsSync(croppedVideoPath) && fs.statSync(croppedVideoPath).size > 0) {
                         state.croppedVideoPath = croppedVideoPath;

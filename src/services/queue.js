@@ -15,6 +15,7 @@ if (process.env.QUEUE_CONCURRENCY) {
 const queue = new PQueue({ concurrency: concurrencyLimit });
 
 export const addJobToQueue = (jobId) => {
+    updateJob(jobId, { status: (queue.pending > 0 || queue.size > 0) ? 'Waiting in queue' : 'Starting' });
     queue.add(async () => {
         try {
             await processRecapPipeline(jobId);
