@@ -1351,6 +1351,7 @@ export const processRecapPipeline = async (jobId) => {
                         }
 
                         if (filterComplex && filterComplex.trim() !== '') {
+                            console.log('[BLUR-COMBINED] canvas=' + state.outputWidth + 'x' + state.outputHeight + ' boxes=' + JSON.stringify(parsedBoxes));
                             filterParts.push(filterComplex.replace(/;\s*$/, ''));
                             current = lastMap;
                             hasBlur = true;

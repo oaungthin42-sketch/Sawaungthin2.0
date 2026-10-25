@@ -428,6 +428,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    updateVideoRect();
+    const el = previewContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => updateVideoRect());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [currentStep, videoPreviewUrl, cropRect, videoNativeDims]);
+
+  useEffect(() => {
     if (activeView === 'tool' && user) {
       axios.get('/api/user/credits').then(r => setCredits(r.data.credits)).catch(() => {});
     }
