@@ -157,7 +157,9 @@ export const processRecapPipeline = async (jobId) => {
         const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
             advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Audio');
+            const __t0 = Date.now();
             state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache);
+            console.log(`[TIMING] transcribe took ${Math.round((Date.now() - __t0) / 1000)}s`);
             saveState();
         }
 
