@@ -1086,6 +1086,7 @@ export const processRecapPipeline = async (jobId) => {
                                 '-c:a', 'copy',
                                 '-c:v', 'libx264',
                                 '-preset', 'fast',
+                                '-crf', '18',
                                 '-y', blurTmpPath
                             ];
                             
@@ -1147,6 +1148,7 @@ export const processRecapPipeline = async (jobId) => {
                         '-c:a', 'copy',
                         '-c:v', 'libx264',
                         '-preset', 'fast',
+                        '-crf', '18',
                         '-y', wmTmpPath
                     ];
                     
@@ -1257,6 +1259,7 @@ export const processRecapPipeline = async (jobId) => {
                                 '-c:a', 'copy',
                                 '-c:v', 'libx264',
                                 '-preset', 'fast',
+                                '-crf', '18',
                                 '-y', subTmpPath
                             ];
                             
@@ -1490,6 +1493,9 @@ export const processRecapPipeline = async (jobId) => {
                 '-c:a', 'copy',
                 '-c:v', 'libx264',
                 '-preset', 'veryfast',
+                '-crf', '18',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
                 '-y', tmpOutPath
             ];
 
@@ -1541,6 +1547,10 @@ export const processRecapPipeline = async (jobId) => {
                     '-map', '[v]',
                     '-map', '[a]',
                     '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '18',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
                     '-c:a', 'aac',
                     '-b:a', '192k',
                     '-y', speedTmpPath
