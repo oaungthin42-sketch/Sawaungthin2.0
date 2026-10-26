@@ -425,7 +425,7 @@ function App() {
   useEffect(() => {
     window.addEventListener('resize', updateVideoRect);
     return () => window.removeEventListener('resize', updateVideoRect);
-  }, []);
+  }, [cropRect, videoNativeDims, currentStep, videoPreviewUrl]);
 
   useEffect(() => {
     updateVideoRect();
