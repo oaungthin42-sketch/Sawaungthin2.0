@@ -6,7 +6,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '+0Hz',
-        rate: '+34%'
+        rate: '+45%'
     },
     {
         id: 'male-young-adult',
@@ -15,7 +15,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '+2Hz',
-        rate: '+35%'
+        rate: '+45%'
     },
     {
         id: 'male-calm',
@@ -24,7 +24,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '-2Hz',
-        rate: '+33%'
+        rate: '+45%'
     },
     {
         id: 'male-mature',
@@ -33,7 +33,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '-6Hz',
-        rate: '+34%'
+        rate: '+45%'
     },
     {
         id: 'male-deep',
@@ -42,7 +42,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-ThihaNeural',
         pitch: '-10Hz',
-        rate: '+33%'
+        rate: '+45%'
     },
     {
         id: 'female-young',
@@ -51,7 +51,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-NilarNeural',
         pitch: '+6Hz',
-        rate: '+38%'
+        rate: '+45%'
     },
     {
         id: 'female-default',
@@ -60,7 +60,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-NilarNeural',
         pitch: '+0Hz',
-        rate: '+35%'
+        rate: '+45%'
     },
     {
         id: 'female-soft',
@@ -69,7 +69,7 @@ export const VOICES = [
         lang: 'my',
         edgeVoice: 'my-MM-NilarNeural',
         pitch: '-2Hz',
-        rate: '+33%'
+        rate: '+45%'
     },
     {
         id: 'th-male-default',
@@ -78,7 +78,7 @@ export const VOICES = [
         lang: 'th',
         edgeVoice: 'th-TH-NiwatNeural',
         pitch: '+0Hz',
-        rate: '+15%'
+        rate: '+45%'
     },
     {
         id: 'th-male-young',
@@ -87,7 +87,7 @@ export const VOICES = [
         lang: 'th',
         edgeVoice: 'th-TH-NiwatNeural',
         pitch: '+3Hz',
-        rate: '+18%'
+        rate: '+45%'
     },
     {
         id: 'th-male-deep',
@@ -96,7 +96,7 @@ export const VOICES = [
         lang: 'th',
         edgeVoice: 'th-TH-NiwatNeural',
         pitch: '-6Hz',
-        rate: '+12%'
+        rate: '+45%'
     },
     {
         id: 'th-female-default',
@@ -105,7 +105,7 @@ export const VOICES = [
         lang: 'th',
         edgeVoice: 'th-TH-PremwadeeNeural',
         pitch: '+0Hz',
-        rate: '+15%'
+        rate: '+45%'
     },
     {
         id: 'th-female-young',
@@ -114,7 +114,7 @@ export const VOICES = [
         lang: 'th',
         edgeVoice: 'th-TH-PremwadeeNeural',
         pitch: '+4Hz',
-        rate: '+18%'
+        rate: '+45%'
     },
     {
         id: 'th-female-soft',
@@ -123,7 +123,7 @@ export const VOICES = [
         lang: 'th',
         edgeVoice: 'th-TH-PremwadeeNeural',
         pitch: '-2Hz',
-        rate: '+12%'
+        rate: '+45%'
     }
 ];
 
