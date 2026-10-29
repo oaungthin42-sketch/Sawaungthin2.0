@@ -611,9 +611,9 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                         const gapPath = path.join(ttsDir, `passthrough_gap_${gapCounter++}.wav`);
                         const ffmpegArgs = [
                             '-y',
-                            '-i', options.sourceVideoPath,
                             '-ss', pStart.toFixed(3),
-                            '-to', pEnd.toFixed(3),
+                            '-t', pLen.toFixed(3),
+                            '-i', options.sourceVideoPath,
                             '-vn'
                         ];
 
