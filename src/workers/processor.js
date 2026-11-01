@@ -187,65 +187,94 @@ export const processRecapPipeline = async (jobId) => {
                     ? (job.narrationStyle === 'narrator' ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
                     : (job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
 
-                // Retry on transient API errors or validation errors
-                let response;
-                let attempts = 0;
-                const maxAttempts = 3;
-                let lastError = null;
+                const totalLines = translationInput.length;
+                const BATCH_SIZE = totalLines <= 60 ? totalLines : 40;
+                const CONTEXT_LINES = 6;
+                const allTranslated = [];
 
-                while (attempts < maxAttempts) {
-                    try {
-                        attempts++;
-                        response = await callLLM({
-                            contents: JSON.stringify(translationInput),
-                            systemInstruction: systemInstruction,
-                            responseMimeType: 'application/json'
-                        });
-                        
-                        if (!response || !response.text) {
-                            throw new Error("Empty response from OpenRouter API");
-                        }
+                for (let start = 0; start < totalLines; start += BATCH_SIZE) {
+                    const batchItems = translationInput.slice(start, start + BATCH_SIZE);
+                    const batchNumber = Math.floor(start / BATCH_SIZE) + 1;
+                    const totalBatches = Math.ceil(totalLines / BATCH_SIZE);
 
-                        const translatedItems = JSON.parse(response.text.trim());
-                        if (!Array.isArray(translatedItems)) {
-                            throw new Error("Response is not a JSON array");
-                        }
+                    let batchSystemInstruction = systemInstruction;
+                    if (start > 0) {
+                        const prevLines = allTranslated.slice(-CONTEXT_LINES);
+                        const contextSnippet = prevLines.map((item, i) => {
+                            const idx = start - prevLines.length + i;
+                            const orig = state.originalTranscript[idx]?.text || '';
+                            return `[Index ${idx}] Original: "${orig}" -> Translated: "${item.text}"`;
+                        }).join('\n');
 
-                        const tempTranslatedTranscript = [];
-                        for (let i = 0; i < state.originalTranscript.length; i++) {
-                            const matched = translatedItems.find(item => item.index === i);
-                            if (!matched) {
-                                throw new Error(`Missing translation for index ${i}`);
-                            }
-                            if (!matched.text || typeof matched.text !== 'string' || !matched.text.trim()) {
-                                throw new Error(`Empty or invalid translation text for index ${i}`);
-                            }
-                            tempTranslatedTranscript.push({
-                                ...state.originalTranscript[i],
-                                text: matched.text.trim()
+                        batchSystemInstruction += `\n\n[CONTEXT FROM PREVIOUS BATCH - Maintain consistency of names, pronouns, genders, and tone. Do NOT re-translate or output these context lines; output ONLY the translation for the current batch items]:\n${contextSnippet}`;
+                    }
+
+                    // Retry on transient API errors or validation errors
+                    let batchSuccess = false;
+                    let attempts = 0;
+                    const maxAttempts = 3;
+                    let lastError = null;
+
+                    while (attempts < maxAttempts) {
+                        try {
+                            attempts++;
+                            console.log(`[TRANSLATION] Processing batch ${batchNumber}/${totalBatches} (lines ${start} to ${start + batchItems.length - 1}), attempt ${attempts}...`);
+                            
+                            const response = await callLLM({
+                                contents: JSON.stringify(batchItems),
+                                systemInstruction: batchSystemInstruction,
+                                responseMimeType: 'application/json'
                             });
-                        }
 
-                        state.translatedTranscript = tempTranslatedTranscript;
-                        fs.writeFileSync(translatedTranscriptCache, JSON.stringify(state.translatedTranscript, null, 2));
-                        break;
-                    } catch (err) {
-                        lastError = err;
-                        console.warn(`[TRANSLATION] OpenRouter translation/validation attempt ${attempts} failed:`, err);
-                        if (attempts < maxAttempts) {
-                            const errStr = err ? (err.message ? err.message.toLowerCase() : String(err).toLowerCase()) : '';
-                            if (errStr.includes('503') || errStr.includes('unavailable')) {
-                                await new Promise(resolve => setTimeout(resolve, 3000));
-                            } else {
-                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            if (!response || !response.text) {
+                                throw new Error("Empty response from OpenRouter API");
+                            }
+
+                            const translatedItems = JSON.parse(response.text.trim());
+                            if (!Array.isArray(translatedItems)) {
+                                throw new Error("Response is not a JSON array");
+                            }
+
+                            const batchResult = [];
+                            for (let i = 0; i < batchItems.length; i++) {
+                                const targetIndex = batchItems[i].index;
+                                const matched = translatedItems.find(item => item.index === targetIndex);
+                                if (!matched) {
+                                    throw new Error(`Missing translation for index ${targetIndex}`);
+                                }
+                                if (!matched.text || typeof matched.text !== 'string' || !matched.text.trim()) {
+                                    throw new Error(`Empty or invalid translation text for index ${targetIndex}`);
+                                }
+                                batchResult.push({
+                                    ...state.originalTranscript[targetIndex],
+                                    text: matched.text.trim()
+                                });
+                            }
+
+                            allTranslated.push(...batchResult);
+                            batchSuccess = true;
+                            break;
+                        } catch (err) {
+                            lastError = err;
+                            console.warn(`[TRANSLATION] OpenRouter translation/validation batch ${batchNumber}/${totalBatches} attempt ${attempts} failed:`, err);
+                            if (attempts < maxAttempts) {
+                                const errStr = err ? (err.message ? err.message.toLowerCase() : String(err).toLowerCase()) : '';
+                                if (errStr.includes('503') || errStr.includes('unavailable')) {
+                                    await new Promise(resolve => setTimeout(resolve, 3000));
+                                } else {
+                                    await new Promise(resolve => setTimeout(resolve, 1000));
+                                }
                             }
                         }
                     }
+
+                    if (!batchSuccess) {
+                        throw new Error(`OpenRouter translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
+                    }
                 }
 
-                if (!state.translatedTranscript) {
-                    throw new Error(`OpenRouter translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
-                }
+                state.translatedTranscript = allTranslated;
+                fs.writeFileSync(translatedTranscriptCache, JSON.stringify(state.translatedTranscript, null, 2));
             }
 
             saveState();
