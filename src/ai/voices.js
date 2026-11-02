@@ -1,5 +1,50 @@
 export const VOICES = [
     {
+        id: 'ms-thiha-original',
+        name: 'Microsoft သီဟ (မူရင်းအသံ)',
+        gender: 'male',
+        lang: 'my',
+        edgeVoice: 'my-MM-ThihaNeural',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'ms-nilar-original',
+        name: 'Microsoft နီလာ (မူရင်းအသံ)',
+        gender: 'female',
+        lang: 'my',
+        edgeVoice: 'my-MM-NilarNeural',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'ms-william-multilingual',
+        name: 'Microsoft ဝီလျံ (စကားစုံ)',
+        gender: 'male',
+        lang: 'my',
+        edgeVoice: 'en-AU-WilliamMultilingualNeural',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'ms-giuseppe-multilingual',
+        name: 'Microsoft ဂျူဇက်ပီ (စကားစုံ)',
+        gender: 'male',
+        lang: 'my',
+        edgeVoice: 'it-IT-GiuseppeMultilingualNeural',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'ms-hyunsu-multilingual',
+        name: 'Microsoft ဟွန်ဆူး (စကားစုံ)',
+        gender: 'male',
+        lang: 'my',
+        edgeVoice: 'ko-KR-HyunsuMultilingualNeural',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
         id: 'male-young',
         name: 'တက်ကြွသောလူငယ်အသံ',
         gender: 'male',
