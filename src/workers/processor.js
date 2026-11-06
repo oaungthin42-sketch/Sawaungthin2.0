@@ -14,6 +14,7 @@ import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM, hasLLMKey } from '../services/llm.js';
 import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
+import { generateStoryContext } from '../ai/storyContext.js';
 import { resolveWatermarkFont } from '../services/fonts.js';
 
 // Pipeline steps
@@ -182,9 +183,44 @@ export const processRecapPipeline = async (jobId) => {
                     text: t.text
                 }));
 
-                const systemInstruction = job.targetLanguage === 'th'
+                let systemInstruction = job.targetLanguage === 'th'
                     ? (job.narrationStyle === 'narrator' ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
                     : (job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
+
+                const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+                const storyContextEnabled = getSetting('STORY_CONTEXT_ENABLED') !== 'false';
+
+                if (job.narrationStyle === 'narrator' && storyContextEnabled && geminiKey) {
+                    const storyContextCache = path.join(cacheDir, 'story_context.txt');
+                    let storyContext = null;
+
+                    if (fs.existsSync(storyContextCache)) {
+                        try {
+                            storyContext = fs.readFileSync(storyContextCache, 'utf8').trim();
+                            console.log(`[Job ${jobId}] Loaded story context from cache`);
+                        } catch (e) {
+                            console.warn(`[Job ${jobId}] Failed to read story_context cache:`, e.message);
+                        }
+                    } else {
+                        updateJob(jobId, { status: 'Understanding Story' });
+                        storyContext = await generateStoryContext(job.videoPath, job.duration, cacheDir);
+                        if (storyContext && storyContext.trim()) {
+                            storyContext = storyContext.trim();
+                            try {
+                                fs.writeFileSync(storyContextCache, storyContext, 'utf8');
+                            } catch (e) {
+                                console.warn(`[Job ${jobId}] Failed to write story_context cache:`, e.message);
+                            }
+                        } else {
+                            storyContext = null;
+                        }
+                        updateJob(jobId, { status: job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese' });
+                    }
+
+                    if (storyContext) {
+                        systemInstruction += "\n\n[STORY CONTEXT — background understanding of the whole video. Use it ONLY to correctly resolve who is who, relationships, genders, pronouns and tone, and to understand ambiguous lines. Do NOT change the translation style, structure, length or any rule above. Do NOT add events or information that are not in the given dialogue lines. Translate exactly the given items as before.]\n" + storyContext;
+                    }
+                }
 
                 const totalLines = translationInput.length;
                 const BATCH_SIZE = totalLines <= 60 ? totalLines : 40;
