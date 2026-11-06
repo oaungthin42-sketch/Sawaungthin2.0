@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
 import { edgeTtsToFile } from './edgeTtsPy.js';
 import ffprobePath from 'ffprobe-static';
-import { getVoiceConfig } from './voices.js';
+import { getVoiceConfig, getEffectiveVoiceConfig } from './voices.js';
 import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { fileURLToPath } from 'url';
@@ -123,7 +123,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
     try {
         console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
         const cacheMetaPath = cachePath + '.meta.json';
-        const voiceConfig = getVoiceConfig(voiceId);
+        const voiceConfig = getEffectiveVoiceConfig(voiceId);
         const edgeVoice = voiceConfig.edgeVoice;
         const pitch = voiceConfig.pitch;
         const rate = voiceConfig.rate;

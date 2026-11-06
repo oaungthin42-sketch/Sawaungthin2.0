@@ -8,7 +8,7 @@ import { spawn } from 'child_process';
 import { createJob, getJob, updateJob } from '../services/jobManager.js';
 import { addJobToQueue } from '../services/queue.js';
 import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../services/settings.js';
-import { VOICES, getVoiceConfig } from '../ai/voices.js';
+import { VOICES, getVoiceConfig, getEffectiveVoiceConfig, parseTuningValue } from '../ai/voices.js';
 import { edgeTtsToFile } from '../ai/edgeTtsPy.js';
 import db from '../services/db.js';
 import { authMiddleware, adminOnly } from './auth.js';
@@ -363,7 +363,7 @@ router.get('/bank-info', authMiddleware, (req, res) => {
 });
 
 router.post('/preview-voice', authMiddleware, async (req, res) => {
-    const { voiceId } = req.body;
+    const { voiceId, rate, pitch } = req.body;
     if (!voiceId) return res.status(400).json({ error: 'Voice ID is required' });
 
     if (req.user.role !== 'admin' && req.user.credits <= 0) {
@@ -371,8 +371,28 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
     }
 
     try {
-        const config = getVoiceConfig(voiceId);
+        const config = getEffectiveVoiceConfig(voiceId);
         if (!config) return res.status(400).json({ error: 'Invalid Voice ID' });
+
+        let effectiveRate = config.rate;
+        let effectivePitch = config.pitch;
+
+        const hasCustomRate = rate !== undefined && rate !== null && rate !== '' && Number.isFinite(Number(rate));
+        const hasCustomPitch = pitch !== undefined && pitch !== null && pitch !== '' && Number.isFinite(Number(pitch));
+
+        if (hasCustomRate || hasCustomPitch) {
+            const defaultRateMatch = config.rate.match(/([+-]?\d+)/);
+            const defaultPitchMatch = config.pitch.match(/([+-]?\d+)/);
+            const defaultRateNum = defaultRateMatch ? parseInt(defaultRateMatch[1], 10) : 0;
+            const defaultPitchNum = defaultPitchMatch ? parseInt(defaultPitchMatch[1], 10) : 0;
+
+            const rNum = hasCustomRate ? Number(rate) : defaultRateNum;
+            const pNum = hasCustomPitch ? Number(pitch) : defaultPitchNum;
+
+            const tuned = parseTuningValue(rNum, pNum);
+            effectiveRate = tuned.rate;
+            effectivePitch = tuned.pitch;
+        }
 
         const previewText = config.lang === 'th' ? "ยินดีต้อนรับสู่ซูเปอร์คลิก" : "စူပါကလစ်မှ ကြိုဆိုပါတယ်";
 
@@ -381,8 +401,8 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
         try {
             await edgeTtsToFile(previewText, {
                 voice: config.edgeVoice,
-                pitch: config.pitch,
-                rate: config.rate
+                pitch: effectivePitch,
+                rate: effectiveRate
             }, previewTmpPath, 15000);
             resAudio = { data: fs.readFileSync(previewTmpPath) };
         } finally {

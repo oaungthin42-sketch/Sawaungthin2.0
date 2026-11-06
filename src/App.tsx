@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminPage } from './components/AdminPage';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -22,6 +22,57 @@ declare global {
     google: any;
   }
 }
+
+const parseVoiceDefaultNum = (valStr?: string, defaultVal = 0): number => {
+  if (!valStr) return defaultVal;
+  const match = String(valStr).match(/([+-]?\d+)/);
+  return match ? parseInt(match[1], 10) : defaultVal;
+};
+
+const getVoiceDefaults = (voice: any) => {
+  return {
+    rate: parseVoiceDefaultNum(voice?.rate, 0),
+    pitch: parseVoiceDefaultNum(voice?.pitch, 0)
+  };
+};
+
+const useHoldStep = (stepFn: () => void) => {
+  const stepRef = useRef(stepFn);
+  stepRef.current = stepFn;
+  const timerRef = useRef<any>(null);
+  const intervalRef = useRef<any>(null);
+
+  const stop = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  const start = (e: React.PointerEvent) => {
+    e.preventDefault();
+    stop();
+    stepRef.current();
+    timerRef.current = setTimeout(() => {
+      intervalRef.current = setInterval(() => stepRef.current(), 70);
+    }, 320);
+  };
+
+  useEffect(() => {
+    return () => stop();
+  }, []);
+
+  return {
+    onPointerDown: start,
+    onPointerUp: stop,
+    onPointerLeave: stop,
+    onPointerCancel: stop
+  };
+};
 
 const VideoSeekBar = ({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement | null> }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -170,6 +221,30 @@ function App() {
   const [settings, setSettings] = useState<any>({});
   const [editSettings, setEditSettings] = useState<any>({});
   const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
+  const currentVoiceId = targetLanguage === 'th'
+    ? (settings['EDGE_TTS_VOICE_TH']?.value || 'th-male-default')
+    : (settings['EDGE_TTS_VOICE']?.value || 'male-young-adult');
+
+  const [expandedVoiceId, setExpandedVoiceId] = useState<string | null>(null);
+  const [tuningRate, setTuningRate] = useState<number>(0);
+  const [tuningPitch, setTuningPitch] = useState<number>(0);
+  const [savingVoiceTuning, setSavingVoiceTuning] = useState<boolean>(false);
+
+  const parsedVoiceTuning = useMemo<Record<string, { rate: number; pitch: number }>>(() => {
+    try {
+      const raw = settings['VOICE_TUNING']?.value;
+      if (raw) {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (e) {}
+    return {};
+  }, [settings]);
+
+  const rateStepDec = useHoldStep(() => setTuningRate(r => Math.max(-50, r - 1)));
+  const rateStepInc = useHoldStep(() => setTuningRate(r => Math.min(100, r + 1)));
+  const pitchStepDec = useHoldStep(() => setTuningPitch(p => Math.max(-50, p - 1)));
+  const pitchStepInc = useHoldStep(() => setTuningPitch(p => Math.min(50, p + 1)));
   const [telegramLink, setTelegramLink] = useState<string | null>(null);
   const [bankInfo, setBankInfo] = useState<{ bankName: string | null, accountName: string | null, accountNumber: string | null }>({ bankName: null, accountName: null, accountNumber: null });
 
@@ -346,10 +421,15 @@ function App() {
     }
   };
   
-  const handlePreviewVoice = async (voiceId: string) => {
+  const handlePreviewVoice = async (voiceId: string, customRate?: number, customPitch?: number) => {
     setPreviewingVoice(voiceId);
     try {
-        const response = await axios.post('/api/preview-voice', { voiceId }, { responseType: 'blob' });
+        const payload: { voiceId: string; rate?: number; pitch?: number } = { voiceId };
+        if (customRate !== undefined && customPitch !== undefined) {
+          payload.rate = customRate;
+          payload.pitch = customPitch;
+        }
+        const response = await axios.post('/api/preview-voice', payload, { responseType: 'blob' });
         const url = URL.createObjectURL(response.data);
         if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
         setAudioPreviewUrl(url);
@@ -366,13 +446,22 @@ function App() {
     }
   };
 
-  const fetchSettings = async () => {
-    try {
-      const res = await axios.get('/api/settings');
-      setSettings(res.data);
-    } catch (e) {
-      console.error("Failed to load settings", e);
-    }
+  const handleOpenVoiceDrawer = () => {
+    setShowVoiceDrawer(true);
+    setExpandedVoiceId(currentVoiceId);
+    const curVoice = voices.find(v => v.id === currentVoiceId);
+    const saved = parsedVoiceTuning[currentVoiceId];
+    const defaults = curVoice ? getVoiceDefaults(curVoice) : { rate: 0, pitch: 0 };
+    setTuningRate(saved?.rate !== undefined ? saved.rate : defaults.rate);
+    setTuningPitch(saved?.pitch !== undefined ? saved.pitch : defaults.pitch);
+  };
+
+  const handleSelectVoiceCard = (voice: any) => {
+    setExpandedVoiceId(voice.id);
+    const saved = parsedVoiceTuning[voice.id];
+    const defaults = getVoiceDefaults(voice);
+    setTuningRate(saved?.rate !== undefined ? saved.rate : defaults.rate);
+    setTuningPitch(saved?.pitch !== undefined ? saved.pitch : defaults.pitch);
   };
 
   const saveSetting = async (key: string, value: string) => {
@@ -380,8 +469,58 @@ function App() {
       const res = await axios.post('/api/settings', { key, value });
       setSettings(res.data);
       setEditSettings({ ...editSettings, [key]: undefined });
+      return res.data;
     } catch (e) {
       console.error("Failed to save setting", e);
+      throw e;
+    }
+  };
+
+  const handleSaveVoiceTuning = async (voiceId: string) => {
+    setSavingVoiceTuning(true);
+    try {
+      const updatedTuning = {
+        ...parsedVoiceTuning,
+        [voiceId]: {
+          rate: Math.min(Math.max(Math.round(tuningRate), -50), 100),
+          pitch: Math.min(Math.max(Math.round(tuningPitch), -50), 50)
+        }
+      };
+      await saveSetting('VOICE_TUNING', JSON.stringify(updatedTuning));
+      const voiceKey = targetLanguage === 'th' ? 'EDGE_TTS_VOICE_TH' : 'EDGE_TTS_VOICE';
+      await saveSetting(voiceKey, voiceId);
+      setShowVoiceDrawer(false);
+    } catch (e: any) {
+      console.error("Failed to save voice tuning", e);
+      alert(e?.response?.data?.error || "Failed to save voice tuning");
+    } finally {
+      setSavingVoiceTuning(false);
+    }
+  };
+
+  const handleResetVoiceTuning = async (voice: any) => {
+    const defaults = getVoiceDefaults(voice);
+    setTuningRate(defaults.rate);
+    setTuningPitch(defaults.pitch);
+
+    if (parsedVoiceTuning[voice.id]) {
+      try {
+        const updatedTuning = { ...parsedVoiceTuning };
+        delete updatedTuning[voice.id];
+        const val = Object.keys(updatedTuning).length > 0 ? JSON.stringify(updatedTuning) : '';
+        await saveSetting('VOICE_TUNING', val);
+      } catch (e) {
+        console.error("Failed to reset voice tuning", e);
+      }
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await axios.get('/api/settings');
+      setSettings(res.data);
+    } catch (e) {
+      console.error("Failed to load settings", e);
     }
   };
 
@@ -857,9 +996,6 @@ function App() {
     setCurrentStep(1);
   };
 
-  const currentVoiceId = targetLanguage === 'th'
-    ? (settings['EDGE_TTS_VOICE_TH']?.value || 'th-male-default')
-    : (settings['EDGE_TTS_VOICE']?.value || 'male-young-adult');
   let selectedVoiceName = voices.find(v => v.id === currentVoiceId)?.name || (targetLanguage === 'th' ? 'ထိုင်း - အမျိုးသားအသံ (ပုံမှန်)' : 'တက်ကြွသောလူငယ်အသံ');
 
   if (authLoading) {
@@ -1398,7 +1534,7 @@ function App() {
                                         <Volume2 className="w-5 h-5 text-indigo-400" />
                                         <h3 className="font-bold text-sm text-gray-200 uppercase tracking-wide">အသံ ပြောင်းရန်</h3>
                                     </div>
-                                    <button onClick={() => setShowVoiceDrawer(true)} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-400/5 px-2 py-1 rounded-md border border-indigo-500/20">အသံ ပြောင်းမည်</button>
+                                    <button onClick={handleOpenVoiceDrawer} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-400/5 px-2 py-1 rounded-md border border-indigo-500/20">အသံ ပြောင်းမည်</button>
                                 </div>
                                 <div className="flex items-center gap-4 bg-gray-950/60 p-4 rounded-xl border border-gray-800">
                                     <div className="w-12 h-12 bg-indigo-600/10 rounded-xl flex items-center justify-center text-xl">{selectedGender === 'male' ? '👨' : '👩'}</div>
@@ -2005,20 +2141,175 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
                     <div className="space-y-3">
                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider px-2">Voice (Edge TTS)</h3>
-                        {voices.filter(v => (v.lang || 'my') === targetLanguage && v.gender === selectedGender).map(voice => (
-                            <button key={voice.id} onClick={() => { saveSetting(targetLanguage === 'th' ? 'EDGE_TTS_VOICE_TH' : 'EDGE_TTS_VOICE', voice.id); setShowVoiceDrawer(false); }} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${currentVoiceId === voice.id ? 'bg-indigo-500/10 border-indigo-500 text-indigo-300' : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'}`}>
-                                <div className="flex items-center gap-4">
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${currentVoiceId === voice.id ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>{selectedGender === 'male' ? '👨' : '👩'}</div>
-                                    <div><span className="text-sm font-bold group-hover:text-white">{voice.name}</span><p className="text-[10px] text-gray-600 uppercase font-bold mt-0.5">{voice.id}</p></div>
+                        {voices.filter(v => (v.lang || 'my') === targetLanguage && v.gender === selectedGender).map(voice => {
+                            const isExpanded = expandedVoiceId === voice.id;
+                            const isSelected = currentVoiceId === voice.id;
+                            const hasCustomTuning = !!parsedVoiceTuning[voice.id];
+
+                            return (
+                                <div
+                                    key={voice.id}
+                                    className={`w-full rounded-2xl border transition-all text-left overflow-hidden ${
+                                        isExpanded
+                                            ? 'bg-gray-900/90 border-indigo-500/80 shadow-lg shadow-indigo-500/5 ring-1 ring-indigo-500/30'
+                                            : isSelected
+                                            ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300'
+                                            : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700'
+                                    }`}
+                                >
+                                    {/* Card Header (Tap to select and expand) */}
+                                    <div
+                                        onClick={() => handleSelectVoiceCard(voice)}
+                                        className="w-full flex items-center justify-between p-4 cursor-pointer select-none group"
+                                    >
+                                        <div className="flex items-center gap-3.5 min-w-0">
+                                            <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center text-lg ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-800'}`}>
+                                                {selectedGender === 'male' ? '👨' : '👩'}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className={`text-sm font-bold truncate group-hover:text-white ${isExpanded || isSelected ? 'text-white' : 'text-gray-200'}`}>
+                                                        {voice.name}
+                                                    </span>
+                                                    {hasCustomTuning && (
+                                                        <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded font-medium shrink-0">
+                                                            ချိန်ထားသည်
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[10px] text-gray-500 uppercase font-bold mt-0.5">{voice.id}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2.5 shrink-0 ml-2">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handlePreviewVoice(voice.id);
+                                                }}
+                                                disabled={previewingVoice !== null}
+                                                className="p-2 bg-gray-900/80 hover:bg-gray-800 text-gray-400 hover:text-indigo-400 rounded-lg transition-all border border-gray-800"
+                                                title="နားထောင်ကြည့်ရန်"
+                                            >
+                                                {previewingVoice === voice.id ? <Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> : <Play className="w-4 h-4" />}
+                                            </button>
+                                            {isSelected && <CheckCircle size={20} className="text-indigo-500" />}
+                                        </div>
+                                    </div>
+
+                                    {/* Expanded Tuning Panel */}
+                                    {isExpanded && (
+                                        <div
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="px-4 pb-4 pt-3 border-t border-gray-800/80 space-y-4 bg-gray-950/70 animate-in fade-in slide-in-from-top-1 duration-200"
+                                        >
+                                            {/* Row A: Speed */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-semibold text-gray-300">အသံမြန်နှုန်း (Speed)</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            {...rateStepDec}
+                                                            className="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-indigo-600 text-gray-200 flex items-center justify-center font-bold text-base transition-colors select-none touch-manipulation"
+                                                        >
+                                                            −
+                                                        </button>
+                                                        <span className="font-mono font-bold text-xs text-indigo-300 w-14 text-center bg-gray-900 px-2 py-1.5 rounded-lg border border-gray-800">
+                                                            {tuningRate >= 0 ? `+${tuningRate}%` : `${tuningRate}%`}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            {...rateStepInc}
+                                                            className="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-indigo-600 text-gray-200 flex items-center justify-center font-bold text-base transition-colors select-none touch-manipulation"
+                                                        >
+                                                            +
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min={-50}
+                                                    max={100}
+                                                    step={1}
+                                                    value={tuningRate}
+                                                    onChange={(e) => setTuningRate(parseInt(e.target.value, 10))}
+                                                    className="w-full accent-indigo-500 bg-gray-800 h-2 rounded-lg cursor-pointer"
+                                                />
+                                            </div>
+
+                                            {/* Row B: Pitch */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-semibold text-gray-300">အသံတက်ကျ (Pitch)</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            {...pitchStepDec}
+                                                            className="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-indigo-600 text-gray-200 flex items-center justify-center font-bold text-base transition-colors select-none touch-manipulation"
+                                                        >
+                                                            −
+                                                        </button>
+                                                        <span className="font-mono font-bold text-xs text-indigo-300 w-14 text-center bg-gray-900 px-2 py-1.5 rounded-lg border border-gray-800">
+                                                            {tuningPitch >= 0 ? `+${tuningPitch}Hz` : `${tuningPitch}Hz`}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            {...pitchStepInc}
+                                                            className="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-indigo-600 text-gray-200 flex items-center justify-center font-bold text-base transition-colors select-none touch-manipulation"
+                                                        >
+                                                            +
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min={-50}
+                                                    max={50}
+                                                    step={1}
+                                                    value={tuningPitch}
+                                                    onChange={(e) => setTuningPitch(parseInt(e.target.value, 10))}
+                                                    className="w-full accent-indigo-500 bg-gray-800 h-2 rounded-lg cursor-pointer"
+                                                />
+                                            </div>
+
+                                            {/* Panel Action Buttons */}
+                                            <div className="flex items-center gap-2 pt-2 border-t border-gray-800/80">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handlePreviewVoice(voice.id, tuningRate, tuningPitch)}
+                                                    disabled={previewingVoice !== null}
+                                                    className="flex-1 py-2.5 px-3 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                                                >
+                                                    {previewingVoice === voice.id ? (
+                                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                    ) : (
+                                                        <Play className="w-3.5 h-3.5 fill-current" />
+                                                    )}
+                                                    <span>▶ နားထောင်ကြည့်ရန်</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleResetVoiceTuning(voice)}
+                                                    className="py-2.5 px-3 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-800 rounded-xl text-xs font-semibold transition-all shrink-0"
+                                                >
+                                                    ပုံသေသို့ ပြန်ထား
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={savingVoiceTuning}
+                                                    onClick={() => handleSaveVoiceTuning(voice.id)}
+                                                    className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/20 shrink-0 flex items-center gap-1.5"
+                                                >
+                                                    {savingVoiceTuning && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                                    <span>သိမ်းမည်</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice(voice.id); }} disabled={previewingVoice !== null} className="p-2 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-indigo-500 rounded-lg transition-all border border-gray-800">
-                                        {previewingVoice === voice.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                                    </button>
-                                    {currentVoiceId === voice.id && <CheckCircle size={20} className="text-indigo-500" />}
-                                </div>
-                            </button>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>

@@ -1,6 +1,7 @@
+import { GoogleGenAI } from '@google/genai';
 import { getSetting } from './settings.js';
 
-export async function callLLM(options) {
+function parseLLMOptions(options, ...extraArgs) {
     let systemInstruction = '';
     let contents = '';
     let model = '';
@@ -8,8 +9,8 @@ export async function callLLM(options) {
 
     if (typeof options === 'string') {
         contents = options;
-        if (arguments.length > 1 && typeof arguments[1] === 'string') {
-            systemInstruction = arguments[1];
+        if (extraArgs.length > 0 && typeof extraArgs[0] === 'string') {
+            systemInstruction = extraArgs[0];
         }
     } else if (options && typeof options === 'object') {
         systemInstruction = options.systemInstruction || (options.config && options.config.systemInstruction) || '';
@@ -19,6 +20,117 @@ export async function callLLM(options) {
             isJson = true;
         }
     }
+
+    return { systemInstruction, contents, model, isJson };
+}
+
+export function hasLLMKey() {
+    const provider = (getSetting('LLM_PROVIDER') || 'gemini').trim().toLowerCase();
+    if (provider === 'openrouter') {
+        const key = getSetting('OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY;
+        return !!(key && key.trim());
+    }
+    const key = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    return !!(key && key.trim());
+}
+
+export async function callGemini(options, ...extraArgs) {
+    const { systemInstruction, contents, model, isJson } = parseLLMOptions(options, ...extraArgs);
+
+    const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    if (!apiKey || !apiKey.trim()) {
+        throw new Error("Gemini API key is not configured. Please add your GEMINI_API_KEY in Settings.");
+    }
+
+    let targetModel = (model || getSetting('GEMINI_MODEL') || 'gemini-3.6-flash').trim();
+    if (targetModel.startsWith('google/')) {
+        targetModel = targetModel.replace(/^google\//, '');
+    }
+
+    const ai = new GoogleGenAI({
+        apiKey: apiKey.trim(),
+        httpOptions: {
+            timeout: 120000,
+            headers: {
+                'User-Agent': 'aistudio-build'
+            }
+        }
+    });
+
+    const userContent = typeof contents === 'string' ? contents : JSON.stringify(contents);
+
+    const config = {};
+    if (systemInstruction && systemInstruction.trim()) {
+        config.systemInstruction = systemInstruction.trim();
+    }
+    if (isJson) {
+        config.responseMimeType = 'application/json';
+    }
+
+    const retryDelays = [5000, 15000, 30000];
+    let response;
+
+    for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+        try {
+            const timeoutPromise = new Promise((_, reject) => {
+                const timer = setTimeout(() => {
+                    reject(new Error("Gemini API call timed out after 120s"));
+                }, 120000);
+                timer.unref?.();
+            });
+
+            response = await Promise.race([
+                ai.models.generateContent({
+                    model: targetModel,
+                    contents: userContent,
+                    config
+                }),
+                timeoutPromise
+            ]);
+
+            break;
+        } catch (err) {
+            const status = err.status || err.statusCode || (err.response && err.response.status);
+            const errMsg = err.message ? err.message.toLowerCase() : String(err).toLowerCase();
+            const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('resource_exhausted') || errMsg.includes('rate limit');
+            const is5xx = (status >= 500 && status < 600) || errMsg.includes('500') || errMsg.includes('503') || errMsg.includes('502') || errMsg.includes('504') || errMsg.includes('internal server') || errMsg.includes('unavailable');
+            const shouldRetry = (is429 || is5xx) && attempt < retryDelays.length;
+
+            if (shouldRetry) {
+                console.warn(`[Gemini] Request failed (${status || err.message}). Retrying in ${retryDelays[attempt] / 1000}s (attempt ${attempt + 1}/${retryDelays.length})...`);
+                await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+                continue;
+            }
+
+            throw err;
+        }
+    }
+
+    const rawText = response && response.text;
+    if (!rawText || !rawText.trim()) {
+        throw new Error("Empty response from Gemini API");
+    }
+
+    let cleanText = rawText.trim();
+    if (isJson) {
+        if (cleanText.startsWith('```json')) {
+            cleanText = cleanText.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+        } else if (cleanText.startsWith('```')) {
+            cleanText = cleanText.replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+        }
+    }
+
+    return {
+        text: cleanText,
+        content: cleanText,
+        toString() {
+            return cleanText;
+        }
+    };
+}
+
+export async function callOpenRouter(options, ...extraArgs) {
+    const { systemInstruction, contents, model, isJson } = parseLLMOptions(options, ...extraArgs);
 
     const apiKey = getSetting('OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY;
     if (!apiKey || !apiKey.trim()) {
@@ -115,6 +227,13 @@ export async function callLLM(options) {
     };
 }
 
+export async function callLLM(options, ...extraArgs) {
+    const provider = (getSetting('LLM_PROVIDER') || 'gemini').trim().toLowerCase();
+    if (provider === 'openrouter') {
+        return callOpenRouter(options, ...extraArgs);
+    }
+    return callGemini(options, ...extraArgs);
+}
+
 export const generateContent = callLLM;
-export const callOpenRouter = callLLM;
 export default callLLM;

@@ -11,7 +11,7 @@ import { generateNarrationTTS, transcribeWav } from '../ai/index.js';
 import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
 import { getTranslationSystemInstruction, getRecapNarrationSystemInstruction } from '../ai/translation.js';
 import { edgeTtsToFile } from '../ai/edgeTtsPy.js';
-import { getVoiceConfig } from '../ai/voices.js';
+import { getVoiceConfig, getEffectiveVoiceConfig } from '../ai/voices.js';
 import { generateVoxCPMSpeech } from '../ai/voxcpmClone.js';
 
 const router = express.Router();
@@ -476,7 +476,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                 if (!success) {
                     try {
                         console.log(`[AI Recap] Generating Edge TTS for scene ${i}`);
-                        const { edgeVoice, pitch, rate } = getVoiceConfig(voiceId);
+                        const { edgeVoice, pitch, rate } = getEffectiveVoiceConfig(voiceId);
                         await edgeTtsToFile(ttsText, { voice: edgeVoice, pitch, rate }, outPath);
                         if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
                             success = true;

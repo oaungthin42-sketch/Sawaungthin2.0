@@ -1,3 +1,5 @@
+import { getSetting } from '../services/settings.js';
+
 export const VOICES = [
     {
         id: 'ms-thiha-original',
@@ -177,3 +179,56 @@ export const getVoiceConfig = (id) => {
 };
 
 export const getDefaultVoiceId = (lang) => (lang === 'th' ? 'th-male-default' : 'male-young-adult');
+
+export const parseTuningValue = (rate, pitch) => {
+    let r = Math.round(Number(rate));
+    let p = Math.round(Number(pitch));
+    if (Object.is(r, -0)) r = 0;
+    if (Object.is(p, -0)) p = 0;
+    const clampedRate = Math.min(Math.max(Number.isFinite(r) ? r : 0, -50), 100);
+    const clampedPitch = Math.min(Math.max(Number.isFinite(p) ? p : 0, -50), 50);
+    return {
+        rate: clampedRate >= 0 ? `+${clampedRate}%` : `${clampedRate}%`,
+        pitch: clampedPitch >= 0 ? `+${clampedPitch}Hz` : `${clampedPitch}Hz`,
+        rateNum: clampedRate,
+        pitchNum: clampedPitch
+    };
+};
+
+export const getEffectiveVoiceConfig = (voiceId) => {
+    const baseConfig = getVoiceConfig(voiceId);
+    if (!baseConfig) return null;
+    const config = { ...baseConfig };
+
+    try {
+        const tuningRaw = getSetting('VOICE_TUNING');
+        if (tuningRaw) {
+            const parsed = typeof tuningRaw === 'string' ? JSON.parse(tuningRaw) : tuningRaw;
+            if (parsed && typeof parsed === 'object' && parsed[config.id]) {
+                const override = parsed[config.id];
+                if (override && typeof override === 'object') {
+                    const hasRate = override.rate !== undefined && override.rate !== null && Number.isFinite(Number(override.rate));
+                    const hasPitch = override.pitch !== undefined && override.pitch !== null && Number.isFinite(Number(override.pitch));
+
+                    if (hasRate || hasPitch) {
+                        const defaultRateMatch = config.rate.match(/([+-]?\d+)/);
+                        const defaultPitchMatch = config.pitch.match(/([+-]?\d+)/);
+                        const defaultRateNum = defaultRateMatch ? parseInt(defaultRateMatch[1], 10) : 0;
+                        const defaultPitchNum = defaultPitchMatch ? parseInt(defaultPitchMatch[1], 10) : 0;
+
+                        const rNum = hasRate ? Number(override.rate) : defaultRateNum;
+                        const pNum = hasPitch ? Number(override.pitch) : defaultPitchNum;
+
+                        const tuned = parseTuningValue(rNum, pNum);
+                        config.rate = tuned.rate;
+                        config.pitch = tuned.pitch;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        // Return default config on any parse or unexpected error
+    }
+
+    return config;
+};

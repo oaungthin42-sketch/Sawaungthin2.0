@@ -12,7 +12,7 @@ import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
-import { callLLM } from '../services/llm.js';
+import { callLLM, hasLLMKey } from '../services/llm.js';
 import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
 import { resolveWatermarkFont } from '../services/fonts.js';
 
@@ -173,9 +173,8 @@ export const processRecapPipeline = async (jobId) => {
                 state.translatedTranscript = [];
                 fs.writeFileSync(translatedTranscriptCache, JSON.stringify([], null, 2));
             } else {
-                const openrouterApiKey = getSetting('OPENROUTER_API_KEY');
-                if (!openrouterApiKey || !openrouterApiKey.trim()) {
-                    throw new Error("OpenRouter API key is not configured. Please add your OPENROUTER_API_KEY in Settings.");
+                if (!hasLLMKey()) {
+                    throw new Error("LLM API key is not configured. Please add it in Settings.");
                 }
 
                 const translationInput = state.originalTranscript.map((t, index) => ({
@@ -1599,8 +1598,7 @@ export const processRecapPipeline = async (jobId) => {
         let generatedCaption = null;
         try {
             if (state.translatedTranscript && state.translatedTranscript.length > 0) {
-                const openrouterApiKey = getSetting('OPENROUTER_API_KEY');
-                if (openrouterApiKey && openrouterApiKey.trim()) {
+                if (hasLLMKey()) {
                     const captionPrompt = job.targetLanguage === 'th'
                         ? "Write a catchy, high-engagement headline/caption in Thai suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural spoken Thai."
                         : "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese.";
