@@ -39,6 +39,9 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitlePosition TEXT`); } catch (e) 
 
 try { db.exec(`ALTER TABLE jobs ADD COLUMN selectedFontId TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleColor TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleEnabled INTEGER DEFAULT 1`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleSize REAL`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleStyle TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN speed REAL DEFAULT 1.0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN flipped INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN keepOriginalGaps INTEGER DEFAULT 0`); } catch (e) {}

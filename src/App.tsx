@@ -169,6 +169,9 @@ function App() {
   const [subtitlePosition, setSubtitlePosition] = useState<any>({ xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 });
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [subtitleColor, setSubtitleColor] = useState<string>('white');
+  const [subtitleEnabled, setSubtitleEnabled] = useState<boolean>(true);
+  const [subtitleSize, setSubtitleSize] = useState<number>(6);
+  const [subtitleStyle, setSubtitleStyle] = useState<'twotone' | 'single'>('twotone');
   const [outputSpeed, setOutputSpeed] = useState<number>(1.0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [keepOriginalGaps, setKeepOriginalGaps] = useState<boolean>(false);
@@ -849,6 +852,9 @@ function App() {
         formData.append('watermarkText', watermarkText);
         formData.append('subtitlePosition', JSON.stringify(subtitlePosition));
         formData.append('subtitleColor', subtitleColor);
+        formData.append('subtitleEnabled', subtitleEnabled ? '1' : '0');
+        formData.append('subtitleSize', subtitleSize.toString());
+        formData.append('subtitleStyle', subtitleStyle);
         formData.append('speed', outputSpeed.toString());
         formData.append('flipped', isFlipped.toString());
         formData.append('keepOriginalGaps', keepOriginalGaps.toString());
@@ -878,6 +884,9 @@ function App() {
           watermarkText: watermarkText,
           subtitlePosition: JSON.stringify(subtitlePosition),
           subtitleColor: subtitleColor,
+          subtitleEnabled: subtitleEnabled ? 1 : 0,
+          subtitleSize: subtitleSize,
+          subtitleStyle: subtitleStyle,
           speed: outputSpeed.toString(),
           flipped: isFlipped.toString(),
           keepOriginalGaps: keepOriginalGaps.toString(),
@@ -993,6 +1002,10 @@ function App() {
     setMusicUploading(false);
     setMusicError('');
     setMusicPreviewUrl(null);
+    setSubtitleEnabled(true);
+    setSubtitleSize(6);
+    setSubtitleStyle('twotone');
+    setSubtitleColor('white');
     setCurrentStep(1);
   };
 
@@ -1729,31 +1742,149 @@ function App() {
                                       />
                                     </div>
                                     <div className="absolute" style={{ left: `${videoRect.left}px`, top: `${videoRect.top}px`, width: `${videoRect.width}px`, height: `${videoRect.height}px` }}>
-                                      <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')} className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors flex items-center justify-center touch-none`} style={{ left: `${subtitlePosition.xPct}%`, top: `${subtitlePosition.yPct}%`, width: `${subtitlePosition.widthPct}%`, height: `${subtitlePosition.heightPct}%` }}>
-                                        <span className="text-white font-bold text-center w-full drop-shadow-md" style={{ fontSize: `calc(${subtitlePosition.heightPct}vh * 0.4)`, color: subtitleColor }}>နမူနာ စာတန်း</span>
-                                        {selectedElement === 'subtitle' && (
-                                          <>
-                                            <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full" />
-                                            <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full" />
-                                          </>
-                                        )}
-                                      </div>
+                                      {subtitleEnabled && (
+                                        <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'move')} className={`absolute border-2 ${selectedElement === 'subtitle' ? 'border-green-400' : 'border-gray-400 border-dashed'} cursor-move transition-colors flex items-center justify-center touch-none`} style={{ left: `${subtitlePosition.xPct}%`, top: `${subtitlePosition.yPct}%`, width: `${subtitlePosition.widthPct}%`, height: `${subtitlePosition.heightPct}%` }}>
+                                          <span
+                                            className="font-bold text-center w-full select-none"
+                                            style={{
+                                              fontSize: `${Math.max(12, Math.round((subtitleSize / 100) * videoRect.height))}px`,
+                                              lineHeight: 1.2,
+                                              WebkitTextStroke: `${Math.max(1, Math.round(Math.max(12, Math.round((subtitleSize / 100) * videoRect.height)) * 0.14))}px black`,
+                                              paintOrder: 'stroke fill',
+                                              textShadow: '0 2px 4px rgba(0,0,0,0.8)'
+                                            }}
+                                          >
+                                            {subtitleStyle === 'twotone' ? (
+                                              <>
+                                                <span style={{ color: '#FFFFFF' }}>နမူနာ </span>
+                                                <span style={{ color: '#FFFF00' }}>စာတန်း</span>
+                                              </>
+                                            ) : (
+                                              <span style={{ color: subtitleColor }}>နမူနာ စာတန်း</span>
+                                            )}
+                                          </span>
+                                          {selectedElement === 'subtitle' && (
+                                            <>
+                                              <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full" />
+                                              <div onPointerDown={(e) => handlePointerDown(e, 'subtitle', 'br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-green-500 rounded-full" />
+                                            </>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                   <VideoSeekBar videoRef={videoRef} />
                                 </div>
                               ) : null}
                             </div>
-                            <div className="w-full md:w-1/3 space-y-6">
-                                <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">အရောင် ရွေးချယ်ရန်</h4>
-                                  <div className="flex flex-wrap gap-3">
-                                    {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(c => (
-                                      <button key={c} onClick={() => setSubtitleColor(c)} className={`w-8 h-8 rounded-lg border-2 ${subtitleColor === c ? 'border-indigo-500 scale-110 shadow-lg' : 'border-gray-800'}`} style={{ backgroundColor: c }} />
-                                    ))}
+                            <div className="w-full md:w-1/3 space-y-4">
+                              <div className="flex items-center justify-between bg-gray-950 border border-gray-800 rounded-xl p-4">
+                                <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">စာတန်းထိုးမည်</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSubtitleEnabled(!subtitleEnabled)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                    subtitleEnabled
+                                      ? 'bg-indigo-600 text-white shadow-sm'
+                                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                  }`}
+                                >
+                                  {subtitleEnabled ? 'ဖွင့်ထားသည်' : 'ပိတ်ထားသည်'}
+                                </button>
+                              </div>
+
+                              {subtitleEnabled && (
+                                <>
+                                  <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">စာလုံးအရွယ်အစား</span>
+                                      <span className="text-xs font-mono font-bold text-indigo-400">{subtitleSize}%</span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSubtitleSize(prev => Math.max(3, prev - 1))}
+                                        disabled={subtitleSize <= 3}
+                                        className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-900 hover:bg-gray-800 text-gray-200 font-bold border border-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      >
+                                        −
+                                      </button>
+                                      <input
+                                        type="range"
+                                        min="3"
+                                        max="12"
+                                        step="1"
+                                        value={subtitleSize}
+                                        onChange={(e) => setSubtitleSize(Number(e.target.value))}
+                                        className="flex-1 accent-indigo-500 cursor-pointer h-1.5 bg-gray-800 rounded-lg appearance-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setSubtitleSize(prev => Math.min(12, prev + 1))}
+                                        disabled={subtitleSize >= 12}
+                                        className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-900 hover:bg-gray-800 text-gray-200 font-bold border border-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
                                   </div>
-                                </div>
-                                <button onClick={() => setSelectedElement('subtitle')} className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl border border-gray-800">နေရာ ရွှေ့ရန်</button>
+
+                                  <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
+                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest block">စာတန်းပုံစံ</span>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSubtitleStyle('twotone')}
+                                        className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all ${
+                                          subtitleStyle === 'twotone'
+                                            ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                                            : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-850'
+                                        }`}
+                                      >
+                                        နှစ်ရောင် (အဖြူ+အဝါ)
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSubtitleStyle('single')}
+                                        className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all ${
+                                          subtitleStyle === 'single'
+                                            ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                                            : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-850'
+                                        }`}
+                                      >
+                                        အရောင်တစ်မျိုး
+                                      </button>
+                                    </div>
+
+                                    {subtitleStyle === 'single' && (
+                                      <div className="pt-2 border-t border-gray-900">
+                                        <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-2">အရောင်ရွေးရန်</span>
+                                        <div className="flex flex-wrap gap-2.5">
+                                          {['white', 'yellow', 'cyan', 'lime', 'magenta'].map(c => (
+                                            <button
+                                              key={c}
+                                              type="button"
+                                              onClick={() => setSubtitleColor(c)}
+                                              className={`w-7 h-7 rounded-lg border-2 transition-transform ${
+                                                subtitleColor === c ? 'border-indigo-500 scale-110 shadow-lg' : 'border-gray-800'
+                                              }`}
+                                              style={{ backgroundColor: c }}
+                                            />
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedElement('subtitle')}
+                                    className="w-full py-3 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold rounded-xl border border-gray-800 transition-colors"
+                                  >
+                                    နေရာ ရွှေ့ရန်
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>

@@ -474,6 +474,16 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const subtitlePosition = body.subtitlePosition || null;
     const selectedFontId = body.selectedFontId || null;
     const subtitleColor = body.subtitleColor || "white";
+    const rawSubEnabled = body.subtitleEnabled;
+    const subtitleEnabled = (rawSubEnabled === 'false' || rawSubEnabled === '0' || rawSubEnabled === false || rawSubEnabled === 0) ? 0 : 1;
+    let subtitleSize = null;
+    if (body.subtitleSize !== undefined && body.subtitleSize !== null && body.subtitleSize !== '') {
+        const s = parseFloat(body.subtitleSize);
+        if (Number.isFinite(s) && s >= 3 && s <= 12) {
+            subtitleSize = s;
+        }
+    }
+    const subtitleStyle = body.subtitleStyle === 'single' ? 'single' : 'twotone';
     const speed = parseFloat(body.speed) || 1.0;
     const flipped = body.flipped === 'true' ? 1 : 0;
     const keepOriginalGaps = body.keepOriginalGaps === 'true' ? 1 : 0;
@@ -517,6 +527,9 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         subtitlePosition: subtitlePosition,
         selectedFontId: selectedFontId,
         subtitleColor: subtitleColor,
+        subtitleEnabled: subtitleEnabled,
+        subtitleSize: subtitleSize,
+        subtitleStyle: subtitleStyle,
         speed: speed,
         flipped: flipped,
         keepOriginalGaps: keepOriginalGaps,
@@ -880,6 +893,16 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const subtitlePosition = req.body.subtitlePosition || null;
      const selectedFontId = req.body.selectedFontId || null;
      const subtitleColor = req.body.subtitleColor || "white";
+     const rawSubEnabled = req.body.subtitleEnabled;
+     const subtitleEnabled = (rawSubEnabled === 'false' || rawSubEnabled === '0' || rawSubEnabled === false || rawSubEnabled === 0) ? 0 : 1;
+     let subtitleSize = null;
+     if (req.body.subtitleSize !== undefined && req.body.subtitleSize !== null && req.body.subtitleSize !== '') {
+         const s = parseFloat(req.body.subtitleSize);
+         if (Number.isFinite(s) && s >= 3 && s <= 12) {
+             subtitleSize = s;
+         }
+     }
+     const subtitleStyle = req.body.subtitleStyle === 'single' ? 'single' : 'twotone';
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
      const keepOriginalGaps = req.body.keepOriginalGaps === 'true' ? 1 : 0;
@@ -923,6 +946,9 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          subtitlePosition: subtitlePosition, 
          selectedFontId: selectedFontId,
          subtitleColor: subtitleColor,
+         subtitleEnabled: subtitleEnabled,
+         subtitleSize: subtitleSize,
+         subtitleStyle: subtitleStyle,
          speed: speed,
          flipped: flipped,
          keepOriginalGaps: keepOriginalGaps,

@@ -1029,6 +1029,132 @@ export const processRecapPipeline = async (jobId) => {
             advanceStep(STEPS.EXPORT, 99, 'Export Complete');
         }
 
+        const buildSubtitleAss = (job, state, tmpDir, jobId) => {
+            if (job.subtitleEnabled === 0 || job.subtitleEnabled === false || job.subtitleEnabled === '0' || job.subtitleEnabled === 'false') {
+                return null;
+            }
+            if (!state.srtFile || !fs.existsSync(state.srtFile)) {
+                return null;
+            }
+
+            try {
+                const srtContent = fs.readFileSync(state.srtFile, 'utf8');
+                const blocks = srtContent.trim().split(/\n\s*\n/);
+                const subtitles = [];
+                for (const block of blocks) {
+                    const lines = block.split('\n');
+                    if (lines.length >= 3) {
+                        const timeLine = lines[1];
+                        const textLines = lines.slice(2).join('\n').trim();
+                        const timeParts = timeLine.split(' --> ');
+                        if (timeParts.length === 2) {
+                            const parseTime = (t) => {
+                                const [hms, ms] = t.split(',');
+                                const [h, m, s] = hms.split(':');
+                                return parseInt(h)*3600 + parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
+                            };
+                            const start = parseTime(timeParts[0]);
+                            const end = parseTime(timeParts[1]);
+                            if (textLines) {
+                                subtitles.push({ start, end, text: textLines });
+                            }
+                        }
+                    }
+                }
+
+                if (subtitles.length === 0) {
+                    return null;
+                }
+
+                let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
+                if (job.subtitlePosition && job.subtitlePosition !== 'null') {
+                    try {
+                        pos = typeof job.subtitlePosition === 'string' ? JSON.parse(job.subtitlePosition) : job.subtitlePosition;
+                    } catch(e) {}
+                }
+
+                const marginL = Math.round((pos.xPct / 100) * state.outputWidth);
+                const marginR = Math.round(state.outputWidth - ((pos.xPct + pos.widthPct) / 100) * state.outputWidth);
+                const marginV = Math.round((pos.yPct / 100) * state.outputHeight);
+
+                let fontsize;
+                const subSizeNum = Number(job.subtitleSize);
+                if (job.subtitleSize !== null && job.subtitleSize !== undefined && !isNaN(subSizeNum) && subSizeNum > 0) {
+                    const rawSize = Math.round((subSizeNum / 100) * state.outputHeight);
+                    const maxSize = Math.round(0.12 * state.outputHeight);
+                    fontsize = Math.max(24, Math.min(maxSize, rawSize));
+                } else {
+                    fontsize = Math.round(((pos.heightPct / 100) * state.outputHeight) * 0.6);
+                    if (fontsize < 24) fontsize = 24;
+                    if (fontsize > 80) fontsize = 80;
+                }
+
+                const outlineWidth = Math.max(3, Math.round(fontsize * 0.14));
+                const fontName = job.targetLanguage === 'th' ? "Noto Sans Thai" : "Padauk";
+
+                let primaryColor = "&H00FFFFFF"; // white (default)
+                if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
+                if (job.subtitleColor === "cyan") primaryColor = "&H00FFFF00";
+                if (job.subtitleColor === "lime") primaryColor = "&H0000FF00";
+                if (job.subtitleColor === "magenta") primaryColor = "&H00FF00FF";
+
+                const toAssTime = (sec) => {
+                    const h = Math.floor(sec / 3600);
+                    const m = Math.floor((sec % 3600) / 60);
+                    const s = Math.floor(sec % 60);
+                    const cs = Math.floor((sec % 1) * 100);
+                    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+                };
+
+                const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${state.outputWidth}\nPlayResY: ${state.outputHeight}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${outlineWidth},2,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+
+                const isTwoTone = job.subtitleStyle === 'twotone';
+
+                const assLines = subtitles.map(sub => {
+                    const startStr = toAssTime(sub.start);
+                    const endStr = toAssTime(sub.end);
+                    const cleaned = String(sub.text || '').replace(/[{}]/g, '');
+                    let assText;
+                    if (isTwoTone) {
+                        const len = cleaned.length;
+                        const mid = len / 2;
+                        let bestIdx = -1;
+                        let minDiff = Infinity;
+                        for (let i = 0; i < len; i++) {
+                            if (cleaned[i] === ' ') {
+                                const diff = Math.abs(i - mid);
+                                if (diff < minDiff) {
+                                    minDiff = diff;
+                                    bestIdx = i;
+                                }
+                            }
+                        }
+                        if (bestIdx === -1) {
+                            assText = `{\\c&H00FFFFFF&}${cleaned.replace(/\n/g, '\\N')}`;
+                        } else {
+                            const p1 = cleaned.slice(0, bestIdx).replace(/\n/g, '\\N');
+                            const p2 = cleaned.slice(bestIdx + 1).replace(/\n/g, '\\N');
+                            assText = `{\\c&H00FFFFFF&}${p1} {\\c&H0000FFFF&}${p2}`;
+                        }
+                    } else {
+                        assText = cleaned.replace(/\n/g, '\\N');
+                    }
+                    return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
+                });
+
+                const assPath = path.join(tmpDir, jobId + ".ass");
+                fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
+
+                return {
+                    assPath,
+                    subtitlesCount: subtitles.length
+                };
+            } catch (e) {
+                console.error("[SUBTITLE] Error generating ASS file:", e);
+                return null;
+            }
+        };
+
         const runSequentialOverlays = async () => {
             // 11.5 BLUR BOXES
             if (!hasCompletedStep(job.currentStep, STEPS.BLUR_BOXES)) {
@@ -1233,117 +1359,33 @@ export const processRecapPipeline = async (jobId) => {
 
             // 11.7 SUBTITLE BURN
             if (!hasCompletedStep(job.currentStep, STEPS.SUBTITLE_BURN)) {
-                if (state.srtFile && fs.existsSync(state.srtFile)) {
+                const subAssResult = buildSubtitleAss(job, state, tmpDir, jobId);
+                if (subAssResult) {
                     try {
-                        const srtContent = fs.readFileSync(state.srtFile, 'utf8');
-                        const blocks = srtContent.trim().split(/\n\s*\n/);
-                        let subtitles = [];
-                        for (const block of blocks) {
-                            const lines = block.split('\n');
-                            if (lines.length >= 3) {
-                                const timeLine = lines[1];
-                                const textLines = lines.slice(2).join('\n').trim();
-                                const timeParts = timeLine.split(' --> ');
-                                if (timeParts.length === 2) {
-                                    const parseTime = (t) => {
-                                        const [hms, ms] = t.split(',');
-                                        const [h, m, s] = hms.split(':');
-                                        return parseInt(h)*3600 + parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
-                                    };
-                                    const start = parseTime(timeParts[0]);
-                                    const end = parseTime(timeParts[1]);
-                                    if (textLines) {
-                                        subtitles.push({ start, end, text: textLines });
-                                    }
-                                }
-                            }
+                        console.log("[SUBTITLE] Burning " + subAssResult.subtitlesCount + " subtitles using libass...");
+                        const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
+                        const filterComplex = `[0:v]ass='${subAssResult.assPath.replace(/:/g, '\\:')}'[v]`;
+                        const subArgs = [
+                            '-i', finalOutPath,
+                            '-filter_complex', filterComplex,
+                            '-map', '[v]',
+                            '-map', '0:a?',
+                            '-c:a', 'copy',
+                            '-c:v', 'libx264',
+                            '-preset', 'fast',
+                            '-crf', '18',
+                            '-y', subTmpPath
+                        ];
+                        await runFFmpeg(subArgs, tmpDir);
+                        if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
+                            fs.unlinkSync(finalOutPath);
+                            safeMoveFile(subTmpPath, finalOutPath);
+                        } else {
+                            throw new Error("FFmpeg failed to produce output file");
                         }
-
-                        if (subtitles.length > 0) {
-                            console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
-                            const subTmpPath = path.join(tmpDir, jobId + "_subburn.mp4");
-                            
-                            let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
-                            if (job.subtitlePosition && job.subtitlePosition !== 'null') {
-                                try {
-                                    pos = typeof job.subtitlePosition === 'string' ? JSON.parse(job.subtitlePosition) : job.subtitlePosition;
-                                } catch(e) {}
-                            }
-                            
-                            const marginL = Math.round((pos.xPct / 100) * state.outputWidth);
-                            const marginR = Math.round(state.outputWidth - ((pos.xPct + pos.widthPct) / 100) * state.outputWidth);
-                            const marginV = Math.round((pos.yPct / 100) * state.outputHeight);
-                            
-                            let fontsize = Math.round(((pos.heightPct / 100) * state.outputHeight) * 0.6);
-                            if (fontsize < 24) fontsize = 24;
-                            if (fontsize > 80) fontsize = 80;
-
-                            let fontName = job.targetLanguage === 'th' ? "Noto Sans Thai" : "Padauk";
-
-                            let primaryColor = "&H00FFFFFF"; // white (default)
-                            if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
-                            if (job.subtitleColor === "cyan") primaryColor = "&H00FFFF00";
-                            if (job.subtitleColor === "lime") primaryColor = "&H0000FF00";
-                            if (job.subtitleColor === "magenta") primaryColor = "&H00FF00FF";
-
-                            console.log("[SUBTITLE] Burning " + subtitles.length + " subtitles using libass...");
-                            
-                            const toAssTime = (sec) => {
-                                const h = Math.floor(sec / 3600);
-                                const m = Math.floor((sec % 3600) / 60);
-                                const s = Math.floor(sec % 60);
-                                const cs = Math.floor((sec % 1) * 100);
-                                return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
-                            };
-                            
-                            const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${state.outputWidth}\nPlayResY: ${state.outputHeight}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-                            
-                            const assLines = subtitles.map(sub => {
-                                const startStr = toAssTime(sub.start);
-                                const endStr = toAssTime(sub.end);
-                                const assText = sub.text.replace(/\n/g, '\\N');
-                                return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
-                            });
-                            
-                            const assPath = path.join(tmpDir, jobId + ".ass");
-                            fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
-                            
-                            const cw = Math.max(2, Math.round((pos.widthPct / 100) * state.outputWidth));
-                            const ch = Math.max(2, Math.round((pos.heightPct / 100) * state.outputHeight));
-                            const cx = Math.max(0, marginL);
-                            const cy = Math.max(0, marginV);
-                            
-                            let filterComplex = `[0:v]ass='${assPath.replace(/:/g, '\\:')}'[v]`;
-                            
-                            const subArgs = [
-                                '-i', finalOutPath,
-                                '-filter_complex', filterComplex,
-                                '-map', '[v]',
-                                '-map', '0:a?',
-                                '-c:a', 'copy',
-                                '-c:v', 'libx264',
-                                '-preset', 'fast',
-                                '-crf', '18',
-                                '-y', subTmpPath
-                            ];
-                            
-                            try {
-                                await runFFmpeg(subArgs, tmpDir);
-                                
-                                if (fs.existsSync(subTmpPath) && fs.statSync(subTmpPath).size > 0) {
-                                    fs.unlinkSync(finalOutPath);
-                                    safeMoveFile(subTmpPath, finalOutPath);
-                                } else {
-                                    throw new Error("FFmpeg failed to produce output file");
-                                }
-                            } catch (e) {
-                                console.error("[SUBTITLE] Error burning subtitles:", e.message || e);
-                                state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
-                            }
-                        }
-                    } catch(e) {
-                        console.error("[SUBTITLE] Error burning subtitles setup:", e);
-                        state.warnings.push("⚠ Subtitles could not be burned in setup: " + e.message);
+                    } catch (e) {
+                        console.error("[SUBTITLE] Error burning subtitles:", e.message || e);
+                        state.warnings.push("⚠ Subtitles could not be burned in: " + (e.message || "FFmpeg error"));
                     }
                 }
                 advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
@@ -1462,85 +1504,12 @@ export const processRecapPipeline = async (jobId) => {
             }
 
             // 3. Subtitles
-            if (state.srtFile && fs.existsSync(state.srtFile)) {
-                try {
-                    const srtContent = fs.readFileSync(state.srtFile, 'utf8');
-                    const blocks = srtContent.trim().split(/\n\s*\n/);
-                    let subtitles = [];
-                    for (const block of blocks) {
-                        const lines = block.split('\n');
-                        if (lines.length >= 3) {
-                            const timeLine = lines[1];
-                            const textLines = lines.slice(2).join('\n').trim();
-                            const timeParts = timeLine.split(' --> ');
-                            if (timeParts.length === 2) {
-                                const parseTime = (t) => {
-                                    const [hms, ms] = t.split(',');
-                                    const [h, m, s] = hms.split(':');
-                                    return parseInt(h)*3600 + parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
-                                };
-                                const start = parseTime(timeParts[0]);
-                                const end = parseTime(timeParts[1]);
-                                if (textLines) {
-                                    subtitles.push({ start, end, text: textLines });
-                                }
-                            }
-                        }
-                    }
-
-                    if (subtitles.length > 0) {
-                        subCount = subtitles.length;
-
-                        let pos = { xPct: 10, yPct: 78, widthPct: 80, heightPct: 12 };
-                        if (job.subtitlePosition && job.subtitlePosition !== 'null') {
-                            try {
-                                pos = typeof job.subtitlePosition === 'string' ? JSON.parse(job.subtitlePosition) : job.subtitlePosition;
-                            } catch(e) {}
-                        }
-
-                        const marginL = Math.round((pos.xPct / 100) * state.outputWidth);
-                        const marginR = Math.round(state.outputWidth - ((pos.xPct + pos.widthPct) / 100) * state.outputWidth);
-                        const marginV = Math.round((pos.yPct / 100) * state.outputHeight);
-
-                        let fontsize = Math.round(((pos.heightPct / 100) * state.outputHeight) * 0.6);
-                        if (fontsize < 24) fontsize = 24;
-                        if (fontsize > 80) fontsize = 80;
-
-                        let fontName = job.targetLanguage === 'th' ? "Noto Sans Thai" : "Padauk";
-
-                        let primaryColor = "&H00FFFFFF"; // white (default)
-                        if (job.subtitleColor === "yellow") primaryColor = "&H0000FFFF";
-                        if (job.subtitleColor === "cyan") primaryColor = "&H00FFFF00";
-                        if (job.subtitleColor === "lime") primaryColor = "&H0000FF00";
-                        if (job.subtitleColor === "magenta") primaryColor = "&H00FF00FF";
-
-                        const toAssTime = (sec) => {
-                            const h = Math.floor(sec / 3600);
-                            const m = Math.floor((sec % 3600) / 60);
-                            const s = Math.floor(sec % 60);
-                            const cs = Math.floor((sec % 1) * 100);
-                            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
-                        };
-
-                        const assHeader = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${state.outputWidth}\nPlayResY: ${state.outputHeight}\nWrapStyle: 1\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,${fontName},${fontsize},${primaryColor},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,8,${marginL},${marginR},${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-
-                        const assLines = subtitles.map(sub => {
-                            const startStr = toAssTime(sub.start);
-                            const endStr = toAssTime(sub.end);
-                            const assText = sub.text.replace(/\n/g, '\\N');
-                            return `Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`;
-                        });
-
-                        const assPath = path.join(tmpDir, jobId + ".ass");
-                        fs.writeFileSync(assPath, '\uFEFF' + assHeader + assLines.join('\n') + '\n', 'utf8');
-
-                        const escapedAssPath = assPath.replace(/:/g, '\\:');
-                        filterParts.push(`${current}ass='${escapedAssPath}'[vsub]`);
-                        current = '[vsub]';
-                    }
-                } catch (e) {
-                    console.error("[OVERLAYS] Error preparing subtitles filter:", e);
-                }
+            const subAssResult = buildSubtitleAss(job, state, tmpDir, jobId);
+            if (subAssResult) {
+                subCount = subAssResult.subtitlesCount;
+                const escapedAssPath = subAssResult.assPath.replace(/:/g, '\\:');
+                filterParts.push(`${current}ass='${escapedAssPath}'[vsub]`);
+                current = '[vsub]';
             }
 
             if (filterParts.length === 0) {
