@@ -17,6 +17,45 @@ import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiT
 import { generateStoryContext } from '../ai/storyContext.js';
 import { resolveWatermarkFont } from '../services/fonts.js';
 
+function parseJsonArrayLenient(text) {
+    let clean = (text || '').trim();
+    if (clean.startsWith('```json')) clean = clean.replace(/^```json\s*/i, '');
+    if (clean.startsWith('```')) clean = clean.replace(/^```\s*/, '');
+    if (clean.endsWith('```')) clean = clean.replace(/\s*```$/, '');
+    clean = clean.trim();
+
+    try {
+        const parsed = JSON.parse(clean);
+        if (Array.isArray(parsed)) return parsed;
+    } catch (_) {}
+
+    const firstBracket = clean.indexOf('[');
+    if (firstBracket !== -1) {
+        const candidate = clean.slice(firstBracket);
+        let lastBrace = candidate.lastIndexOf('}');
+        while (lastBrace > 0) {
+            const attempt = candidate.slice(0, lastBrace + 1) + ']';
+            try {
+                const parsed = JSON.parse(attempt);
+                if (Array.isArray(parsed)) return parsed;
+            } catch (_) {}
+            lastBrace = candidate.lastIndexOf('}', lastBrace - 1);
+        }
+    }
+
+    const items = [];
+    const objRegex = /\{[^{}]*"index"\s*:\s*(\d+)[^{}]*"text"\s*:\s*"((?:[^"\\]|\\.)*)"[^{}]*\}/g;
+    let match;
+    while ((match = objRegex.exec(clean)) !== null) {
+        try {
+            const idx = parseInt(match[1], 10);
+            const txt = JSON.parse(`"${match[2]}"`);
+            items.push({ index: idx, text: txt });
+        } catch (_) {}
+    }
+    return items;
+}
+
 // Pipeline steps
 const STEPS = {
     UPLOAD: 'Upload',
@@ -192,6 +231,7 @@ export const processRecapPipeline = async (jobId) => {
 
                 if (job.narrationStyle === 'narrator' && storyContextEnabled && geminiKey) {
                     const storyContextCache = path.join(cacheDir, 'story_context.txt');
+                    const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
                     let storyContext = null;
 
                     if (fs.existsSync(storyContextCache)) {
@@ -203,16 +243,24 @@ export const processRecapPipeline = async (jobId) => {
                         }
                     } else {
                         updateJob(jobId, { status: 'Understanding Story' });
-                        storyContext = await generateStoryContext(job.videoPath, job.duration, cacheDir);
-                        if (storyContext && storyContext.trim()) {
-                            storyContext = storyContext.trim();
-                            try {
-                                fs.writeFileSync(storyContextCache, storyContext, 'utf8');
-                            } catch (e) {
-                                console.warn(`[Job ${jobId}] Failed to write story_context cache:`, e.message);
+                        const storyResult = await generateStoryContext(job.videoPath, job.duration, cacheDir, job.targetLanguage);
+                        if (storyResult) {
+                            if (storyResult.synopsis && storyResult.synopsis.trim()) {
+                                storyContext = storyResult.synopsis.trim();
+                                try {
+                                    fs.writeFileSync(storyContextCache, storyContext, 'utf8');
+                                } catch (e) {
+                                    console.warn(`[Job ${jobId}] Failed to write story_context cache:`, e.message);
+                                }
                             }
-                        } else {
-                            storyContext = null;
+                            if (storyResult.caption && storyResult.caption.trim()) {
+                                const storyCaption = storyResult.caption.trim();
+                                try {
+                                    fs.writeFileSync(storyCaptionCache, storyCaption, 'utf8');
+                                } catch (e) {
+                                    console.warn(`[Job ${jobId}] Failed to write story_caption cache:`, e.message);
+                                }
+                            }
                         }
                         updateJob(jobId, { status: job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese' });
                     }
@@ -223,7 +271,7 @@ export const processRecapPipeline = async (jobId) => {
                 }
 
                 const totalLines = translationInput.length;
-                const BATCH_SIZE = totalLines <= 60 ? totalLines : 40;
+                const BATCH_SIZE = totalLines <= 250 ? Math.max(1, totalLines) : Math.ceil(totalLines / Math.ceil(totalLines / 150));
                 const CONTEXT_LINES = 6;
                 const allTranslated = [];
 
@@ -244,54 +292,74 @@ export const processRecapPipeline = async (jobId) => {
                         batchSystemInstruction += `\n\n[CONTEXT FROM PREVIOUS BATCH - Maintain consistency of names, pronouns, genders, and tone. Do NOT re-translate or output these context lines; output ONLY the translation for the current batch items]:\n${contextSnippet}`;
                     }
 
-                    // Retry on transient API errors or validation errors
-                    let batchSuccess = false;
+                    const salvagedMap = new Map();
+                    let followUpCount = 0;
+                    const MAX_FOLLOW_UPS = 2;
                     let attempts = 0;
                     const maxAttempts = 3;
+                    let totalRequests = 0;
                     let lastError = null;
+                    let batchSuccess = false;
 
-                    while (attempts < maxAttempts) {
+                    while (attempts < maxAttempts && totalRequests < 5) {
+                        const missingItems = batchItems.filter(item => !salvagedMap.has(item.index));
+                        if (missingItems.length === 0) {
+                            batchSuccess = true;
+                            break;
+                        }
+
                         try {
-                            attempts++;
-                            console.log(`[TRANSLATION] Processing batch ${batchNumber}/${totalBatches} (lines ${start} to ${start + batchItems.length - 1}), attempt ${attempts}...`);
-                            
+                            if (salvagedMap.size > 0) {
+                                console.warn(`[TRANSLATION] batch ${batchNumber}: received ${salvagedMap.size} of ${batchItems.length} items, requesting the missing ${missingItems.length}`);
+                            } else {
+                                attempts++;
+                                console.log(`[TRANSLATION] Processing batch ${batchNumber}/${totalBatches} (lines ${start} to ${start + batchItems.length - 1}), attempt ${attempts}...`);
+                            }
+
+                            totalRequests++;
                             const response = await callLLM({
-                                contents: JSON.stringify(batchItems),
+                                contents: JSON.stringify(missingItems),
                                 systemInstruction: batchSystemInstruction,
                                 responseMimeType: 'application/json'
                             });
 
                             if (!response || !response.text) {
-                                throw new Error("Empty response from OpenRouter API");
+                                throw new Error("Empty response from translation API");
                             }
 
-                            const translatedItems = JSON.parse(response.text.trim());
-                            if (!Array.isArray(translatedItems)) {
-                                throw new Error("Response is not a JSON array");
-                            }
-
-                            const batchResult = [];
-                            for (let i = 0; i < batchItems.length; i++) {
-                                const targetIndex = batchItems[i].index;
-                                const matched = translatedItems.find(item => item.index === targetIndex);
-                                if (!matched) {
-                                    throw new Error(`Missing translation for index ${targetIndex}`);
+                            const parsedItems = parseJsonArrayLenient(response.text.trim());
+                            if (Array.isArray(parsedItems)) {
+                                for (const item of parsedItems) {
+                                    if (item && typeof item.index === 'number' && typeof item.text === 'string' && item.text.trim()) {
+                                        if (batchItems.some(b => b.index === item.index)) {
+                                            salvagedMap.set(item.index, item.text.trim());
+                                        }
+                                    }
                                 }
-                                if (!matched.text || typeof matched.text !== 'string' || !matched.text.trim()) {
-                                    throw new Error(`Empty or invalid translation text for index ${targetIndex}`);
-                                }
-                                batchResult.push({
-                                    ...state.originalTranscript[targetIndex],
-                                    text: matched.text.trim()
-                                });
                             }
 
-                            allTranslated.push(...batchResult);
-                            batchSuccess = true;
-                            break;
+                            const remainingMissing = batchItems.filter(item => !salvagedMap.has(item.index));
+                            if (remainingMissing.length === 0) {
+                                batchSuccess = true;
+                                break;
+                            }
+
+                            if (followUpCount < MAX_FOLLOW_UPS) {
+                                followUpCount++;
+                                continue;
+                            } else {
+                                lastError = new Error(`Missing translation for index ${remainingMissing[0].index}`);
+                                break;
+                            }
                         } catch (err) {
                             lastError = err;
-                            console.warn(`[TRANSLATION] OpenRouter translation/validation batch ${batchNumber}/${totalBatches} attempt ${attempts} failed:`, err);
+                            if (err && err.isDailyQuota) {
+                                throw err;
+                            }
+                            if (salvagedMap.size > 0) {
+                                attempts++;
+                            }
+                            console.warn(`[TRANSLATION] Translation/validation batch ${batchNumber}/${totalBatches} attempt ${attempts} failed:`, err.message || err);
                             if (attempts < maxAttempts) {
                                 const errStr = err ? (err.message ? err.message.toLowerCase() : String(err).toLowerCase()) : '';
                                 if (errStr.includes('503') || errStr.includes('unavailable')) {
@@ -304,8 +372,14 @@ export const processRecapPipeline = async (jobId) => {
                     }
 
                     if (!batchSuccess) {
-                        throw new Error(`OpenRouter translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
+                        throw new Error(`Translation failed after ${maxAttempts} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
                     }
+
+                    const batchResult = batchItems.map(item => ({
+                        ...state.originalTranscript[item.index],
+                        text: salvagedMap.get(item.index)
+                    }));
+                    allTranslated.push(...batchResult);
                 }
 
                 state.translatedTranscript = allTranslated;
@@ -1602,22 +1676,40 @@ export const processRecapPipeline = async (jobId) => {
         
         let generatedCaption = null;
         try {
-            if (state.translatedTranscript && state.translatedTranscript.length > 0) {
-                if (hasLLMKey()) {
-                    const captionPrompt = job.targetLanguage === 'th'
-                        ? "Write a catchy, high-engagement headline/caption in Thai suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural spoken Thai."
-                        : "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese.";
-                    const response = await callLLM({
-                        contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
-                        systemInstruction: captionPrompt
-                    });
-                    
-                    if (response && response.text) {
-                        generatedCaption = response.text.trim();
-                        db.prepare('UPDATE jobs SET coverText = ? WHERE id = ?').run(generatedCaption, jobId);
-                        console.log(`[CAPTION-GENERATION] Generated caption: ${generatedCaption}`);
+            const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
+            if (fs.existsSync(storyCaptionCache)) {
+                try {
+                    const cachedCap = fs.readFileSync(storyCaptionCache, 'utf8').trim();
+                    if (cachedCap) {
+                        generatedCaption = cachedCap;
+                        console.log(`[CAPTION-GENERATION] Using cached story caption: ${generatedCaption}`);
+                    }
+                } catch (e) {
+                    console.warn(`[Job ${jobId}] Failed to read story_caption cache:`, e.message);
+                }
+            }
+
+            if (!generatedCaption) {
+                if (state.translatedTranscript && state.translatedTranscript.length > 0) {
+                    if (hasLLMKey()) {
+                        const captionPrompt = job.targetLanguage === 'th'
+                            ? "Write a catchy, high-engagement headline/caption in Thai suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural spoken Thai."
+                            : "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese.";
+                        const response = await callLLM({
+                            contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
+                            systemInstruction: captionPrompt
+                        });
+                        
+                        if (response && response.text) {
+                            generatedCaption = response.text.trim();
+                        }
                     }
                 }
+            }
+
+            if (generatedCaption) {
+                db.prepare('UPDATE jobs SET coverText = ? WHERE id = ?').run(generatedCaption, jobId);
+                console.log(`[CAPTION-GENERATION] Final caption: ${generatedCaption}`);
             }
         } catch (captionErr) {
             console.error(`[CAPTION-GENERATION] Failed to generate cover text:`, captionErr);

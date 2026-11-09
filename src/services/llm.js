@@ -72,6 +72,8 @@ export async function callGemini(options, ...extraArgs) {
 
     for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
         try {
+            console.log(`[LLM] Gemini request model=${targetModel} attempt=${attempt + 1}`);
+
             const timeoutPromise = new Promise((_, reject) => {
                 const timer = setTimeout(() => {
                     reject(new Error("Gemini API call timed out after 120s"));
@@ -90,6 +92,18 @@ export async function callGemini(options, ...extraArgs) {
 
             break;
         } catch (err) {
+            const rawErr = `${err.status || ''} ${err.statusCode || ''} ${err.message || ''} ${JSON.stringify(err.error || '')} ${String(err)}`;
+            const rawLower = rawErr.toLowerCase();
+            const hasResourceExhausted = rawErr.includes('RESOURCE_EXHAUSTED') || rawLower.includes('resource_exhausted') || err.status === 429 || rawLower.includes('429');
+            const hasDaily = rawErr.includes('PerDay') || rawLower.includes('per day') || rawErr.includes('GenerateRequestsPerDay');
+
+            if (hasResourceExhausted && hasDaily) {
+                const dailyErr = new Error("Gemini daily free quota is used up (requests per day). It resets at midnight Pacific time. Use another model, enable billing, or try again later.");
+                dailyErr.isDailyQuota = true;
+                dailyErr.status = 429;
+                throw dailyErr;
+            }
+
             const status = err.status || err.statusCode || (err.response && err.response.status);
             const errMsg = err.message ? err.message.toLowerCase() : String(err).toLowerCase();
             const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('resource_exhausted') || errMsg.includes('rate limit');
