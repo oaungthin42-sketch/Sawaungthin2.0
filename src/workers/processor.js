@@ -111,6 +111,7 @@ export const processRecapPipeline = async (jobId) => {
     const saveState = () => fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
     const advanceStep = (step, progress, statusText) => {
+        console.log(`[STEP] ${step} | ${statusText}`);
         state.currentStep = step;
         saveState();
         updateJob(jobId, { currentStep: step, progress, status: statusText });
@@ -227,9 +228,7 @@ export const processRecapPipeline = async (jobId) => {
                     : (job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
 
                 const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
-                const storyContextEnabled = getSetting('STORY_CONTEXT_ENABLED') !== 'false';
-
-                if (job.narrationStyle === 'narrator' && storyContextEnabled && geminiKey) {
+                if (job.narrationStyle === 'narrator' && geminiKey) {
                     const storyContextCache = path.join(cacheDir, 'story_context.txt');
                     const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
                     let storyContext = null;

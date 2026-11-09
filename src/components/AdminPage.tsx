@@ -879,57 +879,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBack, initialTab }) => {
                                 </div>
 
                                 <div className="space-y-4 pb-8 border-b border-gray-800">
-                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Gemini Model</h3>
-                                    <input
-                                        type="text"
-                                        value={settingsValues['GEMINI_MODEL'] || ''}
-                                        onChange={(e) => setSettingsValues({ ...settingsValues, GEMINI_MODEL: e.target.value })}
-                                        placeholder="gemini-3.6-flash"
-                                        className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
-                                    />
-                                    <button
-                                        onClick={async () => {
-                                            try {
-                                                await axios.post('/api/settings', { key: 'GEMINI_MODEL', value: settingsValues['GEMINI_MODEL'] || '' });
-                                                alert('Gemini Model Save လုပ်ပြီးပါပြီ');
-                                                fetchData();
-                                            } catch (err: any) {
-                                                alert(err.response?.data?.error || 'Save မလုပ်နိုင်ပါ');
-                                            }
-                                        }}
-                                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
-                                    >
-                                        Gemini Model Save
-                                    </button>
-                                </div>
-
-                                <div className="space-y-4 pb-8 border-b border-gray-800">
-                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Story understanding (Narrator mode)</h3>
-                                    <select
-                                        value={settingsValues['STORY_CONTEXT_ENABLED'] !== 'false' ? 'true' : 'false'}
-                                        onChange={(e) => setSettingsValues({ ...settingsValues, STORY_CONTEXT_ENABLED: e.target.value })}
-                                        className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl text-white text-sm focus:border-indigo-500 outline-none"
-                                    >
-                                        <option value="true">On</option>
-                                        <option value="false">Off</option>
-                                    </select>
-                                    <button
-                                        onClick={async () => {
-                                            try {
-                                                await axios.post('/api/settings', { key: 'STORY_CONTEXT_ENABLED', value: settingsValues['STORY_CONTEXT_ENABLED'] !== 'false' ? 'true' : 'false' });
-                                                alert('Story understanding setting saved');
-                                                fetchData();
-                                            } catch (err: any) {
-                                                alert(err.response?.data?.error || 'Save မလုပ်နိုင်ပါ');
-                                            }
-                                        }}
-                                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all"
-                                    >
-                                        Story understanding Save
-                                    </button>
-                                </div>
-
-                                <div className="space-y-4 pb-8 border-b border-gray-800">
                                     <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide">OpenRouter API Key</h3>
                                     <input
                                         type="password"
