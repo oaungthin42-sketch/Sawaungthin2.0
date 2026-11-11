@@ -1239,11 +1239,19 @@ export const processRecapPipeline = async (jobId) => {
             
                         // Generate ducking envelope and diagnostics
             let authTimeline = [];
-            const timelinePath = state.ttsAudioPath + '.timeline.json';
-            if (fs.existsSync(timelinePath)) {
-                authTimeline = JSON.parse(fs.readFileSync(timelinePath, 'utf8'));
+            if (job.narrationStyle === 'recap') {
+                authTimeline = (state.narrationTranscript || []).map(s => ({
+                    final_audio_start: s.timestamp[0],
+                    final_audio_end: s.timestamp[1],
+                    text: s.text
+                }));
             } else {
-                throw new Error("Pipeline Error: authoritativeTimeline not found for ducking.");
+                const timelinePath = state.ttsAudioPath + '.timeline.json';
+                if (fs.existsSync(timelinePath)) {
+                    authTimeline = JSON.parse(fs.readFileSync(timelinePath, 'utf8'));
+                } else {
+                    throw new Error("Pipeline Error: authoritativeTimeline not found for ducking.");
+                }
             }
 
             let totalNarrationActive = 0;

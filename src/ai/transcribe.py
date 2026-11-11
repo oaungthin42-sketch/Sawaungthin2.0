@@ -3,6 +3,8 @@ import json
 import logging
 import os
 
+WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "0")) or min(8, os.cpu_count() or 2)
+
 # Send logging to stderr to prevent stdout corruption
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 os.environ["HF_HOME"] = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".cache", "huggingface"))
@@ -23,15 +25,15 @@ def main():
     # Load model with fallback compute_types
     model = None
     try:
-        model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=2, num_workers=1)
+        model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=WHISPER_THREADS, num_workers=1)
     except Exception as e:
         sys.stderr.write(f"Warning: Failed to load model with compute_type='int8': {e}\n")
         try:
-            model = WhisperModel("small", device="cpu", compute_type="float32", cpu_threads=2, num_workers=1)
+            model = WhisperModel("small", device="cpu", compute_type="float32", cpu_threads=WHISPER_THREADS, num_workers=1)
         except Exception as e2:
             sys.stderr.write(f"Warning: Failed to load model with compute_type='float32': {e2}\n")
             try:
-                model = WhisperModel("small", device="cpu", cpu_threads=2, num_workers=1)
+                model = WhisperModel("small", device="cpu", cpu_threads=WHISPER_THREADS, num_workers=1)
             except Exception as e3:
                 sys.stderr.write(f"Error: Failed to load model with auto compute_type: {e3}\n")
                 sys.exit(1)
