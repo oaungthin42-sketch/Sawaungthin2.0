@@ -487,7 +487,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const speed = parseFloat(body.speed) || 1.0;
     const flipped = body.flipped === 'true' ? 1 : 0;
     const keepOriginalGaps = body.keepOriginalGaps === 'true' ? 1 : 0;
-    const narrationStyle = body.narrationStyle === 'narrator' ? 'narrator' : 'translate';
+    const narrationStyle = body.narrationStyle === 'recap' ? 'recap' : (body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
     const targetLanguage = body.targetLanguage === 'th' ? 'th' : 'my';
     let musicPath = null;
     const musicId = body.musicId;
@@ -906,7 +906,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
      const keepOriginalGaps = req.body.keepOriginalGaps === 'true' ? 1 : 0;
-     const narrationStyle = req.body.narrationStyle === 'narrator' ? 'narrator' : 'translate';
+     const narrationStyle = req.body.narrationStyle === 'recap' ? 'recap' : (req.body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
      const targetLanguage = req.body.targetLanguage === 'th' ? 'th' : 'my';
      let musicPath = null;
      const musicId = req.body.musicId;

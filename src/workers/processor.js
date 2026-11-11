@@ -15,6 +15,7 @@ import db from '../services/db.js';
 import { callLLM, hasLLMKey } from '../services/llm.js';
 import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
 import { generateStoryContext } from '../ai/storyContext.js';
+import { generateRecapLines } from '../ai/recapScenes.js';
 import { resolveWatermarkFont } from '../services/fonts.js';
 
 function parseJsonArrayLenient(text) {
@@ -209,6 +210,89 @@ export const processRecapPipeline = async (jobId) => {
         const translatedTranscriptCache = path.join(cacheDir, 'translated_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
             advanceStep(STEPS.TRANSLATE_BURMESE, 30, job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese');
+
+            const isNarratorOrRecap = job.narrationStyle === 'narrator' || job.narrationStyle === 'recap';
+            const isRecap = job.narrationStyle === 'recap';
+            const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+
+            let storyContext = null;
+            if (isNarratorOrRecap && geminiKey) {
+                const storyContextCache = path.join(cacheDir, 'story_context.txt');
+                const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
+
+                if (fs.existsSync(storyContextCache)) {
+                    try {
+                        storyContext = fs.readFileSync(storyContextCache, 'utf8').trim();
+                        console.log(`[Job ${jobId}] Loaded story context from cache`);
+                    } catch (e) {
+                        console.warn(`[Job ${jobId}] Failed to read story_context cache:`, e.message);
+                    }
+                } else {
+                    updateJob(jobId, { status: 'Understanding Story' });
+                    const storyResult = await generateStoryContext(job.videoPath, job.duration, cacheDir, job.targetLanguage);
+                    if (storyResult) {
+                        if (storyResult.synopsis && storyResult.synopsis.trim()) {
+                            storyContext = storyResult.synopsis.trim();
+                            try {
+                                fs.writeFileSync(storyContextCache, storyContext, 'utf8');
+                            } catch (e) {
+                                console.warn(`[Job ${jobId}] Failed to write story_context cache:`, e.message);
+                            }
+                        }
+                        if (storyResult.caption && storyResult.caption.trim()) {
+                            const storyCaption = storyResult.caption.trim();
+                            try {
+                                fs.writeFileSync(storyCaptionCache, storyCaption, 'utf8');
+                            } catch (e) {
+                                console.warn(`[Job ${jobId}] Failed to write story_caption cache:`, e.message);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isRecap) {
+                const recapTranscriptCache = path.join(cacheDir, 'recap_transcript.json');
+                let recapLoaded = false;
+                if (fs.existsSync(recapTranscriptCache)) {
+                    try {
+                        const cached = JSON.parse(fs.readFileSync(recapTranscriptCache, 'utf8'));
+                        if (Array.isArray(cached) && cached.length > 0) {
+                            state.originalTranscript = cached;
+                            saveState();
+                            recapLoaded = true;
+                            console.log(`[Job ${jobId}] Loaded recap transcript from cache (${cached.length} lines)`);
+                        }
+                    } catch (e) {
+                        console.warn(`[Job ${jobId}] Failed to read recap_transcript cache:`, e.message);
+                    }
+                }
+
+                if (!recapLoaded) {
+                    updateJob(jobId, { status: 'Generating Recap Script' });
+                    const recapLines = await generateRecapLines(
+                        job.videoPath,
+                        job.duration,
+                        cacheDir,
+                        storyContext,
+                        job.targetLanguage,
+                        state.originalTranscript || [],
+                        (statusMsg) => updateJob(jobId, { status: statusMsg })
+                    );
+                    if (Array.isArray(recapLines) && recapLines.length > 0) {
+                        state.originalTranscript = recapLines;
+                        try {
+                            fs.writeFileSync(recapTranscriptCache, JSON.stringify(recapLines, null, 2));
+                        } catch (e) {
+                            console.warn(`[Job ${jobId}] Failed to write recap_transcript cache:`, e.message);
+                        }
+                        saveState();
+                        console.log(`[Job ${jobId}] Generated ${recapLines.length} recap lines`);
+                    }
+                }
+            }
+
+            updateJob(jobId, { status: job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese' });
             
             if (!state.originalTranscript || state.originalTranscript.length === 0) {
                 state.translatedTranscript = [];
@@ -224,49 +308,11 @@ export const processRecapPipeline = async (jobId) => {
                 }));
 
                 let systemInstruction = job.targetLanguage === 'th'
-                    ? (job.narrationStyle === 'narrator' ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
-                    : (job.narrationStyle === 'narrator' ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
+                    ? (isNarratorOrRecap ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
+                    : (isNarratorOrRecap ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
 
-                const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
-                if (job.narrationStyle === 'narrator' && geminiKey) {
-                    const storyContextCache = path.join(cacheDir, 'story_context.txt');
-                    const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
-                    let storyContext = null;
-
-                    if (fs.existsSync(storyContextCache)) {
-                        try {
-                            storyContext = fs.readFileSync(storyContextCache, 'utf8').trim();
-                            console.log(`[Job ${jobId}] Loaded story context from cache`);
-                        } catch (e) {
-                            console.warn(`[Job ${jobId}] Failed to read story_context cache:`, e.message);
-                        }
-                    } else {
-                        updateJob(jobId, { status: 'Understanding Story' });
-                        const storyResult = await generateStoryContext(job.videoPath, job.duration, cacheDir, job.targetLanguage);
-                        if (storyResult) {
-                            if (storyResult.synopsis && storyResult.synopsis.trim()) {
-                                storyContext = storyResult.synopsis.trim();
-                                try {
-                                    fs.writeFileSync(storyContextCache, storyContext, 'utf8');
-                                } catch (e) {
-                                    console.warn(`[Job ${jobId}] Failed to write story_context cache:`, e.message);
-                                }
-                            }
-                            if (storyResult.caption && storyResult.caption.trim()) {
-                                const storyCaption = storyResult.caption.trim();
-                                try {
-                                    fs.writeFileSync(storyCaptionCache, storyCaption, 'utf8');
-                                } catch (e) {
-                                    console.warn(`[Job ${jobId}] Failed to write story_caption cache:`, e.message);
-                                }
-                            }
-                        }
-                        updateJob(jobId, { status: job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese' });
-                    }
-
-                    if (storyContext) {
-                        systemInstruction += "\n\n[STORY CONTEXT — background understanding of the whole video. Use it ONLY to correctly resolve who is who, relationships, genders, pronouns and tone, and to understand ambiguous lines. Do NOT change the translation style, structure, length or any rule above. Do NOT add events or information that are not in the given dialogue lines. Translate exactly the given items as before.]\n" + storyContext;
-                    }
+                if (storyContext) {
+                    systemInstruction += "\n\n[STORY CONTEXT — background understanding of the whole video. Use it ONLY to correctly resolve who is who, relationships, genders, pronouns and tone, and to understand ambiguous lines. Do NOT change the translation style, structure, length or any rule above. Do NOT add events or information that are not in the given dialogue lines. Translate exactly the given items as before.]\n" + storyContext;
                 }
 
                 const totalLines = translationInput.length;

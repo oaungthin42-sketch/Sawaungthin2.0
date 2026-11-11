@@ -176,6 +176,8 @@ function App() {
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [keepOriginalGaps, setKeepOriginalGaps] = useState<boolean>(false);
   const [narratorMode, setNarratorMode] = useState<boolean>(false);
+  const [fullRecapMode, setFullRecapMode] = useState<boolean>(false);
+  const prevNarratorModeRef = useRef<boolean>(false);
   const [targetLanguage, setTargetLanguage] = useState<'my' | 'th'>(() => {
     const saved = localStorage.getItem('sc_target_language');
     return saved === 'th' ? 'th' : 'my';
@@ -858,7 +860,7 @@ function App() {
         formData.append('speed', outputSpeed.toString());
         formData.append('flipped', isFlipped.toString());
         formData.append('keepOriginalGaps', keepOriginalGaps.toString());
-        formData.append('narrationStyle', narratorMode ? 'narrator' : 'translate');
+        formData.append('narrationStyle', fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'));
         formData.append('targetLanguage', targetLanguage);
 
         if (musicEnabled && musicId) {
@@ -890,7 +892,7 @@ function App() {
           speed: outputSpeed.toString(),
           flipped: isFlipped.toString(),
           keepOriginalGaps: keepOriginalGaps.toString(),
-          narrationStyle: narratorMode ? 'narrator' : 'translate',
+          narrationStyle: fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'),
           targetLanguage: targetLanguage,
           ...(musicEnabled && musicId ? {
             musicId: musicId,
@@ -1006,6 +1008,9 @@ function App() {
     setSubtitleSize(6);
     setSubtitleStyle('twotone');
     setSubtitleColor('white');
+    setFullRecapMode(false);
+    setNarratorMode(false);
+    prevNarratorModeRef.current = false;
     setCurrentStep(1);
   };
 
@@ -1507,15 +1512,38 @@ function App() {
                                           {keepOriginalGaps ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
-                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title="မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်">
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title={fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"}>
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Narrator မုဒ်</span>
                                       <button 
                                           type="button"
+                                          disabled={fullRecapMode}
                                           onClick={() => setNarratorMode(!narratorMode)} 
-                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${narratorMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                                          title="မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${
+                                              (fullRecapMode || narratorMode) ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                                          } ${fullRecapMode ? 'opacity-80 cursor-not-allowed' : ''}`}
+                                          title={fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"}
                                       >
-                                          {narratorMode ? 'ON' : 'OFF'}
+                                          {(fullRecapMode || narratorMode) ? 'ON' : 'OFF'}
+                                      </button>
+                                  </div>
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title="ဗီဒီယိုတစ်ခုလုံးကို တိတ်ဆိတ်/လှုပ်ရှားမှုအခန်းများပါမကျန် ဇာတ်လမ်းပြောပြသူ (movie-recap) အဖြစ် အပြည့်အစုံ ရှင်းပြပြောမည်">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Full Recap</span>
+                                      <button 
+                                          type="button"
+                                          onClick={() => {
+                                              const next = !fullRecapMode;
+                                              if (next) {
+                                                  prevNarratorModeRef.current = narratorMode;
+                                                  setNarratorMode(true);
+                                              } else {
+                                                  setNarratorMode(prevNarratorModeRef.current);
+                                              }
+                                              setFullRecapMode(next);
+                                          }}
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${fullRecapMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                          title="ဗီဒီယိုတစ်ခုလုံးကို တိတ်ဆိတ်/လှုပ်ရှားမှုအခန်းများပါမကျန် ဇာတ်လမ်းပြောပြသူ (movie-recap) အဖြစ် အပြည့်အစုံ ရှင်းပြပြောမည်"
+                                      >
+                                          {fullRecapMode ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
                                   <div className="flex items-center gap-2 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
