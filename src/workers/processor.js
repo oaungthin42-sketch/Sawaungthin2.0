@@ -57,6 +57,28 @@ function parseJsonArrayLenient(text) {
     return items;
 }
 
+function createSilenceWav(filePath, durationSec, sampleRate, channels) {
+    const numSamples = Math.max(1, Math.round(durationSec * sampleRate));
+    const bytesPerSample = 2; // 16-bit PCM
+    const dataSize = numSamples * channels * bytesPerSample;
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + dataSize, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); // PCM
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
+    header.writeUInt16LE(channels * bytesPerSample, 32);
+    header.writeUInt16LE(16, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(dataSize, 40);
+    const silenceData = Buffer.alloc(dataSize, 0);
+    fs.writeFileSync(filePath, Buffer.concat([header, silenceData]));
+}
+
 // Pipeline steps
 const STEPS = {
     UPLOAD: 'Upload',
@@ -495,91 +517,366 @@ export const processRecapPipeline = async (jobId) => {
                 throw new Error("Authoritative timeline JSON not found.");
             }
             
-            const timeline = [];
-            let current_time = 0;
-            
-            const createTimelineSegment = (start, end, scene_start, scene_end, text) => {
-                if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(scene_start) || !Number.isFinite(scene_end)) {
-                    throw new Error(`Pipeline Error: Non-finite timestamps passed to createTimelineSegment. start=${start}, end=${end}, scene_start=${scene_start}, scene_end=${scene_end}`);
+            if (job.narrationStyle === 'recap') {
+                const totalVidDur = state.originalVideoDuration;
+                const mergedGroups = [];
+                let currentGroup = null;
+
+                for (let i = 0; i < authTimeline.length; i++) {
+                    const chunk = authTimeline[i];
+                    if (!chunk) continue;
+
+                    if (!currentGroup) {
+                        currentGroup = {
+                            text: chunk.text,
+                            orig_start: chunk.orig_start,
+                            orig_end: chunk.orig_end,
+                            final_audio_start: chunk.final_audio_start,
+                            final_audio_end: chunk.final_audio_end,
+                            chunks: [chunk]
+                        };
+                    } else {
+                        const gap = chunk.orig_start - currentGroup.orig_end;
+                        const proposedDuration = chunk.orig_end - currentGroup.orig_start;
+                        
+                        if (gap < 0.75 && proposedDuration <= 12) {
+                            currentGroup.text += " " + chunk.text;
+                            currentGroup.orig_end = chunk.orig_end;
+                            currentGroup.final_audio_end = chunk.final_audio_end;
+                            currentGroup.chunks.push(chunk);
+                        } else {
+                            mergedGroups.push(currentGroup);
+                            currentGroup = {
+                                text: chunk.text,
+                                orig_start: chunk.orig_start,
+                                orig_end: chunk.orig_end,
+                                final_audio_start: chunk.final_audio_start,
+                                final_audio_end: chunk.final_audio_end,
+                                chunks: [chunk]
+                            };
+                        }
+                    }
                 }
-                let target_dur = end - start;
-                if (target_dur <= 0.001) return;
-                
-                if (scene_end > state.originalVideoDuration) {
-                    scene_end = state.originalVideoDuration;
-                    if (scene_start >= scene_end) {
-                        scene_start = Math.max(0, scene_end - 0.1);
+                if (currentGroup) {
+                    mergedGroups.push(currentGroup);
+                }
+
+                // Ensure mergedGroups are contiguous over the whole video
+                if (mergedGroups.length > 0) {
+                    mergedGroups[0].orig_start = 0;
+                    for (let i = 0; i < mergedGroups.length - 1; i++) {
+                        mergedGroups[i].orig_end = mergedGroups[i + 1].orig_start;
+                    }
+                    mergedGroups[mergedGroups.length - 1].orig_end = totalVidDur;
+                }
+
+                // Build timeline directly from contiguous scene groups so OUTPUT timeline equals ORIGINAL timeline:
+                // for each group: start_time = scene_start, end_time = scene_end, target_dur = scene_end - scene_start, speed = 1.0 exactly
+                const timeline = [];
+                for (let i = 0; i < mergedGroups.length; i++) {
+                    const group = mergedGroups[i];
+                    const scene_start = group.orig_start;
+                    const scene_end = group.orig_end;
+                    const target_dur = scene_end - scene_start;
+                    if (target_dur <= 0.001) continue;
+
+                    let sIdx = 0;
+                    for (let s = 0; s < (state.scenes || []).length; s++) {
+                        if (scene_start >= state.scenes[s] - 0.1) sIdx = s;
+                        else break;
+                    }
+
+                    timeline.push({
+                        segment_index: timeline.length,
+                        start_time: scene_start,
+                        end_time: scene_end,
+                        target_dur: target_dur,
+                        scene_start: scene_start,
+                        scene_end: scene_end,
+                        speed: 1.0,
+                        narration_text: group.text,
+                        matched_scene_index: sIdx
+                    });
+                }
+
+                if (timeline.length === 0) {
+                    timeline.push({
+                        segment_index: 0,
+                        start_time: 0,
+                        end_time: totalVidDur,
+                        target_dur: totalVidDur,
+                        scene_start: 0,
+                        scene_end: totalVidDur,
+                        speed: 1.0,
+                        narration_text: "[Silence]",
+                        matched_scene_index: 0
+                    });
+                } else {
+                    const last = timeline[timeline.length - 1];
+                    if (last.end_time < totalVidDur - 0.05) {
+                        timeline.push({
+                            segment_index: timeline.length,
+                            start_time: last.end_time,
+                            end_time: totalVidDur,
+                            target_dur: totalVidDur - last.end_time,
+                            scene_start: last.end_time,
+                            scene_end: totalVidDur,
+                            speed: 1.0,
+                            narration_text: "[Silence]",
+                            matched_scene_index: 0
+                        });
+                    } else {
+                        last.end_time = totalVidDur;
+                        last.target_dur = last.end_time - last.start_time;
+                        last.scene_end = totalVidDur;
+                    }
+                }
+
+                state.timeline = timeline;
+
+                // Rebuild state.ttsAudioPath as one track whose length equals originalVideoDuration exactly
+                const recapAudioCache = path.join(cacheDir, 'narration_recap.wav');
+                const recapTranscriptCache = path.join(cacheDir, 'narration_recap_subtitles.json');
+                let audioReady = false;
+
+                if (fs.existsSync(recapAudioCache) && fs.existsSync(recapTranscriptCache) && fs.statSync(recapAudioCache).size > 0) {
+                    try {
+                        const dur = await getDuration(recapAudioCache);
+                        if (Math.abs(dur - totalVidDur) < 0.2) {
+                            state.ttsAudioPath = recapAudioCache;
+                            state.audioDuration = totalVidDur;
+                            state.narrationTranscript = JSON.parse(fs.readFileSync(recapTranscriptCache, 'utf8'));
+                            audioReady = true;
+                            console.log(`[RECAP-AUDIO] Using cached rebuilt narration audio (${dur.toFixed(2)}s)`);
+                        }
+                    } catch (e) {
+                        console.warn('[RECAP-AUDIO] Cache read failed, will rebuild:', e.message);
+                    }
+                }
+
+                if (!audioReady) {
+                    const currentTTS = state.ttsAudioPath;
+                    const audioDetails = await getAudioDetails(currentTTS);
+                    const sampleRate = audioDetails.sampleRate || 24000;
+                    const channels = audioDetails.channels || 1;
+
+                    const slicesDir = path.join(cacheDir, 'recap_slices');
+                    if (!fs.existsSync(slicesDir)) {
+                        fs.mkdirSync(slicesDir, { recursive: true });
+                    }
+
+                    const concatList = [];
+                    const placedSubtitles = [];
+                    let lastNarrationEnd = 0;
+
+                    for (let gIdx = 0; gIdx < mergedGroups.length; gIdx++) {
+                        const group = mergedGroups[gIdx];
+                        const sceneStart = group.orig_start;
+                        const sceneEnd = group.orig_end;
+                        const slot = Math.max(0.1, sceneEnd - sceneStart);
+                        const sliceStart = group.final_audio_start;
+                        const sliceEnd = group.final_audio_end;
+                        const sliceDur = Math.max(0.05, sliceEnd - sliceStart);
+
+                        // If sliceDur > slot, speed the slice up with atempo = min(sliceDur / slot, 1.35)
+                        let atempo = 1.0;
+                        if (sliceDur > slot) {
+                            atempo = Math.min(sliceDur / slot, 1.35);
+                        }
+
+                        // Narration for a group starts at max(scene_start, end of the previous narration)
+                        const placedStart = Math.max(sceneStart, lastNarrationEnd);
+
+                        // Cut slice from current TTS file and speed up if needed
+                        const sliceWavPath = path.join(slicesDir, `slice_${gIdx}.wav`);
+                        const filter = atempo !== 1.0 ? `atempo=${atempo.toFixed(4)}` : 'anull';
+
+                        await runFFmpeg([
+                            '-threads', '2',
+                            '-y',
+                            '-ss', sliceStart.toFixed(3),
+                            '-to', sliceEnd.toFixed(3),
+                            '-i', currentTTS,
+                            '-af', filter,
+                            '-ar', String(sampleRate),
+                            '-ac', String(channels),
+                            '-c:a', 'pcm_s16le',
+                            sliceWavPath
+                        ], slicesDir);
+
+                        let actualSliceDur = sliceDur / atempo;
+                        try {
+                            const probeDur = parseFloat(await getDuration(sliceWavPath));
+                            if (Number.isFinite(probeDur) && probeDur > 0) {
+                                actualSliceDur = probeDur;
+                            }
+                        } catch (_) {}
+
+                        const placedEnd = placedStart + actualSliceDur;
+
+                        // Fill gap before this narration with silence if needed
+                        const silenceBefore = placedStart - lastNarrationEnd;
+                        if (silenceBefore > 0.01) {
+                            const silWav = path.join(slicesDir, `silence_before_${gIdx}.wav`);
+                            createSilenceWav(silWav, silenceBefore, sampleRate, channels);
+                            concatList.push(`file '${silWav}'`);
+                        }
+
+                        concatList.push(`file '${sliceWavPath}'`);
+                        lastNarrationEnd = placedEnd;
+
+                        // Build state.narrationTranscript (subtitles) from REAL placed start/end
+                        if (group.chunks && group.chunks.length > 0) {
+                            for (const chunk of group.chunks) {
+                                if (!chunk.text || !chunk.text.trim()) continue;
+                                const chunkRelStart = (chunk.final_audio_start - group.final_audio_start) / atempo;
+                                const chunkRelEnd = (chunk.final_audio_end - group.final_audio_start) / atempo;
+                                const cStart = Math.max(0, placedStart + chunkRelStart);
+                                const cEnd = Math.max(cStart + 0.5, placedStart + chunkRelEnd);
+                                placedSubtitles.push({
+                                    timestamp: [parseFloat(cStart.toFixed(2)), parseFloat(cEnd.toFixed(2))],
+                                    text: chunk.text.trim()
+                                });
+                            }
+                        } else if (group.text && group.text.trim()) {
+                            placedSubtitles.push({
+                                timestamp: [parseFloat(placedStart.toFixed(2)), parseFloat(placedEnd.toFixed(2))],
+                                text: group.text.trim()
+                            });
+                        }
+                    }
+
+                    // Fill remaining time with silence up to original video duration
+                    if (totalVidDur > lastNarrationEnd + 0.01) {
+                        const silEndWav = path.join(slicesDir, 'silence_end.wav');
+                        createSilenceWav(silEndWav, totalVidDur - lastNarrationEnd, sampleRate, channels);
+                        concatList.push(`file '${silEndWav}'`);
+                    }
+
+                    const concatTxtPath = path.join(slicesDir, 'concat.txt');
+                    fs.writeFileSync(concatTxtPath, concatList.join('\n') + '\n', 'utf8');
+
+                    // Assemble into recapAudioCache, pad or trim to exactly totalVidDur
+                    await runFFmpeg([
+                        '-threads', '2',
+                        '-y',
+                        '-f', 'concat',
+                        '-safe', '0',
+                        '-i', concatTxtPath,
+                        '-af', 'apad',
+                        '-t', totalVidDur.toFixed(3),
+                        '-ar', String(sampleRate),
+                        '-ac', String(channels),
+                        '-c:a', 'pcm_s16le',
+                        recapAudioCache
+                    ], slicesDir);
+
+                    state.ttsAudioPath = recapAudioCache;
+                    state.audioDuration = totalVidDur;
+                    state.narrationTranscript = placedSubtitles;
+                    fs.writeFileSync(recapTranscriptCache, JSON.stringify(placedSubtitles, null, 2), 'utf8');
+                    console.log(`[RECAP-AUDIO] Rebuilt narration track: ${recapAudioCache} (${totalVidDur.toFixed(2)}s) with ${placedSubtitles.length} subtitles`);
+                }
+
+                // State mapping
+                state.mapping = state.narrationTranscript.map(sub => ({
+                    text: sub.text,
+                    timestamp: [sub.timestamp[0], sub.timestamp[1]]
+                }));
+
+                // Validation
+                for (let i = 0; i < timeline.length; i++) {
+                    const t = timeline[i];
+                    if (i > 0) {
+                        const prev = timeline[i-1];
+                        if (Math.abs(t.start_time - prev.end_time) < 0.02) {
+                            t.start_time = prev.end_time;
+                            t.target_dur = t.end_time - t.start_time;
+                        } else if (t.start_time !== prev.end_time) {
+                            throw new Error(`Validation failed: Unrepairable gap/overlap between segment ${i-1} and ${i} (${t.start_time - prev.end_time}).`);
+                        }
                     }
                 }
                 
-                // 1. NEVER allow createTimelineSegment() to receive scene_end <= scene_start.
-                if (!Number.isFinite(scene_start) || !Number.isFinite(scene_end) || scene_end <= scene_start) {
-                    throw new Error(`Pipeline Error: Invalid scene boundaries passed to createTimelineSegment (${scene_start} -> ${scene_end}) for text: "${text}"`);
-                }
-                
-                let desired_orig_dur = scene_end - scene_start;
-                
-                let speed = 1.0;
-                if (desired_orig_dur > 0.1 && target_dur > 0.1) {
-                    speed = desired_orig_dur / target_dur;
-                    if (speed < 0.35) speed = 0.35;
-                    if (speed > 100.0) speed = 100.0;
-                }
-                
-                let sIdx = 0;
-                for (let i = 0; i < state.scenes.length; i++) {
-                    if (scene_start >= state.scenes[i] - 0.1) sIdx = i;
-                    else break;
-                }
-                
-                timeline.push({
-                    segment_index: timeline.length,
-                    start_time: start,
-                    end_time: end,
-                    target_dur: target_dur,
-                    scene_start: scene_start,
-                    scene_end: scene_end,
-                    speed: speed,
-                    narration_text: text,
-                    matched_scene_index: sIdx
-                });
-            };
-            
-            state.mapping = [];
-            
-            const mergedGroups = [];
-            let currentGroup = null;
-
-            for (let i = 0; i < authTimeline.length; i++) {
-                const chunk = authTimeline[i];
-                
-                if (!chunk) {
-                    throw new Error(`Pipeline Error: Missing authTimeline chunk for scene ${i}`);
+                if (timeline.length > 0) {
+                    const last = timeline[timeline.length - 1];
+                    if (Math.abs(last.end_time - state.audioDuration) < 0.02) {
+                        last.end_time = state.audioDuration;
+                        last.target_dur = last.end_time - last.start_time;
+                    }
                 }
 
-                state.mapping.push({
-                    text: chunk.text,
-                    timestamp: [chunk.final_audio_start, chunk.final_audio_end]
-                });
-
-                if (!currentGroup) {
-                    currentGroup = {
-                        text: chunk.text,
-                        orig_start: chunk.orig_start,
-                        orig_end: chunk.orig_end,
-                        final_audio_start: chunk.final_audio_start,
-                        final_audio_end: chunk.final_audio_end
-                    };
-                } else {
-                    const gap = chunk.orig_start - currentGroup.orig_end;
-                    const proposedDuration = chunk.orig_end - currentGroup.orig_start;
+                saveState();
+                advanceStep(STEPS.TIMELINE_BUILDER, 70, 'Timeline Built');
+            } else {
+                const timeline = [];
+                let current_time = 0;
+                
+                const createTimelineSegment = (start, end, scene_start, scene_end, text) => {
+                    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(scene_start) || !Number.isFinite(scene_end)) {
+                        throw new Error(`Pipeline Error: Non-finite timestamps passed to createTimelineSegment. start=${start}, end=${end}, scene_start=${scene_start}, scene_end=${scene_end}`);
+                    }
+                    let target_dur = end - start;
+                    if (target_dur <= 0.001) return;
                     
-                    if (gap < 0.75 && proposedDuration <= 12) {
-                        currentGroup.text += " " + chunk.text;
-                        currentGroup.orig_end = chunk.orig_end;
-                        currentGroup.final_audio_end = chunk.final_audio_end;
-                    } else {
-                        mergedGroups.push(currentGroup);
+                    if (scene_end > state.originalVideoDuration) {
+                        scene_end = state.originalVideoDuration;
+                        if (scene_start >= scene_end) {
+                            scene_start = Math.max(0, scene_end - 0.1);
+                        }
+                    }
+                    
+                    // 1. NEVER allow createTimelineSegment() to receive scene_end <= scene_start.
+                    if (!Number.isFinite(scene_start) || !Number.isFinite(scene_end) || scene_end <= scene_start) {
+                        throw new Error(`Pipeline Error: Invalid scene boundaries passed to createTimelineSegment (${scene_start} -> ${scene_end}) for text: "${text}"`);
+                    }
+                    
+                    let desired_orig_dur = scene_end - scene_start;
+                    
+                    let speed = 1.0;
+                    if (desired_orig_dur > 0.1 && target_dur > 0.1) {
+                        speed = desired_orig_dur / target_dur;
+                        if (speed < 0.35) speed = 0.35;
+                        if (speed > 100.0) speed = 100.0;
+                    }
+                    
+                    let sIdx = 0;
+                    for (let i = 0; i < state.scenes.length; i++) {
+                        if (scene_start >= state.scenes[i] - 0.1) sIdx = i;
+                        else break;
+                    }
+                    
+                    timeline.push({
+                        segment_index: timeline.length,
+                        start_time: start,
+                        end_time: end,
+                        target_dur: target_dur,
+                        scene_start: scene_start,
+                        scene_end: scene_end,
+                        speed: speed,
+                        narration_text: text,
+                        matched_scene_index: sIdx
+                    });
+                };
+                
+                state.mapping = [];
+                
+                const mergedGroups = [];
+                let currentGroup = null;
+
+                for (let i = 0; i < authTimeline.length; i++) {
+                    const chunk = authTimeline[i];
+                    
+                    if (!chunk) {
+                        throw new Error(`Pipeline Error: Missing authTimeline chunk for scene ${i}`);
+                    }
+
+                    state.mapping.push({
+                        text: chunk.text,
+                        timestamp: [chunk.final_audio_start, chunk.final_audio_end]
+                    });
+
+                    if (!currentGroup) {
                         currentGroup = {
                             text: chunk.text,
                             orig_start: chunk.orig_start,
@@ -587,80 +884,98 @@ export const processRecapPipeline = async (jobId) => {
                             final_audio_start: chunk.final_audio_start,
                             final_audio_end: chunk.final_audio_end
                         };
+                    } else {
+                        const gap = chunk.orig_start - currentGroup.orig_end;
+                        const proposedDuration = chunk.orig_end - currentGroup.orig_start;
+                        
+                        if (gap < 0.75 && proposedDuration <= 12) {
+                            currentGroup.text += " " + chunk.text;
+                            currentGroup.orig_end = chunk.orig_end;
+                            currentGroup.final_audio_end = chunk.final_audio_end;
+                        } else {
+                            mergedGroups.push(currentGroup);
+                            currentGroup = {
+                                text: chunk.text,
+                                orig_start: chunk.orig_start,
+                                orig_end: chunk.orig_end,
+                                final_audio_start: chunk.final_audio_start,
+                                final_audio_end: chunk.final_audio_end
+                            };
+                        }
                     }
                 }
-            }
-            
-            if (currentGroup) {
-                mergedGroups.push(currentGroup);
-            }
-
-            for (const group of mergedGroups) {
-                createTimelineSegment(
-                    group.final_audio_start, 
-                    group.final_audio_end, 
-                    group.orig_start, 
-                    group.orig_end, 
-                    group.text
-                );
-                current_time = group.final_audio_end;
-            }
-
-            if (current_time < state.audioDuration) {
-                const lastChunk = authTimeline[authTimeline.length - 1];
-                let sEnd = lastChunk ? lastChunk.orig_end : 0;
                 
-                if (!Number.isFinite(sEnd)) sEnd = 0;
-                if (sEnd >= state.originalVideoDuration) {
-                    sEnd = Math.max(0, state.originalVideoDuration - 0.5);
+                if (currentGroup) {
+                    mergedGroups.push(currentGroup);
                 }
-                
-                if (state.originalVideoDuration > sEnd) {
-                    createTimelineSegment(current_time, state.audioDuration, sEnd, state.originalVideoDuration, "[Silence]");
-                } else if (timeline.length > 0) {
-                    const prev = timeline[timeline.length - 1];
-                    prev.end_time = state.audioDuration;
-                    prev.target_dur = prev.end_time - prev.start_time;
+
+                for (const group of mergedGroups) {
+                    createTimelineSegment(
+                        group.final_audio_start, 
+                        group.final_audio_end, 
+                        group.orig_start, 
+                        group.orig_end, 
+                        group.text
+                    );
+                    current_time = group.final_audio_end;
                 }
-            }
-            
-            state.timeline = timeline;
-            
-            // Generate exact state.narrationTranscript matching timeline for subtitles
-            state.narrationTranscript = [];
-            for (const chunk of authTimeline) {
-                if (chunk.text && chunk.text.trim().length > 0) {
-                    state.narrationTranscript.push({
-                        timestamp: [chunk.final_audio_start, chunk.final_audio_end],
-                        text: chunk.text
-                    });
-                }
-            }
-            
-            // Validation
-            for (let i = 0; i < timeline.length; i++) {
-                const t = timeline[i];
-                if (i > 0) {
-                    const prev = timeline[i-1];
-                    if (Math.abs(t.start_time - prev.end_time) < 0.02) {
-                        t.start_time = prev.end_time;
-                        t.target_dur = t.end_time - t.start_time;
-                    } else if (t.start_time !== prev.end_time) {
-                        throw new Error(`Validation failed: Unrepairable gap/overlap between segment ${i-1} and ${i} (${t.start_time - prev.end_time}).`);
+
+                if (current_time < state.audioDuration) {
+                    const lastChunk = authTimeline[authTimeline.length - 1];
+                    let sEnd = lastChunk ? lastChunk.orig_end : 0;
+                    
+                    if (!Number.isFinite(sEnd)) sEnd = 0;
+                    if (sEnd >= state.originalVideoDuration) {
+                        sEnd = Math.max(0, state.originalVideoDuration - 0.5);
+                    }
+                    
+                    if (state.originalVideoDuration > sEnd) {
+                        createTimelineSegment(current_time, state.audioDuration, sEnd, state.originalVideoDuration, "[Silence]");
+                    } else if (timeline.length > 0) {
+                        const prev = timeline[timeline.length - 1];
+                        prev.end_time = state.audioDuration;
+                        prev.target_dur = prev.end_time - prev.start_time;
                     }
                 }
-            }
-            
-            if (timeline.length > 0) {
-                const last = timeline[timeline.length - 1];
-                if (Math.abs(last.end_time - state.audioDuration) < 0.02) {
-                    last.end_time = state.audioDuration;
-                    last.target_dur = last.end_time - last.start_time;
+                
+                state.timeline = timeline;
+                
+                // Generate exact state.narrationTranscript matching timeline for subtitles
+                state.narrationTranscript = [];
+                for (const chunk of authTimeline) {
+                    if (chunk.text && chunk.text.trim().length > 0) {
+                        state.narrationTranscript.push({
+                            timestamp: [chunk.final_audio_start, chunk.final_audio_end],
+                            text: chunk.text
+                        });
+                    }
                 }
+                
+                // Validation
+                for (let i = 0; i < timeline.length; i++) {
+                    const t = timeline[i];
+                    if (i > 0) {
+                        const prev = timeline[i-1];
+                        if (Math.abs(t.start_time - prev.end_time) < 0.02) {
+                            t.start_time = prev.end_time;
+                            t.target_dur = t.end_time - t.start_time;
+                        } else if (t.start_time !== prev.end_time) {
+                            throw new Error(`Validation failed: Unrepairable gap/overlap between segment ${i-1} and ${i} (${t.start_time - prev.end_time}).`);
+                        }
+                    }
+                }
+                
+                if (timeline.length > 0) {
+                    const last = timeline[timeline.length - 1];
+                    if (Math.abs(last.end_time - state.audioDuration) < 0.02) {
+                        last.end_time = state.audioDuration;
+                        last.target_dur = last.end_time - last.start_time;
+                    }
+                }
+                
+                saveState();
+                advanceStep(STEPS.TIMELINE_BUILDER, 70, 'Timeline Built');
             }
-            
-            saveState();
-            advanceStep(STEPS.TIMELINE_BUILDER, 70, 'Timeline Built');
         }
 
         // 8. SUBTITLE BUILDER
@@ -815,7 +1130,8 @@ export const processRecapPipeline = async (jobId) => {
                     const freezeAmount = t.target_dur - ((t.scene_end - t.scene_start) / speed);
                     console.log(`[FREEZE-PADDING] segment ${globalIdx}: speed=${speed.toFixed(2)}, freeze_padding=${freezeAmount.toFixed(2)}s`);
                     const hflipFilter = job.flipped ? 'hflip,' : '';
-                    const filter = `[0:v]${hflipFilter}setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${target_dur},scale=${state.outputWidth}:${state.outputHeight}:force_original_aspect_ratio=increase,crop=${state.outputWidth}:${state.outputHeight},fps=30,setsar=1,format=yuv420p[v]`;
+                    const stopDur = job.narrationStyle === 'recap' ? 0 : target_dur;
+                    const filter = `[0:v]${hflipFilter}setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${stopDur},scale=${state.outputWidth}:${state.outputHeight}:force_original_aspect_ratio=increase,crop=${state.outputWidth}:${state.outputHeight},fps=30,setsar=1,format=yuv420p[v]`;
                     
                     const segFile = path.join(cacheDir, `seg_${globalIdx}.ts`);
                     const segFileTmp = path.join(cacheDir, `seg_${globalIdx}.ts.tmp`);

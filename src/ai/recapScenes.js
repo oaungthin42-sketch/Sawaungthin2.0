@@ -128,24 +128,29 @@ function mergeAndNormalizeRecapLines(allLines, totalDurationSec) {
         }
     }
 
-    // Final pass to guarantee strict non-overlap and conform to pipeline format
-    let prevEnd = 0;
+    if (finalLines.length === 0) return [];
+
+    // Make lines contiguous over the whole video: sort, first start = 0, each item's end = next item's start, last end = durationSec
+    finalLines.sort((a, b) => a.start - b.start);
+
+    const n = finalLines.length;
+    finalLines[0].start = 0;
+    for (let i = 0; i < n - 1; i++) {
+        let boundary = Math.max(finalLines[i].start + 1.0, finalLines[i + 1].start);
+        const remaining = (n - 1 - i) * 1.0;
+        if (boundary + remaining > totalDurationSec) {
+            boundary = Math.max(finalLines[i].start + 0.5, totalDurationSec - remaining);
+        }
+        finalLines[i].end = boundary;
+        finalLines[i + 1].start = boundary;
+    }
+    finalLines[n - 1].end = totalDurationSec;
+
     const result = [];
     for (let i = 0; i < finalLines.length; i++) {
         const item = finalLines[i];
-        let start = Math.max(0, item.start);
-        if (start < prevEnd) {
-            start = prevEnd + 0.05;
-        }
-        let end = Math.max(start + 1.5, item.end);
-        if (end > totalDurationSec && totalDurationSec > 0) {
-            end = totalDurationSec;
-            if (end <= start) {
-                start = Math.max(0, end - 1.5);
-            }
-        }
-        const sFloat = parseFloat(start.toFixed(2));
-        const eFloat = parseFloat(end.toFixed(2));
+        const sFloat = parseFloat(item.start.toFixed(2));
+        const eFloat = parseFloat(item.end.toFixed(2));
         if (eFloat > sFloat) {
             result.push({
                 timestamp: [sFloat, eFloat],
@@ -153,8 +158,19 @@ function mergeAndNormalizeRecapLines(allLines, totalDurationSec) {
                 end: eFloat,
                 text: item.text
             });
-            prevEnd = eFloat;
         }
+    }
+
+    if (result.length > 0) {
+        result[0].start = 0;
+        result[0].timestamp[0] = 0;
+        for (let i = 0; i < result.length - 1; i++) {
+            result[i].end = result[i + 1].start;
+            result[i].timestamp[1] = result[i + 1].timestamp[0];
+        }
+        const totalFloat = parseFloat(totalDurationSec.toFixed(2));
+        result[result.length - 1].end = totalFloat;
+        result[result.length - 1].timestamp[1] = totalFloat;
     }
 
     return result;
@@ -354,7 +370,7 @@ export async function generateRecapLines(
                 promptText += `
 YOUR TASK:
 Write narrative recap lines covering this ENTIRE clip from start to end like a movie-recap video narrator (explaining dialogue, key actions, character expressions, tensions, and transitions). Silent or action scenes MUST have narration too.
-Do NOT leave long silent gaps. Keep each line concise (1-2 sentences in plain English).
+Do NOT leave long silent gaps. Write each text long enough to be spoken in roughly 80-100% of (end - start) seconds, about 2.5 English words per second, so the narration fills the scene. No filler. Keep each line concise (1-2 sentences in plain English).
 
 REQUIREMENTS:
 1. Provide the start and end timestamp in seconds relative to this clip (start between 0.0 and ${chunk.duration.toFixed(1)}).
