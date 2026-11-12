@@ -601,10 +601,119 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
 
                 if (gaps.length > 0) {
                     console.log(`[PASSTHROUGH-GAP-INSERTION] Found ${gaps.length} qualifying gap(s) (>= ${PASSTHROUGH_GAP_THRESHOLD}s) in source video.`);
+
+                    // Run VAD ONCE on the whole original audio
+                    const checkScript = path.join(__dirname, 'gap_speech_check.py');
+                    console.log(`[PASSTHROUGH-GAP-INSERTION] Running VAD once on original audio: ${options.sourceVideoPath}`);
+
+                    let rawSpeechIntervals = null;
+                    try {
+                        rawSpeechIntervals = await new Promise((resolve, reject) => {
+                            let stdout = '';
+                            let stderr = '';
+                            const proc = spawn('python3', [checkScript, options.sourceVideoPath]);
+
+                            const timer = setTimeout(() => {
+                                try { proc.kill(); } catch (_) {}
+                                reject(new Error('VAD timed out after 120s'));
+                            }, 120000);
+
+                            proc.stdout.on('data', (d) => { stdout += d.toString(); });
+                            proc.stderr.on('data', (d) => { stderr += d.toString(); });
+                            proc.on('error', (err) => {
+                                clearTimeout(timer);
+                                reject(err);
+                            });
+                            proc.on('close', (code) => {
+                                clearTimeout(timer);
+                                if (code !== 0) {
+                                    return reject(new Error(`VAD exited with code ${code}: ${stderr}`));
+                                }
+                                try {
+                                    const parsed = JSON.parse(stdout.trim());
+                                    if (Array.isArray(parsed)) {
+                                        return resolve(parsed);
+                                    }
+                                    reject(new Error('VAD output is not a JSON array'));
+                                } catch (parseErr) {
+                                    reject(new Error(`Failed to parse VAD output: ${parseErr.message}`));
+                                }
+                            });
+                        });
+                    } catch (vadErr) {
+                        console.warn(`[PASSTHROUGH-GAP-INSERTION] VAD failed or timed out: ${vadErr.message}. Failing closed (no passthrough audio).`);
+                        rawSpeechIntervals = null;
+                    }
+
+                    // FAIL-CLOSED: if the VAD errors, times out or returns nothing, insert NO passthrough audio
+                    if (!rawSpeechIntervals) {
+                        throw new Error('VAD check failed, timed out, or returned nothing (fail-closed)');
+                    }
+
+                    const validSpeechIntervals = rawSpeechIntervals.filter(sp => (
+                        sp && typeof sp.start === 'number' && typeof sp.end === 'number' && sp.end > sp.start
+                    ));
+
+                    // Speech intervals padded by 0.5s on both sides
+                    const PADDING = 0.5;
+                    const paddedSpeech = validSpeechIntervals.map(sp => ({
+                        start: Math.max(0, sp.start - PADDING),
+                        end: sp.end + PADDING
+                    }));
+
+                    // Merge overlapping padded speech intervals
+                    const mergedPaddedSpeech = [];
+                    if (paddedSpeech.length > 0) {
+                        const sorted = [...paddedSpeech].sort((a, b) => a.start - b.start);
+                        let cur = { ...sorted[0] };
+                        for (let i = 1; i < sorted.length; i++) {
+                            if (sorted[i].start <= cur.end) {
+                                cur.end = Math.max(cur.end, sorted[i].end);
+                            } else {
+                                mergedPaddedSpeech.push(cur);
+                                cur = { ...sorted[i] };
+                            }
+                        }
+                        mergedPaddedSpeech.push(cur);
+                    }
+
+                    const subtractIntervals = (range, forbidden) => {
+                        let pieces = [{ start: range.start, end: range.end }];
+                        for (const f of forbidden) {
+                            const nextPieces = [];
+                            for (const p of pieces) {
+                                if (f.end <= p.start || f.start >= p.end) {
+                                    nextPieces.push(p);
+                                } else {
+                                    if (p.start < f.start) {
+                                        nextPieces.push({ start: p.start, end: f.start });
+                                    }
+                                    if (p.end > f.end) {
+                                        nextPieces.push({ start: f.end, end: p.end });
+                                    }
+                                }
+                            }
+                            pieces = nextPieces;
+                        }
+                        return pieces;
+                    };
+
+                    const overlapsDetectedSpeech = (start, end) => {
+                        for (const sp of validSpeechIntervals) {
+                            const overlap = Math.min(end, sp.end) - Math.max(start, sp.start);
+                            if (overlap >= 0.1) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    };
+
                     const newProcessedChunks = [];
                     const newAuthoritativeTimeline = [];
                     let cursor = 0;
                     let gapCounter = 0;
+                    let piecesKept = 0;
+                    let piecesDropped = 0;
 
                     const emitPiece = async (pStart, pEnd, fadeOpts = {}) => {
                         const pLen = pEnd - pStart;
@@ -653,50 +762,6 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                             return;
                         }
 
-                        // Check if the gap piece still contains speech
-                        try {
-                            const checkScript = path.join(__dirname, 'gap_speech_check.py');
-                            const speechSec = await new Promise((resolve) => {
-                                let stdout = '';
-                                let timer = null;
-                                let proc = null;
-                                try {
-                                    proc = spawn('python3', [checkScript, gapPath]);
-                                } catch (_) {
-                                    return resolve(0);
-                                }
-
-                                timer = setTimeout(() => {
-                                    try { proc.kill(); } catch (_) {}
-                                    resolve(0);
-                                }, 60000);
-
-                                proc.stdout.on('data', (d) => { stdout += d.toString(); });
-                                proc.on('error', () => {
-                                    clearTimeout(timer);
-                                    resolve(0);
-                                });
-                                proc.on('close', () => {
-                                    clearTimeout(timer);
-                                    try {
-                                        const parsed = JSON.parse(stdout.trim());
-                                        if (parsed && typeof parsed.speech_seconds === 'number') {
-                                            return resolve(parsed.speech_seconds);
-                                        }
-                                    } catch (_) {}
-                                    resolve(0);
-                                });
-                            });
-
-                            if (speechSec >= 0.3) {
-                                const displaySpeech = typeof speechSec === 'number' ? parseFloat(speechSec.toFixed(3)) : speechSec;
-                                console.log(`[PASSTHROUGH-GAP-INSERTION] Skipped piece ${pStart.toFixed(3)}-${pEnd.toFixed(3)}: speech detected (${displaySpeech} s)`);
-                                return;
-                            }
-                        } catch (checkErr) {
-                            // If the check fails or times out for any reason, keep the piece (old behavior)
-                        }
-
                         newProcessedChunks.push(gapPath);
                         newAuthoritativeTimeline.push({
                             is_passthrough: true,
@@ -715,29 +780,71 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                     const emitGap = async (g) => {
                         const effStart = g.origStart + (g.speechBefore ? GAP_EDGE_MARGIN : 0);
                         const effEnd   = g.origEnd   - (g.speechAfter  ? GAP_EDGE_MARGIN : 0);
+                        if (effEnd - effStart < GAP_MIN_KEEP) {
+                            piecesDropped++;
+                            return;
+                        }
                         console.log(`[PASSTHROUGH-GAP-INSERTION] gap ${g.origStart.toFixed(3)}-${g.origEnd.toFixed(3)} -> using ${effStart.toFixed(3)}-${effEnd.toFixed(3)} (margin ${GAP_EDGE_MARGIN} s on speech sides, fade ${GAP_EDGE_FADE} s)`);
 
-                        const gapLen = effEnd - effStart;
-                        if (gapLen < TRIM_LONG_GAP_MIN) {
-                            const fadeIn = g.speechBefore ? GAP_EDGE_FADE : 0;
-                            const fadeOut = g.speechAfter ? GAP_EDGE_FADE : 0;
-                            await emitPiece(effStart, effEnd, { fadeIn, fadeOut });
-                        } else {
-                            const keepLen = gapLen * TRIM_KEEP_RATIO;
-                            const half = keepLen / 2;
-                            const formatNum = (n) => (typeof n === 'number' ? (Number.isInteger(n) ? n : parseFloat(n.toFixed(3))) : n);
-                            console.log(`[PASSTHROUGH-GAP-INSERTION] Trimmed gap ${formatNum(effStart)}-${formatNum(effEnd)} (${formatNum(gapLen)} s) to keep ${formatNum(keepLen)} s.`);
-                            const headStart = effStart;
-                            const headEnd = effStart + half;
-                            const headFadeIn = g.speechBefore ? GAP_EDGE_FADE : 0;
-                            const headFadeOut = 0.15;
-                            await emitPiece(headStart, headEnd, { fadeIn: headFadeIn, fadeOut: headFadeOut });
+                        // Build passthrough pieces from the gaps MINUS padded speech intervals
+                        const rawPieces = subtractIntervals({ start: effStart, end: effEnd }, mergedPaddedSpeech);
+                        if (rawPieces.length === 0) {
+                            piecesDropped++;
+                            return;
+                        }
 
-                            const tailStart = effEnd - half;
-                            const tailEnd = effEnd;
-                            const tailFadeIn = 0.15;
-                            const tailFadeOut = g.speechAfter ? GAP_EDGE_FADE : 0;
-                            await emitPiece(tailStart, tailEnd, { fadeIn: tailFadeIn, fadeOut: tailFadeOut });
+                        for (const p of rawPieces) {
+                            const pDur = p.end - p.start;
+                            // Keep only pieces that are at least 1.2s long
+                            if (pDur < GAP_MIN_KEEP) {
+                                piecesDropped++;
+                                continue;
+                            }
+                            // Do not copy any piece that overlaps detected speech, even by 0.1s
+                            if (overlapsDetectedSpeech(p.start, p.end)) {
+                                console.log(`[PASSTHROUGH-GAP-INSERTION] Dropped piece ${p.start.toFixed(3)}-${p.end.toFixed(3)}: overlaps detected speech.`);
+                                piecesDropped++;
+                                continue;
+                            }
+
+                            // Determine fades for piece boundaries
+                            const isAtStart = Math.abs(p.start - effStart) < 0.05;
+                            const isAtEnd = Math.abs(p.end - effEnd) < 0.05;
+                            const pieceFadeIn = isAtStart ? (g.speechBefore ? GAP_EDGE_FADE : 0) : GAP_EDGE_FADE;
+                            const pieceFadeOut = isAtEnd ? (g.speechAfter ? GAP_EDGE_FADE : 0) : GAP_EDGE_FADE;
+
+                            // Keep existing trim logic for long gaps
+                            if (pDur < TRIM_LONG_GAP_MIN) {
+                                piecesKept++;
+                                await emitPiece(p.start, p.end, { fadeIn: pieceFadeIn, fadeOut: pieceFadeOut });
+                            } else {
+                                const keepLen = pDur * TRIM_KEEP_RATIO;
+                                const half = keepLen / 2;
+                                const formatNum = (n) => (typeof n === 'number' ? (Number.isInteger(n) ? n : parseFloat(n.toFixed(3))) : n);
+                                console.log(`[PASSTHROUGH-GAP-INSERTION] Trimmed gap piece ${formatNum(p.start)}-${formatNum(p.end)} (${formatNum(pDur)} s) to keep ${formatNum(keepLen)} s.`);
+
+                                const headStart = p.start;
+                                const headEnd = p.start + half;
+                                const headFadeIn = pieceFadeIn;
+                                const headFadeOut = 0.15;
+                                if (headEnd - headStart >= GAP_MIN_KEEP && !overlapsDetectedSpeech(headStart, headEnd)) {
+                                    piecesKept++;
+                                    await emitPiece(headStart, headEnd, { fadeIn: headFadeIn, fadeOut: headFadeOut });
+                                } else {
+                                    piecesDropped++;
+                                }
+
+                                const tailStart = p.end - half;
+                                const tailEnd = p.end;
+                                const tailFadeIn = 0.15;
+                                const tailFadeOut = pieceFadeOut;
+                                if (tailEnd - tailStart >= GAP_MIN_KEEP && !overlapsDetectedSpeech(tailStart, tailEnd)) {
+                                    piecesKept++;
+                                    await emitPiece(tailStart, tailEnd, { fadeIn: tailFadeIn, fadeOut: tailFadeOut });
+                                } else {
+                                    piecesDropped++;
+                                }
+                            }
                         }
                     };
 
@@ -758,6 +865,8 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                         const gapAfter = gaps.find(g => g.afterBlockIdx === b);
                         if (gapAfter) await emitGap(gapAfter);
                     }
+
+                    console.log(`[PASSTHROUGH-GAP-INSERTION] total speech intervals found: ${validSpeechIntervals.length}, pieces kept: ${piecesKept}, pieces dropped: ${piecesDropped}`);
 
                     processedChunks.length = 0;
                     processedChunks.push(...newProcessedChunks);

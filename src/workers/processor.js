@@ -133,8 +133,20 @@ export const processRecapPipeline = async (jobId) => {
 
     const saveState = () => fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
+    const pipelineStartTime = Date.now();
+    let stepStartTime = Date.now();
+    let lastStep = null;
+
     const advanceStep = (step, progress, statusText) => {
-        console.log(`[STEP] ${step} | ${statusText}`);
+        const now = Date.now();
+        if (lastStep) {
+            const stepElapsed = ((now - stepStartTime) / 1000).toFixed(1);
+            console.log(`[STEP] ${lastStep} finished in ${stepElapsed}s`);
+        }
+        const totalElapsed = ((now - pipelineStartTime) / 1000).toFixed(1);
+        console.log(`[STEP] ${step} | ${statusText} [${totalElapsed}s elapsed]`);
+        stepStartTime = now;
+        lastStep = step;
         state.currentStep = step;
         saveState();
         updateJob(jobId, { currentStep: step, progress, status: statusText });
@@ -1835,6 +1847,13 @@ export const processRecapPipeline = async (jobId) => {
             }
         };
 
+        const getAtempoFilter = (speed) => {
+            if (speed > 2.0) {
+                return `atempo=2.0,atempo=${(speed / 2.0).toFixed(4)}`;
+            }
+            return `atempo=${speed}`;
+        };
+
         const runCombinedOverlays = async () => {
             const tmpOutPath = path.join(tmpDir, `${jobId}_combined_overlays.mp4`);
             let current = '[0:v]';
@@ -1955,6 +1974,19 @@ export const processRecapPipeline = async (jobId) => {
                 current = '[vsub]';
             }
 
+            // 4. Speed (if job.speed != 1.0, apply setpts=PTS/speed and atempo=speed)
+            let speedApplied = false;
+            let multiplier = parseFloat(job.speed) || 1.0;
+            if (multiplier < 0.5) multiplier = 0.5;
+            if (multiplier > 3.0) multiplier = 3.0;
+
+            if (multiplier !== 1.0) {
+                filterParts.push(`${current}setpts=PTS/${multiplier}[vspd]`);
+                current = '[vspd]';
+                filterParts.push(`[0:a]${getAtempoFilter(multiplier)}[aspd]`);
+                speedApplied = true;
+            }
+
             if (filterParts.length === 0) {
                 advanceStep(STEPS.BLUR_BOXES, 99, 'Blur Applied');
                 advanceStep(STEPS.SUBTITLE_BURN, 99, 'Subtitles Burned');
@@ -1966,8 +1998,9 @@ export const processRecapPipeline = async (jobId) => {
                 '-i', finalOutPath,
                 '-filter_complex', chain,
                 '-map', current,
-                '-map', '0:a?',
-                '-c:a', 'copy',
+                ...(speedApplied
+                    ? ['-map', '[aspd]', '-c:a', 'aac', '-b:a', '192k']
+                    : ['-map', '0:a?', '-c:a', 'copy']),
                 '-c:v', 'libx264',
                 '-preset', 'veryfast',
                 '-crf', '18',
@@ -1976,7 +2009,7 @@ export const processRecapPipeline = async (jobId) => {
                 '-y', tmpOutPath
             ];
 
-            console.log(`[OVERLAYS] Combined pass: blur=${hasBlur} watermark=${hasWatermark} subtitles=${subCount}`);
+            console.log(`[OVERLAYS] Combined pass: blur=${hasBlur} watermark=${hasWatermark} subtitles=${subCount} speed=${speedApplied ? multiplier + 'x' : '1.0x'}`);
             const startTime = Date.now();
             await runFFmpeg(combinedArgs, tmpDir);
             const durationSec = Math.round((Date.now() - startTime) / 1000);
@@ -1985,6 +2018,10 @@ export const processRecapPipeline = async (jobId) => {
             if (fs.existsSync(tmpOutPath) && fs.statSync(tmpOutPath).size > 0) {
                 fs.unlinkSync(finalOutPath);
                 safeMoveFile(tmpOutPath, finalOutPath);
+                if (speedApplied) {
+                    state.speedAppliedInCombined = true;
+                    saveState();
+                }
             } else {
                 throw new Error('Combined overlays failed to produce output file');
             }
@@ -2016,31 +2053,40 @@ export const processRecapPipeline = async (jobId) => {
             if (multiplier > 3.0) multiplier = 3.0;
 
             if (multiplier !== 1.0) {
-                console.log(`[SPEED-ADJUST] Applying output multiplier: ${multiplier}x`);
-                const speedTmpPath = path.join(tmpDir, `${jobId}_speed.mp4`);
-                const speedArgs = [
-                    '-i', finalOutPath,
-                    '-filter_complex', `[0:v]setpts=PTS/${multiplier}[v];[0:a]atempo=${multiplier}[a]`,
-                    '-map', '[v]',
-                    '-map', '[a]',
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-crf', '18',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                    '-c:a', 'aac',
-                    '-b:a', '192k',
-                    '-y', speedTmpPath
-                ];
-                await runFFmpeg(speedArgs, tmpDir);
-                
-                if (fs.existsSync(speedTmpPath) && fs.statSync(speedTmpPath).size > 0) {
-                    fs.unlinkSync(finalOutPath);
-                    safeMoveFile(speedTmpPath, finalOutPath);
+                if (state.speedAppliedInCombined) {
+                    console.log(`[SPEED-ADJUST] Speed multiplier ${multiplier}x was already applied in combined overlays pass. Skipping separate re-encode.`);
                 } else {
-                    throw new Error("Pipeline Error: Speed adjustment failed to produce output file.");
+                    console.log(`[SPEED-ADJUST] Applying output multiplier: ${multiplier}x`);
+                    const speedTmpPath = path.join(tmpDir, `${jobId}_speed.mp4`);
+                    const speedArgs = [
+                        '-i', finalOutPath,
+                        '-filter_complex', `[0:v]setpts=PTS/${multiplier}[v];[0:a]${getAtempoFilter(multiplier)}[a]`,
+                        '-map', '[v]',
+                        '-map', '[a]',
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-crf', '18',
+                        '-pix_fmt', 'yuv420p',
+                        '-movflags', '+faststart',
+                        '-c:a', 'aac',
+                        '-b:a', '192k',
+                        '-y', speedTmpPath
+                    ];
+                    await runFFmpeg(speedArgs, tmpDir);
+                    
+                    if (fs.existsSync(speedTmpPath) && fs.statSync(speedTmpPath).size > 0) {
+                        fs.unlinkSync(finalOutPath);
+                        safeMoveFile(speedTmpPath, finalOutPath);
+                    } else {
+                        throw new Error("Pipeline Error: Speed adjustment failed to produce output file.");
+                    }
                 }
             }
+            const now = Date.now();
+            const speedElapsed = ((now - stepStartTime) / 1000).toFixed(1);
+            const totalElapsed = ((now - pipelineStartTime) / 1000).toFixed(1);
+            console.log(`[STEP] Speed Adjust finished in ${speedElapsed}s [${totalElapsed}s elapsed]`);
+            lastStep = null;
         }
         
         let generatedCaption = null;
