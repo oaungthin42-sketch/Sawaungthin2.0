@@ -567,7 +567,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         // processedChunks/authoritativeTimeline/runningAudioTime are left
         // completely untouched.
         const PASSTHROUGH_GAP_THRESHOLD = 2.0;
-        const GAP_EDGE_MARGIN = 0.4;  // seconds removed from every gap edge that touches speech
+        const GAP_EDGE_MARGIN = 0.7;  // seconds removed from every gap edge that touches speech
         const GAP_EDGE_FADE   = 0.2;  // seconds of fade-in/fade-out at those edges
         const GAP_MIN_KEEP    = 1.2;  // a gap shorter than this AFTER removing the margins is not used
         const TRIM_LONG_GAP_MIN = 20;   // gaps shorter than this many seconds are kept in full
@@ -652,6 +652,51 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                             console.warn(`[PASSTHROUGH-GAP-INSERTION] Extracted gap audio ${gapPath} has invalid duration. Skipping this gap.`);
                             return;
                         }
+
+                        // Check if the gap piece still contains speech
+                        try {
+                            const checkScript = path.join(__dirname, 'gap_speech_check.py');
+                            const speechSec = await new Promise((resolve) => {
+                                let stdout = '';
+                                let timer = null;
+                                let proc = null;
+                                try {
+                                    proc = spawn('python3', [checkScript, gapPath]);
+                                } catch (_) {
+                                    return resolve(0);
+                                }
+
+                                timer = setTimeout(() => {
+                                    try { proc.kill(); } catch (_) {}
+                                    resolve(0);
+                                }, 60000);
+
+                                proc.stdout.on('data', (d) => { stdout += d.toString(); });
+                                proc.on('error', () => {
+                                    clearTimeout(timer);
+                                    resolve(0);
+                                });
+                                proc.on('close', () => {
+                                    clearTimeout(timer);
+                                    try {
+                                        const parsed = JSON.parse(stdout.trim());
+                                        if (parsed && typeof parsed.speech_seconds === 'number') {
+                                            return resolve(parsed.speech_seconds);
+                                        }
+                                    } catch (_) {}
+                                    resolve(0);
+                                });
+                            });
+
+                            if (speechSec >= 0.3) {
+                                const displaySpeech = typeof speechSec === 'number' ? parseFloat(speechSec.toFixed(3)) : speechSec;
+                                console.log(`[PASSTHROUGH-GAP-INSERTION] Skipped piece ${pStart.toFixed(3)}-${pEnd.toFixed(3)}: speech detected (${displaySpeech} s)`);
+                                return;
+                            }
+                        } catch (checkErr) {
+                            // If the check fails or times out for any reason, keep the piece (old behavior)
+                        }
+
                         newProcessedChunks.push(gapPath);
                         newAuthoritativeTimeline.push({
                             is_passthrough: true,
