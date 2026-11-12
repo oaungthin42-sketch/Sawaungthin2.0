@@ -347,7 +347,7 @@ export async function generateRecapLines(
                 }
 
                 // Construct prompt
-                let promptText = `You are a movie-recap narrator scriptwriter. You are watching a ${Math.round(chunk.duration)}-second video clip (from ${Math.round(chunk.start)}s to ${Math.round(chunk.end)}s of the movie).\n`;
+                let promptText = `You are a storyteller telling the story of this video from beginning to end. You are watching a ${Math.round(chunk.duration)}-second video clip (from ${Math.round(chunk.start)}s to ${Math.round(chunk.end)}s of the movie).\n`;
 
                 if (storySynopsis) {
                     promptText += `\n[OVERALL MOVIE SYNOPSIS & CHARACTERS]:\n${storySynopsis}\n`;
@@ -369,14 +369,16 @@ export async function generateRecapLines(
 
                 promptText += `
 YOUR TASK:
-Write narrative recap lines covering this ENTIRE clip from start to end like a movie-recap video narrator (explaining dialogue, key actions, character expressions, tensions, and transitions). Silent or action scenes MUST have narration too.
-Do NOT leave long silent gaps. Write each text long enough to be spoken in roughly 80-100% of (end - start) seconds, about 2.5 English words per second, so the narration fills the scene. No filler. Keep each line concise (1-2 sentences in plain English).
+1. Act as a storyteller telling the story of this video from beginning to end. The narration must flow continuously, each line connecting naturally to the previous one, not isolated scene captions.
+2. Narrate ONLY what is shown or said inside this clip, at the moment it happens. The synopsis is background knowledge only. Never mention events, reveals, or outcomes that have not appeared yet at that timestamp (no spoilers, no foreshadowing).
+3. Cover the ENTIRE clip with no long silent gaps, including silent or action scenes.
+4. Prefer fewer, longer lines (about 4-10 seconds each, 1-3 sentences) instead of many tiny lines.
+5. Each line must be speakable in about 60-70% of (end - start) seconds, at about 2 English words per second, because it will be translated into Burmese, which takes longer to speak. Never write a line longer than its time slot.
 
 REQUIREMENTS:
 1. Provide the start and end timestamp in seconds relative to this clip (start between 0.0 and ${chunk.duration.toFixed(1)}).
 2. The lines must be sequential and chronologically ordered.
-3. Every beat must have an English line describing the scene/dialogue clearly.
-4. Output MUST be a valid JSON array of objects with the exact schema:
+3. Output MUST be a valid JSON array of objects with the exact schema:
 [
   {
     "start": 0.0,
