@@ -602,21 +602,36 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 if (gaps.length > 0) {
                     console.log(`[PASSTHROUGH-GAP-INSERTION] Found ${gaps.length} qualifying gap(s) (>= ${PASSTHROUGH_GAP_THRESHOLD}s) in source video.`);
 
-                    // Run VAD ONCE on the whole original audio
-                    const checkScript = path.join(__dirname, 'gap_speech_check.py');
-                    console.log(`[PASSTHROUGH-GAP-INSERTION] Running VAD once on original audio: ${options.sourceVideoPath}`);
+                    const gapRegions = gaps
+                        .map(g => ({
+                            start: g.origStart + (g.speechBefore ? GAP_EDGE_MARGIN : 0),
+                            end: g.origEnd - (g.speechAfter ? GAP_EDGE_MARGIN : 0)
+                        }))
+                        .filter(r => r.end - r.start >= GAP_MIN_KEEP);
 
-                    let rawSpeechIntervals = null;
+                    if (gapRegions.length === 0) {
+                        throw new Error('No qualifying gap regions remain after edge margin');
+                    }
+
+                    // Run VAD + Whisper gap speech detection ONCE
+                    const checkScript = path.join(__dirname, 'gap_speech_check.py');
+                    console.log(`[PASSTHROUGH-GAP-INSERTION] Running VAD + Whisper gap speech check once on original audio: ${options.sourceVideoPath}`);
+
+                    let rawSpeechResult = null;
                     try {
-                        rawSpeechIntervals = await new Promise((resolve, reject) => {
+                        rawSpeechResult = await new Promise((resolve, reject) => {
                             let stdout = '';
                             let stderr = '';
                             const proc = spawn('python3', [checkScript, options.sourceVideoPath]);
 
                             const timer = setTimeout(() => {
                                 try { proc.kill(); } catch (_) {}
-                                reject(new Error('VAD timed out after 120s'));
-                            }, 120000);
+                                reject(new Error('VAD + Whisper gap check timed out after 300s'));
+                            }, 300000);
+
+                            proc.stdin.on('error', () => {});
+                            proc.stdin.write(JSON.stringify(gapRegions));
+                            proc.stdin.end();
 
                             proc.stdout.on('data', (d) => { stdout += d.toString(); });
                             proc.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -627,32 +642,43 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                             proc.on('close', (code) => {
                                 clearTimeout(timer);
                                 if (code !== 0) {
-                                    return reject(new Error(`VAD exited with code ${code}: ${stderr}`));
+                                    return reject(new Error(`VAD + Whisper check exited with code ${code}: ${stderr}`));
                                 }
                                 try {
                                     const parsed = JSON.parse(stdout.trim());
-                                    if (Array.isArray(parsed)) {
+                                    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.vad) && Array.isArray(parsed.whisper)) {
                                         return resolve(parsed);
                                     }
-                                    reject(new Error('VAD output is not a JSON array'));
+                                    reject(new Error('VAD + Whisper output is not a valid {vad, whisper} JSON object'));
                                 } catch (parseErr) {
-                                    reject(new Error(`Failed to parse VAD output: ${parseErr.message}`));
+                                    reject(new Error(`Failed to parse VAD + Whisper output: ${parseErr.message}`));
                                 }
                             });
                         });
                     } catch (vadErr) {
-                        console.warn(`[PASSTHROUGH-GAP-INSERTION] VAD failed or timed out: ${vadErr.message}. Failing closed (no passthrough audio).`);
-                        rawSpeechIntervals = null;
+                        console.warn(`[PASSTHROUGH-GAP-INSERTION] VAD + Whisper check failed or timed out: ${vadErr.message}. Failing closed (no passthrough audio).`);
+                        rawSpeechResult = null;
                     }
 
-                    // FAIL-CLOSED: if the VAD errors, times out or returns nothing, insert NO passthrough audio
-                    if (!rawSpeechIntervals) {
-                        throw new Error('VAD check failed, timed out, or returned nothing (fail-closed)');
+                    // FAIL-CLOSED: if the python call errors, times out or returns nothing, insert NO passthrough audio
+                    if (!rawSpeechResult) {
+                        throw new Error('VAD + Whisper check failed, timed out, or returned nothing (fail-closed)');
                     }
 
-                    const validSpeechIntervals = rawSpeechIntervals.filter(sp => (
+                    const validVadIntervals = rawSpeechResult.vad.filter(sp => (
                         sp && typeof sp.start === 'number' && typeof sp.end === 'number' && sp.end > sp.start
                     ));
+                    const validWhisperIntervals = rawSpeechResult.whisper.filter(sp => (
+                        sp && typeof sp.start === 'number' && typeof sp.end === 'number' && sp.end > sp.start
+                    ));
+
+                    for (const sp of validWhisperIntervals) {
+                        const textPreview = (sp.text || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+                        console.log(`[PASSTHROUGH-GAP-INSERTION] extra speech (whisper) ${sp.start.toFixed(3)}-${sp.end.toFixed(3)} text=${textPreview}`);
+                    }
+                    console.log(`[PASSTHROUGH-GAP-INSERTION] total extra speech (whisper) intervals found: ${validWhisperIntervals.length}`);
+
+                    const validSpeechIntervals = [...validVadIntervals, ...validWhisperIntervals];
 
                     // Speech intervals padded by 0.5s on both sides
                     const PADDING = 0.5;
