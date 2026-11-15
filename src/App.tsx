@@ -1467,7 +1467,7 @@ function App() {
                                         type="text"
                                         value={videoUrlInput}
                                         onChange={(e) => setVideoUrlInput(e.target.value)}
-                                        placeholder="YouTube / TikTok URL ကို ဒီမှာ ကူးထည့်ပါ"
+                                        placeholder="YouTube / TikTok / RedNote URL ကို ဒီမှာ ကူးထည့်ပါ"
                                         className="flex-1 bg-gray-950 border border-gray-800 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-500"
                                       />
                                       <button

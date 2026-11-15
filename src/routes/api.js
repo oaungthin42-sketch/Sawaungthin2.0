@@ -175,6 +175,124 @@ async function tryDownloadViaCobalt(url, destPath) {
     }
 }
 
+function detectPlatform(url) {
+    try {
+        const hostname = new URL(url).hostname.toLowerCase();
+        if (
+            hostname === 'xiaohongshu.com' ||
+            hostname === 'www.xiaohongshu.com' ||
+            hostname === 'rednote.com' ||
+            hostname === 'www.rednote.com' ||
+            hostname === 'xhslink.com'
+        ) {
+            return 'xiaohongshu';
+        }
+    } catch (_) {}
+    return 'other';
+}
+
+async function tryDownloadViaXhs(url, destPath) {
+    const xhsApiUrl = process.env.XHS_API_URL;
+    if (!xhsApiUrl) {
+        return { success: false, error: 'XHS_API_URL not set' };
+    }
+
+    try {
+        const baseUrl = xhsApiUrl.replace(/\/+$/, '');
+        const response = await axios.post(
+            `${baseUrl}/xhs/detail`,
+            { url, download: false },
+            {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 60000
+            }
+        );
+
+        const data = response.data?.data;
+        if (!data || data['作品类型'] !== '视频') {
+            return { success: false, error: 'Not a video note' };
+        }
+
+        const videoUrl = data['下载地址']?.[0];
+        if (!videoUrl) {
+            return { success: false, error: 'No video download URL in XHS response' };
+        }
+
+        const videoRes = await axios.get(videoUrl, {
+            responseType: 'stream',
+            timeout: 120000,
+            headers: {
+                'Referer': 'https://www.xiaohongshu.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+        });
+
+        const contentLength = parseInt(videoRes.headers?.['content-length'] || '0', 10);
+        if (Number.isFinite(contentLength) && contentLength > maxUploadSize) {
+            if (typeof videoRes.data?.destroy === 'function') {
+                videoRes.data.destroy();
+            }
+            throw new Error(`File too large (${contentLength} bytes exceeds maxUploadSize ${maxUploadSize})`);
+        }
+
+        await new Promise((resolve, reject) => {
+            const writer = fs.createWriteStream(destPath);
+            let settled = false;
+            let downloadedBytes = 0;
+
+            const fail = (err) => {
+                if (settled) return;
+                settled = true;
+                try { videoRes.data.destroy(); } catch (_) {}
+                try { writer.destroy(); } catch (_) {}
+                reject(err);
+            };
+
+            videoRes.data.on('data', (chunk) => {
+                downloadedBytes += chunk.length;
+                if (downloadedBytes > maxUploadSize) {
+                    fail(new Error(`File too large (stream exceeded maxUploadSize ${maxUploadSize})`));
+                }
+            });
+            videoRes.data.on('error', fail);
+            writer.on('error', fail);
+            writer.on('finish', () => {
+                if (!settled) {
+                    settled = true;
+                    resolve();
+                }
+            });
+
+            videoRes.data.pipe(writer);
+        });
+
+        if (!fs.existsSync(destPath) || fs.statSync(destPath).size === 0) {
+            throw new Error('Downloaded file is empty');
+        }
+
+        return { success: true };
+    } catch (e) {
+        if (fs.existsSync(destPath)) {
+            try { fs.unlinkSync(destPath); } catch (_) {}
+        }
+        let errStr = e.message;
+        if (e.response) {
+            if (typeof e.response.data === 'string') {
+                errStr = `HTTP ${e.response.status} - ${e.response.data.substring(0, 500)}`;
+            } else if (e.response.data && typeof e.response.data.pipe !== 'function') {
+                try {
+                    errStr = `HTTP ${e.response.status} - ${JSON.stringify(e.response.data).substring(0, 500)}`;
+                } catch (_) {
+                    errStr = `HTTP ${e.response.status}`;
+                }
+            } else {
+                errStr = `HTTP ${e.response.status}`;
+            }
+        }
+        return { success: false, error: errStr };
+    }
+}
+
 async function runYtDlp(args) {
     return new Promise((resolve, reject) => {
         let ytDlpStderr = '';
@@ -596,44 +714,58 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
     let downloaded = false;
 
     try {
-        const tikwmRes = await tryDownloadViaTikwm(url, tempFilePath);
-        if (tikwmRes.success) {
-            downloaded = true;
-        } else {
-            downloadErrors.push(`tikwm: ${tikwmRes.error}`);
-            const cobaltRes = await tryDownloadViaCobalt(url, tempFilePath);
-            if (cobaltRes.success) {
+        const platform = detectPlatform(url);
+        if (platform === 'xiaohongshu') {
+            const xhsRes = await tryDownloadViaXhs(url, tempFilePath);
+            if (xhsRes.success) {
+                console.log('[DOWNLOAD] platform=xiaohongshu method=xhs result=ok');
                 downloaded = true;
             } else {
-                downloadErrors.push(`cobalt: ${cobaltRes.error}`);
-                
-                const ytDlpArgs = [
-                    '-f', 'bestvideo*+bestaudio/best',
-                    '-o', tempFilePath,
-                    '--no-playlist',
-                    '--merge-output-format', 'mp4',
-                    '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
-                ];
-                if (process.env.DOWNLOAD_PROXY_URL) {
-                    ytDlpArgs.push('--proxy', process.env.DOWNLOAD_PROXY_URL);
-                }
-                
-                try {
-                    await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+                console.log(`[DOWNLOAD] platform=xiaohongshu method=xhs result=fail ${xhsRes.error}`);
+                downloadErrors.push(`xhs: ${xhsRes.error}`);
+            }
+        } else {
+            const tikwmRes = await tryDownloadViaTikwm(url, tempFilePath);
+            if (tikwmRes.success) {
+                downloaded = true;
+            } else {
+                downloadErrors.push(`tikwm: ${tikwmRes.error}`);
+                const cobaltRes = await tryDownloadViaCobalt(url, tempFilePath);
+                if (cobaltRes.success) {
                     downloaded = true;
-                } catch (err) {
-                    const stderr = err.stderr || '';
-                    if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
-                        console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
-                        try {
-                            await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
-                            downloaded = true;
-                        } catch (err2) {
-                            downloadErrors.push(`yt-dlp: ${(err2.stderr || err2.message).replace(/\n/g, ' ').substring(0, 500)}`);
-                        }
-                    } else {
-                        downloadErrors.push(`yt-dlp: ${(err.stderr || err.message).replace(/\n/g, ' ').substring(0, 500)}`);
+                } else {
+                    downloadErrors.push(`cobalt: ${cobaltRes.error}`);
+                }
+            }
+        }
+
+        if (!downloaded) {
+            const ytDlpArgs = [
+                '-f', 'bestvideo*+bestaudio/best',
+                '-o', tempFilePath,
+                '--no-playlist',
+                '--merge-output-format', 'mp4',
+                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
+            ];
+            if (process.env.DOWNLOAD_PROXY_URL) {
+                ytDlpArgs.push('--proxy', process.env.DOWNLOAD_PROXY_URL);
+            }
+            
+            try {
+                await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+                downloaded = true;
+            } catch (err) {
+                const stderr = err.stderr || '';
+                if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
+                    console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
+                    try {
+                        await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
+                        downloaded = true;
+                    } catch (err2) {
+                        downloadErrors.push(`yt-dlp: ${(err2.stderr || err2.message).replace(/\n/g, ' ').substring(0, 500)}`);
                     }
+                } else {
+                    downloadErrors.push(`yt-dlp: ${(err.stderr || err.message).replace(/\n/g, ' ').substring(0, 500)}`);
                 }
             }
         }
@@ -694,44 +826,58 @@ router.post('/download-video-url-only', authMiddleware, express.json(), async (r
     let downloaded = false;
 
     try {
-        const tikwmRes = await tryDownloadViaTikwm(url, tempFilePath);
-        if (tikwmRes.success) {
-            downloaded = true;
-        } else {
-            downloadErrors.push(`tikwm: ${tikwmRes.error}`);
-            const cobaltRes = await tryDownloadViaCobalt(url, tempFilePath);
-            if (cobaltRes.success) {
+        const platform = detectPlatform(url);
+        if (platform === 'xiaohongshu') {
+            const xhsRes = await tryDownloadViaXhs(url, tempFilePath);
+            if (xhsRes.success) {
+                console.log('[DOWNLOAD] platform=xiaohongshu method=xhs result=ok');
                 downloaded = true;
             } else {
-                downloadErrors.push(`cobalt: ${cobaltRes.error}`);
-                
-                const ytDlpArgs = [
-                    '-f', 'bestvideo*+bestaudio/best',
-                    '-o', tempFilePath,
-                    '--no-playlist',
-                    '--merge-output-format', 'mp4',
-                    '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
-                ];
-                if (process.env.DOWNLOAD_PROXY_URL) {
-                    ytDlpArgs.push('--proxy', process.env.DOWNLOAD_PROXY_URL);
-                }
-                
-                try {
-                    await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+                console.log(`[DOWNLOAD] platform=xiaohongshu method=xhs result=fail ${xhsRes.error}`);
+                downloadErrors.push(`xhs: ${xhsRes.error}`);
+            }
+        } else {
+            const tikwmRes = await tryDownloadViaTikwm(url, tempFilePath);
+            if (tikwmRes.success) {
+                downloaded = true;
+            } else {
+                downloadErrors.push(`tikwm: ${tikwmRes.error}`);
+                const cobaltRes = await tryDownloadViaCobalt(url, tempFilePath);
+                if (cobaltRes.success) {
                     downloaded = true;
-                } catch (err) {
-                    const stderr = err.stderr || '';
-                    if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
-                        console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
-                        try {
-                            await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
-                            downloaded = true;
-                        } catch (err2) {
-                            downloadErrors.push(`yt-dlp: ${(err2.stderr || err2.message).replace(/\n/g, ' ').substring(0, 500)}`);
-                        }
-                    } else {
-                        downloadErrors.push(`yt-dlp: ${(err.stderr || err.message).replace(/\n/g, ' ').substring(0, 500)}`);
+                } else {
+                    downloadErrors.push(`cobalt: ${cobaltRes.error}`);
+                }
+            }
+        }
+
+        if (!downloaded) {
+            const ytDlpArgs = [
+                '-f', 'bestvideo*+bestaudio/best',
+                '-o', tempFilePath,
+                '--no-playlist',
+                '--merge-output-format', 'mp4',
+                '--max-filesize', `${Math.floor(maxUploadSize / (1024 * 1024))}m`
+            ];
+            if (process.env.DOWNLOAD_PROXY_URL) {
+                ytDlpArgs.push('--proxy', process.env.DOWNLOAD_PROXY_URL);
+            }
+            
+            try {
+                await runYtDlp([...ytDlpArgs, '--impersonate', 'chrome', url]);
+                downloaded = true;
+            } catch (err) {
+                const stderr = err.stderr || '';
+                if (stderr.includes('Impersonate target') || stderr.includes('not available')) {
+                    console.log('[yt-dlp] Impersonate target "chrome" failed, retrying with auto-pick ("")...');
+                    try {
+                        await runYtDlp([...ytDlpArgs, '--impersonate', '', url]);
+                        downloaded = true;
+                    } catch (err2) {
+                        downloadErrors.push(`yt-dlp: ${(err2.stderr || err2.message).replace(/\n/g, ' ').substring(0, 500)}`);
                     }
+                } else {
+                    downloadErrors.push(`yt-dlp: ${(err.stderr || err.message).replace(/\n/g, ' ').substring(0, 500)}`);
                 }
             }
         }
