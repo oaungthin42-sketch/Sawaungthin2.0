@@ -9,7 +9,7 @@ import { createJob, getJob, updateJob } from '../services/jobManager.js';
 import { addJobToQueue } from '../services/queue.js';
 import { getSetting, setSetting, deleteSetting, getAllSettingsMasked } from '../services/settings.js';
 import { VOICES, getVoiceConfig, getEffectiveVoiceConfig, parseTuningValue } from '../ai/voices.js';
-import { edgeTtsToFile } from '../ai/edgeTtsPy.js';
+import { synthesizeToFile } from '../ai/ttsEngine.js';
 import db from '../services/db.js';
 import { authMiddleware, adminOnly } from './auth.js';
 import { decrypt } from '../services/settings.js';
@@ -517,11 +517,16 @@ router.post('/preview-voice', authMiddleware, async (req, res) => {
         const previewTmpPath = path.join(process.cwd(), 'data', `preview_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
         let resAudio;
         try {
-            await edgeTtsToFile(previewText, {
-                voice: config.edgeVoice,
+            const previewConfig = {
+                ...config,
                 pitch: effectivePitch,
                 rate: effectiveRate
-            }, previewTmpPath, 15000);
+            };
+            const ttsStart = Date.now();
+            await synthesizeToFile(previewText, previewConfig, previewTmpPath, previewConfig.engine === 'nara' ? 120000 : 15000);
+            if (previewConfig.engine === 'nara') {
+                console.log(`[TTS] engine=nara voice=${previewConfig.naraVoice} block=preview took=${Date.now() - ttsStart}ms`);
+            }
             resAudio = { data: fs.readFileSync(previewTmpPath) };
         } finally {
             try { fs.unlinkSync(previewTmpPath); } catch (_) {}

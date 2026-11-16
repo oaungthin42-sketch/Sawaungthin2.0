@@ -2,6 +2,46 @@ import { getSetting } from '../services/settings.js';
 
 export const VOICES = [
     {
+        id: 'nara-shoon',
+        name: 'Nara ရွှန်း',
+        gender: 'female',
+        lang: 'my',
+        engine: 'nara',
+        naraVoice: 'shoon',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'nara-thazin',
+        name: 'Nara သဇင်',
+        gender: 'female',
+        lang: 'my',
+        engine: 'nara',
+        naraVoice: 'thazin',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'nara-ko-banyar',
+        name: 'Nara ကိုဗညား',
+        gender: 'male',
+        lang: 'my',
+        engine: 'nara',
+        naraVoice: 'ko-banyar',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
+        id: 'nara-htet-myat',
+        name: 'Nara ထက်မြတ်',
+        gender: 'male',
+        lang: 'my',
+        engine: 'nara',
+        naraVoice: 'htet-myat',
+        pitch: '+0Hz',
+        rate: '+0%'
+    },
+    {
         id: 'ms-thiha-original',
         name: 'Microsoft သီဟ (မူရင်းအသံ)',
         gender: 'male',

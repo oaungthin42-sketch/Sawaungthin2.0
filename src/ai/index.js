@@ -6,7 +6,7 @@ import db from '../services/db.js';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
-import { edgeTtsToFile } from './edgeTtsPy.js';
+import { synthesizeToFile } from './ttsEngine.js';
 import ffprobePath from 'ffprobe-static';
 import { getVoiceConfig, getEffectiveVoiceConfig } from './voices.js';
 import { runFFmpeg, getDuration, getAudioDetails } from '../ffmpeg/index.js';
@@ -124,11 +124,16 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         console.log("[AI] Starting TTS Generation (Scene-based Continuous Audio)");
         const cacheMetaPath = cachePath + '.meta.json';
         const voiceConfig = getEffectiveVoiceConfig(voiceId);
-        const edgeVoice = voiceConfig.edgeVoice;
+        const isNara = voiceConfig.engine === 'nara';
         const pitch = voiceConfig.pitch;
         const rate = voiceConfig.rate;
 
-        const currentMeta = { voice: edgeVoice, pitch, rate, len: sceneNarration.length };
+        const currentMeta = {
+            voice: isNara ? 'nara:' + voiceConfig.naraVoice : voiceConfig.edgeVoice,
+            pitch,
+            rate,
+            len: sceneNarration.length
+        };
         if (fs.existsSync(cachePath) && fs.existsSync(cacheMetaPath)) {
             try {
                 const existingMeta = JSON.parse(fs.readFileSync(cacheMetaPath, 'utf8'));
@@ -215,7 +220,6 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         }
 
         const chunks = [];
-        const ttsOptions = { voice: edgeVoice, pitch, rate };
         
         let concurrencyLimit = 3;
         if (process.env.TTS_CONCURRENCY) {
@@ -224,6 +228,14 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 concurrencyLimit = Math.min(parsed, 20);
             }
         }
+        if (isNara) {
+            const naraParallel = parseInt(process.env.NARA_PARALLEL || '2', 10);
+            if (Number.isFinite(naraParallel) && naraParallel >= 1) {
+                concurrencyLimit = Math.min(concurrencyLimit, naraParallel);
+            }
+        }
+
+        const ttsTimeoutMs = isNara ? 120000 : 30000;
 
         for (let i = 0; i < mergedBlocks.length; i++) {
             const chunkFileName = `chunk_${String(i).padStart(4, '0')}.wav`;
@@ -247,14 +259,19 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
+                        const ttsStart = Date.now();
                         let timeoutId;
                         try {
                             const timeoutPromise = new Promise((_, reject) => {
-                                timeoutId = setTimeout(() => reject(new Error("Edge TTS timeout")), 30000);
+                                timeoutId = setTimeout(() => reject(new Error(isNara ? "Nara TTS timeout" : "Edge TTS timeout")), ttsTimeoutMs);
                             });
-                            await Promise.race([edgeTtsToFile(chunkText, ttsOptions, chunkPath, 30000), timeoutPromise]);
+                            await Promise.race([synthesizeToFile(chunkText, voiceConfig, chunkPath, ttsTimeoutMs), timeoutPromise]);
                         } finally {
                             if (timeoutId) clearTimeout(timeoutId);
+                        }
+
+                        if (isNara) {
+                            console.log(`[TTS] engine=nara voice=${voiceConfig.naraVoice} block=${bIdx} took=${Date.now() - ttsStart}ms`);
                         }
                         
                         if (fs.existsSync(chunkPath) && fs.statSync(chunkPath).size > 0) {

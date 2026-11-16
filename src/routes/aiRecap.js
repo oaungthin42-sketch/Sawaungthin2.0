@@ -10,7 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import { generateNarrationTTS, transcribeWav } from '../ai/index.js';
 import { runFFmpeg, extractWav } from '../ffmpeg/index.js';
 import { getTranslationSystemInstruction, getRecapNarrationSystemInstruction } from '../ai/translation.js';
-import { edgeTtsToFile } from '../ai/edgeTtsPy.js';
+import { synthesizeToFile } from '../ai/ttsEngine.js';
 import { getVoiceConfig, getEffectiveVoiceConfig } from '../ai/voices.js';
 import { generateVoxCPMSpeech } from '../ai/voxcpmClone.js';
 import { GEMINI_MODEL } from '../services/geminiConfig.js';
@@ -476,14 +476,18 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
                 if (!success) {
                     try {
-                        console.log(`[AI Recap] Generating Edge TTS for scene ${i}`);
-                        const { edgeVoice, pitch, rate } = getEffectiveVoiceConfig(voiceId);
-                        await edgeTtsToFile(ttsText, { voice: edgeVoice, pitch, rate }, outPath);
+                        const voiceConfig = getEffectiveVoiceConfig(voiceId);
+                        console.log(`[AI Recap] Generating TTS (${voiceConfig.engine === 'nara' ? 'nara:' + voiceConfig.naraVoice : 'edge'}) for scene ${i}`);
+                        const ttsStart = Date.now();
+                        await synthesizeToFile(ttsText, voiceConfig, outPath, voiceConfig.engine === 'nara' ? 120000 : 30000);
+                        if (voiceConfig.engine === 'nara') {
+                            console.log(`[TTS] engine=nara voice=${voiceConfig.naraVoice} block=${i} took=${Date.now() - ttsStart}ms`);
+                        }
                         if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
                             success = true;
                         }
                     } catch(e) {
-                        console.error("[AI Recap] Edge TTS failed", e);
+                        console.error("[AI Recap] TTS failed", e);
                     }
                 }
 
