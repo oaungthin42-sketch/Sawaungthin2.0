@@ -97,7 +97,10 @@ CRITICAL STORYTELLING MANDATES:
 8. Keep sentences flowing naturally.`;
 };
 
-export const getNarratorSystemInstruction = () => {
+export const getNarratorSystemInstruction = (isRecap = false) => {
+    const lengthRule = isRecap
+        ? '11. LENGTH: Each output line should fill its time slot naturally: write a flowing spoken Burmese narration, about 1.0 to 1.6 times as long as a plain translation of its input line, never a short caption. Use connected sentences with the connectors from rule 2. Never output an empty text.'
+        : '11. LENGTH: each output line must be about as long as a natural translation of its input line, at most about 1.2 times; shorter is fine. The video timing is tied to each line, so never write long speeches for short lines. Even for filler lines like "yes" or "okay", write a very short natural narration (for example သူလည်း လက်ခံလိုက်တယ်). Never output an empty text.';
     return `You are a professional Myanmar movie-recap narrator, the calm, fluent storyteller voice of Burmese movie-recap channels, telling a whole story from start to end to listeners. You are NOT a writer, NOT a news reader, NOT a chatty friend and NOT a translator.
 
 INPUT: a JSON array [{"index":0,"text":"original line"}]. Each line is something said in the video, in order. You cannot see the video; you only know these lines.
@@ -116,7 +119,7 @@ The voice is a steady, polite, engaging story-telling voice, fluent spoken Burme
 8. NO intro, outro, title, summary, moral, comment to the audience, or any line that is not tied to an input index. Never write phrases like "ဒီဇာတ်ကားမှာ" or "ကြည့်ရှုသူများ".
 9. Make it easy for Burmese TTS: simple clear words, light punctuation (end a finished sentence with ။), no brackets, no emoji, no symbols.
 10. ZERO ENGLISH CHARACTERS: the whole output must be 100% Burmese script. Transliterate names, foreign words, brand names and acronyms into Burmese phonetic spelling. Numbers must ALWAYS be written fully as Burmese words, never as digits (10000 -> တစ်သောင်း, 1500 -> တစ်ထောင့်ငါးရာ, 2026 -> နှစ်ထောင့်နှစ်ဆယ့်ခြောက်, 3:00 PM -> နေ့လယ် သုံးနာရီ).
-11. LENGTH: each output line must be about as long as a natural translation of its input line, at most about 1.2 times; shorter is fine. The video timing is tied to each line, so never write long speeches for short lines. Even for filler lines like "yes" or "okay", write a very short natural narration (for example သူလည်း လက်ခံလိုက်တယ်). Never output an empty text.
+${lengthRule}
 
 STYLE EXAMPLES (only to show the tone; never copy their content):
 Bad (bookish): ထို့နောက် သူသည် ထိုအမျိုးသမီးအား ချစ်ကြောင်း ဝန်ခံခဲ့သည်။

@@ -369,11 +369,11 @@ export async function generateRecapLines(
 
                 promptText += `
 YOUR TASK:
-1. Act as a storyteller telling the story of this video from beginning to end. The narration must flow continuously, each line connecting naturally to the previous one, not isolated scene captions.
+1. Act as a storyteller telling the story of this video from beginning to end. Write the narration as connected, flowing storytelling, where consecutive lines continue each other with connectors and cause and effect, not as isolated scene captions or short choppy sentences.
 2. Narrate ONLY what is shown or said inside this clip, at the moment it happens. The synopsis is background knowledge only. Never mention events, reveals, or outcomes that have not appeared yet at that timestamp (no spoilers, no foreshadowing).
 3. Cover the ENTIRE clip with no long silent gaps, including silent or action scenes.
 4. Prefer fewer, longer lines (about 4-10 seconds each, 1-3 sentences) instead of many tiny lines.
-5. Each line must be speakable in about 60-70% of (end - start) seconds, at about 2 English words per second, because it will be translated into Burmese, which takes longer to speak. Never write a line longer than its time slot.
+5. Each line must be speakable in about 80-90% of (end - start) seconds, at about 2 English words per second, because it will be translated into Burmese, which takes longer to speak. Never write a line longer than its time slot.
 
 REQUIREMENTS:
 1. Provide the start and end timestamp in seconds relative to this clip (start between 0.0 and ${chunk.duration.toFixed(1)}).

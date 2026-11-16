@@ -346,7 +346,7 @@ export const processRecapPipeline = async (jobId) => {
 
                 let systemInstruction = job.targetLanguage === 'th'
                     ? (isNarratorOrRecap ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
-                    : (isNarratorOrRecap ? getNarratorSystemInstruction() : getTranslationSystemInstruction());
+                    : (isNarratorOrRecap ? getNarratorSystemInstruction(job.narrationStyle === 'recap') : getTranslationSystemInstruction());
 
                 if (storyContext) {
                     systemInstruction += "\n\n[STORY CONTEXT — background understanding of the whole video. Use it ONLY to correctly resolve who is who, relationships, genders, pronouns and tone, and to understand ambiguous lines. Do NOT change the translation style, structure, length or any rule above. Do NOT add events or information that are not in the given dialogue lines. Translate exactly the given items as before.]\n" + storyContext;
@@ -683,6 +683,7 @@ export const processRecapPipeline = async (jobId) => {
                     const concatList = [];
                     const placedSubtitles = [];
                     let lastNarrationEnd = 0;
+                    let totalSilence = 0;
 
                     for (let gIdx = 0; gIdx < mergedGroups.length; gIdx++) {
                         const group = mergedGroups[gIdx];
@@ -693,16 +694,13 @@ export const processRecapPipeline = async (jobId) => {
                         const sliceEnd = group.final_audio_end;
                         const sliceDur = Math.max(0.05, sliceEnd - sliceStart);
 
-                        // If sliceDur > slot, speed the slice up with atempo = min(sliceDur / slot, 1.35)
-                        let atempo = 1.0;
-                        if (sliceDur > slot) {
-                            atempo = Math.min(sliceDur / slot, 1.35);
-                        }
+                        // Fit-to-slot: slow down up to 15% (0.85) or speed up up to 35% (1.35) to target 95% of slot
+                        const atempo = Math.min(1.35, Math.max(0.85, sliceDur / (slot * 0.95)));
 
                         // Narration for a group starts at max(scene_start, end of the previous narration)
                         const placedStart = Math.max(sceneStart, lastNarrationEnd);
 
-                        // Cut slice from current TTS file and speed up if needed
+                        // Cut slice from current TTS file and speed up/slow down if needed
                         const sliceWavPath = path.join(slicesDir, `slice_${gIdx}.wav`);
                         const filter = atempo !== 1.0 ? `atempo=${atempo.toFixed(4)}` : 'anull';
 
@@ -740,6 +738,10 @@ export const processRecapPipeline = async (jobId) => {
                         concatList.push(`file '${sliceWavPath}'`);
                         lastNarrationEnd = placedEnd;
 
+                        const silenceAfter = Math.max(0, sceneEnd - placedEnd);
+                        totalSilence += silenceAfter;
+                        console.log(`[RECAP-FILL] group ${gIdx} slot=${slot.toFixed(2)}s tts=${sliceDur.toFixed(2)}s atempo=${atempo.toFixed(2)} silence_after=${silenceAfter.toFixed(2)}s`);
+
                         // Build state.narrationTranscript (subtitles) from REAL placed start/end
                         if (group.chunks && group.chunks.length > 0) {
                             for (const chunk of group.chunks) {
@@ -760,6 +762,9 @@ export const processRecapPipeline = async (jobId) => {
                             });
                         }
                     }
+
+                    const silencePct = totalVidDur > 0 ? ((totalSilence / totalVidDur) * 100).toFixed(1) : '0.0';
+                    console.log(`[RECAP-FILL] total_silence=${totalSilence.toFixed(2)}s of ${totalVidDur.toFixed(2)}s (${silencePct}%)`);
 
                     // Fill remaining time with silence up to original video duration
                     if (totalVidDur > lastNarrationEnd + 0.01) {
