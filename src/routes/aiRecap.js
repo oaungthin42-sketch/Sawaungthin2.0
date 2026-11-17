@@ -676,6 +676,12 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
                         const cy = Math.max(0, y - pad);
                         const cw = Math.min(vidW - cx, w + pad * 2);
                         const ch = Math.min(vidH - cy, h + pad * 2);
+                        const maxR = Math.max(1, Math.floor(Math.min(cw, ch) / 4));
+                        const effSafe = Math.min(eff, maxR);
+                        const maskBlurSafe = Math.min(maskBlur, maxR);
+                        if (effSafe < eff || maskBlurSafe < maskBlur) {
+                            console.log(`[BLUR] box ${i} radii clamped: eff=${eff}->${effSafe} maskBlur=${maskBlur}->${maskBlurSafe} (crop ${cw}x${ch})`);
+                        }
 
                         const boxInCropX = x - cx;
                         const boxInCropY = y - cy;
@@ -692,8 +698,8 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
                         filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
                         filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
-                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
-                        filterComplex += `${blurCrop}boxblur=${eff}:1${blurDone};`;
+                        filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlurSafe}:1${mask};`;
+                        filterComplex += `${blurCrop}boxblur=${effSafe}:1${blurDone};`;
                         filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
                         filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
 

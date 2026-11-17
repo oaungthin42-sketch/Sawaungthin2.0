@@ -1686,6 +1686,12 @@ export const processRecapPipeline = async (jobId) => {
                             const cy = Math.max(0, y - pad);
                             const cw = Math.min(state.outputWidth - cx, w + pad * 2);
                             const ch = Math.min(state.outputHeight - cy, h + pad * 2);
+                            const maxR = Math.max(1, Math.floor(Math.min(cw, ch) / 4));
+                            const effSafe = Math.min(eff, maxR);
+                            const maskBlurSafe = Math.min(maskBlur, maxR);
+                            if (effSafe < eff || maskBlurSafe < maskBlur) {
+                                console.log(`[BLUR] box ${i} radii clamped: eff=${eff}->${effSafe} maskBlur=${maskBlur}->${maskBlurSafe} (crop ${cw}x${ch})`);
+                            }
                             
                             // Calculate the true offset of the user's box within our padded crop
                             const boxInCropX = x - cx;
@@ -1718,13 +1724,13 @@ export const processRecapPipeline = async (jobId) => {
                             filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
                             
                             // Generate the feathered mask using the enlarged white box coordinates
-                            filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
+                            filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlurSafe}:1${mask};`;
                             
                             // Blur the cropped video content.
                             // We use TWO passes of power=1 (boxblur=eff:1,boxblur=eff:1) rather than one, because 
                             // convolving a box filter with itself produces a triangle filter, which gives a smoother, 
                             // more Gaussian-like blur without blocky artifacts at high strengths.
-                            filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                            filterComplex += `${blurCrop}boxblur=${effSafe}:1,boxblur=${effSafe}:1${blurDone};`;
                             
                             // Merge the alpha mask and overlay
                             filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
@@ -1904,6 +1910,12 @@ export const processRecapPipeline = async (jobId) => {
                             const cy = Math.max(0, y - pad);
                             const cw = Math.min(state.outputWidth - cx, w + pad * 2);
                             const ch = Math.min(state.outputHeight - cy, h + pad * 2);
+                            const maxR = Math.max(1, Math.floor(Math.min(cw, ch) / 4));
+                            const effSafe = Math.min(eff, maxR);
+                            const maskBlurSafe = Math.min(maskBlur, maxR);
+                            if (effSafe < eff || maskBlurSafe < maskBlur) {
+                                console.log(`[BLUR] box ${i} radii clamped: eff=${eff}->${effSafe} maskBlur=${maskBlur}->${maskBlurSafe} (crop ${cw}x${ch})`);
+                            }
 
                             const boxInCropX = x - cx;
                             const boxInCropY = y - cy;
@@ -1925,8 +1937,8 @@ export const processRecapPipeline = async (jobId) => {
 
                             filterComplex += `${lastMap}split=2${mainSplit}${blurSplit};`;
                             filterComplex += `${blurSplit}crop=${cw}:${ch}:${cx}:${cy},split=2${blurCrop}${maskBase};`;
-                            filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlur}:1${mask};`;
-                            filterComplex += `${blurCrop}boxblur=${eff}:1,boxblur=${eff}:1${blurDone};`;
+                            filterComplex += `${maskBase}drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill,drawbox=x=${maskX}:y=${maskY}:w=${maskW}:h=${maskH}:color=white:t=fill,boxblur=${maskBlurSafe}:1${mask};`;
+                            filterComplex += `${blurCrop}boxblur=${effSafe}:1,boxblur=${effSafe}:1${blurDone};`;
                             filterComplex += `${blurDone}${mask}alphamerge${alphaBlur};`;
                             filterComplex += `${mainSplit}${alphaBlur}overlay=${cx}:${cy}${nextMap};`;
 
