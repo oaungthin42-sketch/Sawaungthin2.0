@@ -9,7 +9,7 @@ const SCRIPT_PATH = path.join(__dirname, 'edge_tts_cli.py');
 
 export const edgeTtsToFile = (text, options, outPath, timeoutMs = 30000) => new Promise((resolve, reject) => {
     const { voice, rate, pitch } = options || {};
-    const textPath = `${outPath}.input.txt`;
+    const textPath = `${outPath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.input.txt`;
     try {
         fs.writeFileSync(textPath, text, 'utf8');
     } catch (writeErr) {

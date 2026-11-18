@@ -3,7 +3,7 @@ import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { runFFmpeg, getDuration } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { GEMINI_MODEL } from '../services/geminiConfig.js';
+import { getGeminiModel } from '../services/geminiConfig.js';
 
 function parseJsonArrayLenient(text) {
     let clean = (text || '').trim();
@@ -214,7 +214,7 @@ export async function generateRecapLines(
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const rawModel = GEMINI_MODEL;
+    const rawModel = getGeminiModel();
     const modelName = rawModel.replace(/^google\//, '');
 
     // Divide video into configurable chunks (default 600s, clamped 300..3600) with 10s overlap

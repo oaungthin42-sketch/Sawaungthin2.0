@@ -3,7 +3,7 @@ import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { runFFmpeg } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
-import { GEMINI_MODEL } from '../services/geminiConfig.js';
+import { getGeminiModel } from '../services/geminiConfig.js';
 
 export async function generateStoryContext(videoPath, durationSec, tempArea = null, targetLanguage = 'my', includeCaption = false) {
     const startTime = Date.now();
@@ -81,7 +81,7 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
             throw new Error(`Gemini file processing failed or timed out. Final state: ${state}`);
         }
 
-        const rawModel = GEMINI_MODEL;
+        const rawModel = getGeminiModel();
         const modelName = rawModel.replace(/^google\//, '');
 
         const langCaption = targetLanguage === 'th' ? 'written in Thai' : 'written in Burmese';

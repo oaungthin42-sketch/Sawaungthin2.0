@@ -235,7 +235,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
             }
         }
 
-        const ttsTimeoutMs = isNara ? 120000 : 30000;
+        const ttsTimeoutMs = isNara ? 120000 : 60000;
 
         for (let i = 0; i < mergedBlocks.length; i++) {
             const chunkFileName = `chunk_${String(i).padStart(4, '0')}.wav`;
@@ -260,18 +260,19 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
                         const ttsStart = Date.now();
-                        let timeoutId;
-                        try {
-                            const timeoutPromise = new Promise((_, reject) => {
-                                timeoutId = setTimeout(() => reject(new Error(isNara ? "Nara TTS timeout" : "Edge TTS timeout")), ttsTimeoutMs);
-                            });
-                            await Promise.race([synthesizeToFile(chunkText, voiceConfig, chunkPath, ttsTimeoutMs), timeoutPromise]);
-                        } finally {
-                            if (timeoutId) clearTimeout(timeoutId);
-                        }
-
                         if (isNara) {
+                            let timeoutId;
+                            try {
+                                const timeoutPromise = new Promise((_, reject) => {
+                                    timeoutId = setTimeout(() => reject(new Error("Nara TTS timeout")), ttsTimeoutMs);
+                                });
+                                await Promise.race([synthesizeToFile(chunkText, voiceConfig, chunkPath, ttsTimeoutMs), timeoutPromise]);
+                            } finally {
+                                if (timeoutId) clearTimeout(timeoutId);
+                            }
                             console.log(`[TTS] engine=nara voice=${voiceConfig.naraVoice} block=${bIdx} took=${Date.now() - ttsStart}ms`);
+                        } else {
+                            await synthesizeToFile(chunkText, voiceConfig, chunkPath, ttsTimeoutMs);
                         }
                         
                         if (fs.existsSync(chunkPath) && fs.statSync(chunkPath).size > 0) {
@@ -282,7 +283,10 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
                         }
                     } catch (err) {
                         lastError = err;
-                        console.warn(`[AI] TTS attempt ${attempt} failed for block ${bIdx}:`, err);
+                        console.warn(`[TTS] block ${bIdx} attempt ${attempt} failed: ${err?.message || err}`);
+                        if (attempt < 3) {
+                            await new Promise(r => setTimeout(r, attempt * 1500));
+                        }
                     }
                 }
 

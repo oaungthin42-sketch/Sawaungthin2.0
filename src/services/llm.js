@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { getSetting } from './settings.js';
-import { GEMINI_MODEL } from './geminiConfig.js';
+import { getGeminiModel } from './geminiConfig.js';
 
 function parseLLMOptions(options, ...extraArgs) {
     let systemInstruction = '';
@@ -43,7 +43,7 @@ export async function callGemini(options, ...extraArgs) {
         throw new Error("Gemini API key is not configured. Please add your GEMINI_API_KEY in Settings.");
     }
 
-    let targetModel = (model || GEMINI_MODEL).trim();
+    let targetModel = (model || getGeminiModel()).trim();
     if (targetModel.startsWith('google/')) {
         targetModel = targetModel.replace(/^google\//, '');
     }

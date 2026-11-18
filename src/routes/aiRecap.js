@@ -13,7 +13,7 @@ import { getTranslationSystemInstruction, getRecapNarrationSystemInstruction } f
 import { synthesizeToFile } from '../ai/ttsEngine.js';
 import { getVoiceConfig, getEffectiveVoiceConfig } from '../ai/voices.js';
 import { generateVoxCPMSpeech } from '../ai/voxcpmClone.js';
-import { GEMINI_MODEL } from '../services/geminiConfig.js';
+import { getGeminiModel } from '../services/geminiConfig.js';
 
 const router = express.Router();
 
@@ -249,7 +249,7 @@ Every source_start/source_end in "segments" must fall within the bounds of at le
         const currentPrompt = buildPrompt(retryAttempt > 0 ? "Your previous output was too short. This time, ensure you generate at least 35-40% of the source runtime in spoken narration length by adding more detailed storytelling and events." : "");
         console.log(`[AI Recap] Calling generateContent for narration script (Attempt ${retryAttempt + 1})...`);
         const response = await ai.models.generateContent({
-            model: GEMINI_MODEL,
+            model: getGeminiModel(),
             contents: [
                 {
                     role: "user",
