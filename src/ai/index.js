@@ -589,7 +589,7 @@ export const generateNarrationTTS = async (sceneNarration, cachePath, voiceId, o
         const GAP_MIN_KEEP    = 1.2;  // a gap shorter than this AFTER removing the margins is not used
         const TRIM_LONG_GAP_MIN = 20;   // gaps shorter than this many seconds are kept in full
         const TRIM_KEEP_RATIO = 0.6;    // for longer gaps keep this fraction of the gap
-        if (options && options.keepOriginalGaps && options.sourceVideoPath && mergedBlocks.length > 0) {
+        if (options && options.keepOriginalGaps && !options.keepFullVideo && options.sourceVideoPath && mergedBlocks.length > 0) {
             try {
                 const blockEntryGroups = mergedBlocks.map(block =>
                     authoritativeTimeline.filter(e => block.scenes.includes(e.chunk_index))

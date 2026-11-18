@@ -154,6 +154,8 @@ export const processRecapPipeline = async (jobId) => {
     };
 
     try {
+        const keepTimeline = job.narrationStyle === 'recap' || !!job.keepFullVideo;
+        const dubbing = !!job.keepFullVideo && job.narrationStyle !== 'recap';
         console.log(`[Job ${jobId}] Pipeline started. Current Step: ${job.currentStep || STEPS.UPLOAD}`);
 
         updateJob(jobId, { progress: 1, status: 'Preparing Video' });
@@ -208,6 +210,10 @@ export const processRecapPipeline = async (jobId) => {
             state.outputWidth = videoDims.width;
             state.outputHeight = videoDims.height;
             console.log(`[VIDEO-DIMENSIONS] Detected input resolution: ${state.outputWidth}x${state.outputHeight}. This will be used as the output canvas (no more forced 1080x1920).`);
+            saveState();
+        }
+        if (!Number.isFinite(state.originalVideoDuration) || state.originalVideoDuration <= 0) {
+            state.originalVideoDuration = await getDuration(job.videoPath);
             saveState();
         }
 
@@ -489,7 +495,8 @@ export const processRecapPipeline = async (jobId) => {
                 referenceVoiceId: job.referenceVoiceId,
                 sourceVideoPath: job.videoPath,
                 videoDuration: state.originalVideoDuration,
-                keepOriginalGaps: !!job.keepOriginalGaps
+                keepOriginalGaps: !!job.keepOriginalGaps && !job.keepFullVideo,
+                keepFullVideo: !!job.keepFullVideo
             });
             saveState();
         }
@@ -532,7 +539,7 @@ export const processRecapPipeline = async (jobId) => {
                 throw new Error("Authoritative timeline JSON not found.");
             }
             
-            if (job.narrationStyle === 'recap') {
+            if (keepTimeline) {
                 const totalVidDur = state.originalVideoDuration;
                 const mergedGroups = [];
                 let currentGroup = null;
@@ -540,6 +547,19 @@ export const processRecapPipeline = async (jobId) => {
                 for (let i = 0; i < authTimeline.length; i++) {
                     const chunk = authTimeline[i];
                     if (!chunk) continue;
+
+                    if (dubbing) {
+                        mergedGroups.push({
+                            text: chunk.text,
+                            orig_start: chunk.orig_start,
+                            orig_end: chunk.orig_end,
+                            line_end: chunk.orig_end,
+                            final_audio_start: chunk.final_audio_start,
+                            final_audio_end: chunk.final_audio_end,
+                            chunks: [chunk]
+                        });
+                        continue;
+                    }
 
                     if (!currentGroup) {
                         currentGroup = {
@@ -578,11 +598,21 @@ export const processRecapPipeline = async (jobId) => {
 
                 // Ensure mergedGroups are contiguous over the whole video
                 if (mergedGroups.length > 0) {
-                    mergedGroups[0].orig_start = 0;
-                    for (let i = 0; i < mergedGroups.length - 1; i++) {
-                        mergedGroups[i].orig_end = mergedGroups[i + 1].orig_start;
+                    if (dubbing) {
+                        mergedGroups[0].video_start = 0;
+                        for (let i = 0; i < mergedGroups.length - 1; i++) {
+                            const nextStart = Math.max(mergedGroups[i].video_start, mergedGroups[i + 1].orig_start);
+                            mergedGroups[i].video_end = nextStart;
+                            mergedGroups[i + 1].video_start = nextStart;
+                        }
+                        mergedGroups[mergedGroups.length - 1].video_end = totalVidDur;
+                    } else {
+                        mergedGroups[0].orig_start = 0;
+                        for (let i = 0; i < mergedGroups.length - 1; i++) {
+                            mergedGroups[i].orig_end = mergedGroups[i + 1].orig_start;
+                        }
+                        mergedGroups[mergedGroups.length - 1].orig_end = totalVidDur;
                     }
-                    mergedGroups[mergedGroups.length - 1].orig_end = totalVidDur;
                 }
 
                 // Build timeline directly from contiguous scene groups so OUTPUT timeline equals ORIGINAL timeline:
@@ -590,8 +620,8 @@ export const processRecapPipeline = async (jobId) => {
                 const timeline = [];
                 for (let i = 0; i < mergedGroups.length; i++) {
                     const group = mergedGroups[i];
-                    const scene_start = group.orig_start;
-                    const scene_end = group.orig_end;
+                    const scene_start = dubbing ? group.video_start : group.orig_start;
+                    const scene_end = dubbing ? group.video_end : group.orig_end;
                     const target_dur = scene_end - scene_start;
                     if (target_dur <= 0.001) continue;
 
@@ -684,6 +714,8 @@ export const processRecapPipeline = async (jobId) => {
                     const placedSubtitles = [];
                     let lastNarrationEnd = 0;
                     let totalSilence = 0;
+                    let maxDelay = 0;
+                    let linesDelayed = 0;
 
                     for (let gIdx = 0; gIdx < mergedGroups.length; gIdx++) {
                         const group = mergedGroups[gIdx];
@@ -694,8 +726,11 @@ export const processRecapPipeline = async (jobId) => {
                         const sliceEnd = group.final_audio_end;
                         const sliceDur = Math.max(0.05, sliceEnd - sliceStart);
 
-                        // Fit-to-slot: slow down up to 15% (0.85) or speed up up to 35% (1.35) to target 95% of slot
-                        const atempo = Math.min(1.35, Math.max(0.85, sliceDur / (slot * 0.95)));
+                        const ownDur = dubbing ? Math.max(0.3, group.line_end - group.orig_start) : slot;
+                        // Fit-to-slot (recap) vs dub-sync (never slow below 1.0, cap speedup at 1.35)
+                        const atempo = dubbing
+                            ? Math.min(1.35, Math.max(1.0, sliceDur / ownDur))
+                            : Math.min(1.35, Math.max(0.85, sliceDur / (slot * 0.95)));
 
                         // Narration for a group starts at max(scene_start, end of the previous narration)
                         const placedStart = Math.max(sceneStart, lastNarrationEnd);
@@ -738,9 +773,16 @@ export const processRecapPipeline = async (jobId) => {
                         concatList.push(`file '${sliceWavPath}'`);
                         lastNarrationEnd = placedEnd;
 
-                        const silenceAfter = Math.max(0, sceneEnd - placedEnd);
-                        totalSilence += silenceAfter;
-                        console.log(`[RECAP-FILL] group ${gIdx} slot=${slot.toFixed(2)}s tts=${sliceDur.toFixed(2)}s atempo=${atempo.toFixed(2)} silence_after=${silenceAfter.toFixed(2)}s`);
+                        if (dubbing) {
+                            const delay = Math.max(0, placedStart - sceneStart);
+                            if (delay > 0.01) linesDelayed++;
+                            if (delay > maxDelay) maxDelay = delay;
+                            console.log(`[DUB-SYNC] line ${gIdx} start=${sceneStart.toFixed(2)} tts=${sliceDur.toFixed(2)}s own=${ownDur.toFixed(2)}s atempo=${atempo.toFixed(2)} delay=${delay.toFixed(2)}s`);
+                        } else {
+                            const silenceAfter = Math.max(0, sceneEnd - placedEnd);
+                            totalSilence += silenceAfter;
+                            console.log(`[RECAP-FILL] group ${gIdx} slot=${slot.toFixed(2)}s tts=${sliceDur.toFixed(2)}s atempo=${atempo.toFixed(2)} silence_after=${silenceAfter.toFixed(2)}s`);
+                        }
 
                         // Build state.narrationTranscript (subtitles) from REAL placed start/end
                         if (group.chunks && group.chunks.length > 0) {
@@ -763,8 +805,12 @@ export const processRecapPipeline = async (jobId) => {
                         }
                     }
 
-                    const silencePct = totalVidDur > 0 ? ((totalSilence / totalVidDur) * 100).toFixed(1) : '0.0';
-                    console.log(`[RECAP-FILL] total_silence=${totalSilence.toFixed(2)}s of ${totalVidDur.toFixed(2)}s (${silencePct}%)`);
+                    if (dubbing) {
+                        console.log(`[DUB-SYNC] max_delay=${maxDelay.toFixed(2)}s lines_delayed=${linesDelayed}/${mergedGroups.length}`);
+                    } else {
+                        const silencePct = totalVidDur > 0 ? ((totalSilence / totalVidDur) * 100).toFixed(1) : '0.0';
+                        console.log(`[RECAP-FILL] total_silence=${totalSilence.toFixed(2)}s of ${totalVidDur.toFixed(2)}s (${silencePct}%)`);
+                    }
 
                     // Fill remaining time with silence up to original video duration
                     if (totalVidDur > lastNarrationEnd + 0.01) {
@@ -1149,7 +1195,7 @@ export const processRecapPipeline = async (jobId) => {
                 const freezeAmount = t.target_dur - ((t.scene_end - t.scene_start) / speed);
                 console.log(`[FREEZE-PADDING] segment ${globalIdx}: speed=${speed.toFixed(2)}, freeze_padding=${freezeAmount.toFixed(2)}s`);
                 const hflipFilter = job.flipped ? 'hflip,' : '';
-                const stopDur = job.narrationStyle === 'recap' ? 0 : target_dur;
+                const stopDur = keepTimeline ? 0 : target_dur;
                 const filter = `[0:v]${hflipFilter}setpts=${(1/speed).toFixed(4)}*(PTS-STARTPTS),tpad=stop_mode=clone:stop_duration=${stopDur},scale=${state.outputWidth}:${state.outputHeight}:force_original_aspect_ratio=increase,crop=${state.outputWidth}:${state.outputHeight},fps=30,setsar=1,format=yuv420p[v]`;
                 
                 const segFile = path.join(cacheDir, `seg_${globalIdx}.ts`);
@@ -1266,7 +1312,7 @@ export const processRecapPipeline = async (jobId) => {
             
                         // Generate ducking envelope and diagnostics
             let authTimeline = [];
-            if (job.narrationStyle === 'recap') {
+            if (keepTimeline) {
                 authTimeline = (state.narrationTranscript || []).map(s => ({
                     final_audio_start: s.timestamp[0],
                     final_audio_end: s.timestamp[1],

@@ -609,8 +609,9 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const subtitleStyle = body.subtitleStyle === 'single' ? 'single' : 'twotone';
     const speed = parseFloat(body.speed) || 1.0;
     const flipped = body.flipped === 'true' ? 1 : 0;
-    const keepOriginalGaps = body.keepOriginalGaps === 'true' ? 1 : 0;
     const narrationStyle = body.narrationStyle === 'recap' ? 'recap' : (body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
+    const keepFullVideo = narrationStyle === 'recap' ? 0 : (body.keepFullVideo === 'true' ? 1 : 0);
+    const keepOriginalGaps = keepFullVideo === 1 ? 0 : (body.keepOriginalGaps === 'true' ? 1 : 0);
     const targetLanguage = body.targetLanguage === 'th' ? 'th' : 'my';
     let musicPath = null;
     const musicId = body.musicId;
@@ -656,6 +657,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         speed: speed,
         flipped: flipped,
         keepOriginalGaps: keepOriginalGaps,
+        keepFullVideo: keepFullVideo,
         narrationStyle: narrationStyle,
         targetLanguage: targetLanguage,
         musicPath: musicPath,
@@ -1056,8 +1058,9 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const subtitleStyle = req.body.subtitleStyle === 'single' ? 'single' : 'twotone';
      const speed = parseFloat(req.body.speed) || 1.0;
      const flipped = req.body.flipped === 'true' ? 1 : 0;
-     const keepOriginalGaps = req.body.keepOriginalGaps === 'true' ? 1 : 0;
      const narrationStyle = req.body.narrationStyle === 'recap' ? 'recap' : (req.body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
+     const keepFullVideo = narrationStyle === 'recap' ? 0 : (req.body.keepFullVideo === 'true' ? 1 : 0);
+     const keepOriginalGaps = keepFullVideo === 1 ? 0 : (req.body.keepOriginalGaps === 'true' ? 1 : 0);
      const targetLanguage = req.body.targetLanguage === 'th' ? 'th' : 'my';
      let musicPath = null;
      const musicId = req.body.musicId;
@@ -1103,6 +1106,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          speed: speed,
          flipped: flipped,
          keepOriginalGaps: keepOriginalGaps,
+         keepFullVideo: keepFullVideo,
          narrationStyle: narrationStyle,
          targetLanguage: targetLanguage,
          musicPath: musicPath,

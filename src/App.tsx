@@ -175,6 +175,7 @@ function App() {
   const [outputSpeed, setOutputSpeed] = useState<number>(1.0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [keepOriginalGaps, setKeepOriginalGaps] = useState<boolean>(false);
+  const [keepFullVideo, setKeepFullVideo] = useState<boolean>(false);
   const [narratorMode, setNarratorMode] = useState<boolean>(false);
   const [fullRecapMode, setFullRecapMode] = useState<boolean>(false);
   const prevNarratorModeRef = useRef<boolean>(false);
@@ -860,6 +861,7 @@ function App() {
         formData.append('speed', outputSpeed.toString());
         formData.append('flipped', isFlipped.toString());
         formData.append('keepOriginalGaps', keepOriginalGaps.toString());
+        formData.append('keepFullVideo', keepFullVideo.toString());
         formData.append('narrationStyle', fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'));
         formData.append('targetLanguage', targetLanguage);
 
@@ -892,6 +894,7 @@ function App() {
           speed: outputSpeed.toString(),
           flipped: isFlipped.toString(),
           keepOriginalGaps: keepOriginalGaps.toString(),
+          keepFullVideo: keepFullVideo.toString(),
           narrationStyle: fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'),
           targetLanguage: targetLanguage,
           ...(musicEnabled && musicId ? {
@@ -1505,13 +1508,35 @@ function App() {
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">နောက်ခံအသံ ထိန်းမည်</span>
                                       <button 
                                           type="button"
-                                          onClick={() => setKeepOriginalGaps(!keepOriginalGaps)} 
-                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${keepOriginalGaps ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                          disabled={!fullRecapMode && keepFullVideo}
+                                          onClick={() => {
+                                              const next = !keepOriginalGaps;
+                                              setKeepOriginalGaps(next);
+                                              if (next) setKeepFullVideo(false);
+                                          }} 
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${keepOriginalGaps ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'} ${(!fullRecapMode && keepFullVideo) ? 'opacity-50 cursor-not-allowed' : ''}`}
                                           title="စကားမပြောတဲ့ ၂ စက္ကန့်ထက်ရှည်တဲ့ အခန်းတွေမှာ မူရင်းနောက်ခံအသံ (တီးလုံး၊ ပေါက်ကွဲသံ စသည်) ကို ထိန်းထားမည်"
                                       >
                                           {keepOriginalGaps ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
+                                  {!fullRecapMode && (
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title="ဗီဒီယိုကို ဘာမှမဖြတ်ဘဲ မူရင်းအသံအားလုံး (စကားသံ၊ နောက်ခံ) ကို ဖယ်ပြီး TTS အသံပဲ ထားမည်။ စကားတစ်ကြောင်းချင်းကို မူရင်းပြောတဲ့ နေရာမှာ ပြောမည်">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">မူရင်းအသံ ဖျောက်မည်</span>
+                                      <button 
+                                          type="button"
+                                          onClick={() => {
+                                              const next = !keepFullVideo;
+                                              setKeepFullVideo(next);
+                                              if (next) setKeepOriginalGaps(false);
+                                          }} 
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${keepFullVideo ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                          title="ဗီဒီယိုကို ဘာမှမဖြတ်ဘဲ မူရင်းအသံအားလုံး (စကားသံ၊ နောက်ခံ) ကို ဖယ်ပြီး TTS အသံပဲ ထားမည်။ စကားတစ်ကြောင်းချင်းကို မူရင်းပြောတဲ့ နေရာမှာ ပြောမည်"
+                                      >
+                                          {keepFullVideo ? 'ON' : 'OFF'}
+                                      </button>
+                                  </div>
+                                  )}
                                   <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title={fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"}>
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Narrator မုဒ်</span>
                                       <button 

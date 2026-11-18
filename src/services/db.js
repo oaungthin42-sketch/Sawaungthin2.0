@@ -45,6 +45,7 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN subtitleStyle TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN speed REAL DEFAULT 1.0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN flipped INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN keepOriginalGaps INTEGER DEFAULT 0`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN keepFullVideo INTEGER DEFAULT 0`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN narrationStyle TEXT DEFAULT 'translate'`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN voiceProvider TEXT DEFAULT 'edge'`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN targetLanguage TEXT DEFAULT 'my'`); } catch (e) {}
