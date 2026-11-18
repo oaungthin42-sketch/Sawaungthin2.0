@@ -612,6 +612,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const narrationStyle = body.narrationStyle === 'recap' ? 'recap' : (body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
     const keepFullVideo = narrationStyle === 'recap' ? 0 : (body.keepFullVideo === 'true' ? 1 : 0);
     const keepOriginalGaps = keepFullVideo === 1 ? 0 : (body.keepOriginalGaps === 'true' ? 1 : 0);
+    const generateCaption = body.generateCaption === 'true' ? 1 : 0;
     const targetLanguage = body.targetLanguage === 'th' ? 'th' : 'my';
     let musicPath = null;
     const musicId = body.musicId;
@@ -658,6 +659,7 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         flipped: flipped,
         keepOriginalGaps: keepOriginalGaps,
         keepFullVideo: keepFullVideo,
+        generateCaption: generateCaption,
         narrationStyle: narrationStyle,
         targetLanguage: targetLanguage,
         musicPath: musicPath,
@@ -1061,6 +1063,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
      const narrationStyle = req.body.narrationStyle === 'recap' ? 'recap' : (req.body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
      const keepFullVideo = narrationStyle === 'recap' ? 0 : (req.body.keepFullVideo === 'true' ? 1 : 0);
      const keepOriginalGaps = keepFullVideo === 1 ? 0 : (req.body.keepOriginalGaps === 'true' ? 1 : 0);
+     const generateCaption = req.body.generateCaption === 'true' ? 1 : 0;
      const targetLanguage = req.body.targetLanguage === 'th' ? 'th' : 'my';
      let musicPath = null;
      const musicId = req.body.musicId;
@@ -1107,6 +1110,7 @@ router.post('/process', authMiddleware, handleUpload, async (req, res) => {
          flipped: flipped,
          keepOriginalGaps: keepOriginalGaps,
          keepFullVideo: keepFullVideo,
+         generateCaption: generateCaption,
          narrationStyle: narrationStyle,
          targetLanguage: targetLanguage,
          musicPath: musicPath,

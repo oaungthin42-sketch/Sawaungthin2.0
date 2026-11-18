@@ -217,8 +217,11 @@ export async function generateRecapLines(
     const rawModel = GEMINI_MODEL;
     const modelName = rawModel.replace(/^google\//, '');
 
-    // Divide video into 600s chunks with 10s overlap
-    const CHUNK_SEC = 600;
+    // Divide video into configurable chunks (default 600s, clamped 300..3600) with 10s overlap
+    const envChunkSec = parseInt(process.env.RECAP_CHUNK_SEC, 10);
+    const settingChunkSec = parseInt(getSetting('RECAP_CHUNK_SEC'), 10);
+    const rawChunkSec = Number.isFinite(envChunkSec) ? envChunkSec : (Number.isFinite(settingChunkSec) ? settingChunkSec : 600);
+    const CHUNK_SEC = Math.min(3600, Math.max(300, rawChunkSec));
     const OVERLAP_SEC = 10;
     const chunks = [];
     let currentStart = 0;
@@ -408,6 +411,7 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
 
                 let response;
                 try {
+                    const callStart = Date.now();
                     response = await ai.models.generateContent({
                         model: modelName,
                         contents: [
@@ -424,6 +428,8 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
                             mediaResolution: 'MEDIA_RESOLUTION_LOW'
                         }
                     });
+                    const callElapsed = ((Date.now() - callStart) / 1000).toFixed(1);
+                    console.log(`[GEMINI-USAGE] call=recap-chunk-${chunk.index} prompt=${response?.usageMetadata?.promptTokenCount ?? 'n/a'} output=${response?.usageMetadata?.candidatesTokenCount ?? 'n/a'} total=${response?.usageMetadata?.totalTokenCount ?? 'n/a'} seconds=${callElapsed}`);
                 } catch (mediaErr) {
                     const errStr = (mediaErr.message || String(mediaErr)).toLowerCase();
                     const status = mediaErr.status || mediaErr.statusCode || (mediaErr.response && mediaErr.response.status);
@@ -431,6 +437,7 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
 
                     if (isMediaResError) {
                         console.warn(`[RECAP] generateContent with mediaResolution failed, retrying without: ${mediaErr.message}`);
+                        const retryStart = Date.now();
                         response = await ai.models.generateContent({
                             model: modelName,
                             contents: [
@@ -446,6 +453,8 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
                                 responseMimeType: 'application/json'
                             }
                         });
+                        const retryElapsed = ((Date.now() - retryStart) / 1000).toFixed(1);
+                        console.log(`[GEMINI-USAGE] call=recap-chunk-${chunk.index} prompt=${response?.usageMetadata?.promptTokenCount ?? 'n/a'} output=${response?.usageMetadata?.candidatesTokenCount ?? 'n/a'} total=${response?.usageMetadata?.totalTokenCount ?? 'n/a'} seconds=${retryElapsed}`);
                     } else {
                         throw mediaErr;
                     }

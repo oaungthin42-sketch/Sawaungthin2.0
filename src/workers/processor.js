@@ -259,7 +259,7 @@ export const processRecapPipeline = async (jobId) => {
             const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
 
             let storyContext = null;
-            if (isNarratorOrRecap && geminiKey) {
+            if (isNarratorOrRecap && !isRecap && geminiKey) {
                 const storyContextCache = path.join(cacheDir, 'story_context.txt');
                 const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
 
@@ -272,7 +272,7 @@ export const processRecapPipeline = async (jobId) => {
                     }
                 } else {
                     updateJob(jobId, { status: 'Understanding Story' });
-                    const storyResult = await generateStoryContext(job.videoPath, job.duration, cacheDir, job.targetLanguage);
+                    const storyResult = await generateStoryContext(job.videoPath, job.duration, cacheDir, job.targetLanguage, !!job.generateCaption);
                     if (storyResult) {
                         if (storyResult.synopsis && storyResult.synopsis.trim()) {
                             storyContext = storyResult.synopsis.trim();
@@ -282,7 +282,7 @@ export const processRecapPipeline = async (jobId) => {
                                 console.warn(`[Job ${jobId}] Failed to write story_context cache:`, e.message);
                             }
                         }
-                        if (storyResult.caption && storyResult.caption.trim()) {
+                        if (job.generateCaption && storyResult.caption && storyResult.caption.trim()) {
                             const storyCaption = storyResult.caption.trim();
                             try {
                                 fs.writeFileSync(storyCaptionCache, storyCaption, 'utf8');
@@ -333,6 +333,45 @@ export const processRecapPipeline = async (jobId) => {
                         console.log(`[Job ${jobId}] Generated ${recapLines.length} recap lines`);
                     }
                 }
+
+                if (Array.isArray(state.originalTranscript) && state.originalTranscript.length > 250) {
+                    const formatMmSs = (sec) => {
+                        const s = Math.max(0, Math.floor(Number.isFinite(sec) ? sec : 0));
+                        const mm = Math.floor(s / 60).toString().padStart(2, '0');
+                        const ss = (s % 60).toString().padStart(2, '0');
+                        return `${mm}:${ss}`;
+                    };
+                    const formattedLines = state.originalTranscript.map(t => {
+                        const start = Number.isFinite(t.start) ? t.start : (Array.isArray(t.timestamp) && Number.isFinite(t.timestamp[0]) ? t.timestamp[0] : 0);
+                        return `[${formatMmSs(start)}] ${(t.text || '').trim()}`;
+                    });
+                    let joined = formattedLines.join('\n');
+                    if (joined.length > 9000) {
+                        let lo = 1;
+                        let hi = formattedLines.length;
+                        let best = '';
+                        while (lo <= hi) {
+                            const mid = Math.floor((lo + hi) / 2);
+                            const subset = [];
+                            for (let k = 0; k < mid; k++) {
+                                const idx = mid === 1 ? 0 : Math.floor((k * (formattedLines.length - 1)) / (mid - 1));
+                                subset.push(formattedLines[idx]);
+                            }
+                            const candidate = subset.join('\n');
+                            if (candidate.length <= 9000) {
+                                best = candidate;
+                                lo = mid + 1;
+                            } else {
+                                hi = mid - 1;
+                            }
+                        }
+                        joined = best;
+                    }
+                    storyContext = joined || null;
+                } else {
+                    storyContext = null;
+                }
+                console.log('[RECAP] story context built from recap lines (no extra Gemini video call)');
             }
 
             updateJob(jobId, { status: job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese' });
@@ -2181,44 +2220,46 @@ export const processRecapPipeline = async (jobId) => {
         }
         
         let generatedCaption = null;
-        try {
-            const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
-            if (fs.existsSync(storyCaptionCache)) {
-                try {
-                    const cachedCap = fs.readFileSync(storyCaptionCache, 'utf8').trim();
-                    if (cachedCap) {
-                        generatedCaption = cachedCap;
-                        console.log(`[CAPTION-GENERATION] Using cached story caption: ${generatedCaption}`);
+        if (job.generateCaption) {
+            try {
+                const storyCaptionCache = path.join(cacheDir, 'story_caption.txt');
+                if (fs.existsSync(storyCaptionCache)) {
+                    try {
+                        const cachedCap = fs.readFileSync(storyCaptionCache, 'utf8').trim();
+                        if (cachedCap) {
+                            generatedCaption = cachedCap;
+                            console.log(`[CAPTION-GENERATION] Using cached story caption: ${generatedCaption}`);
+                        }
+                    } catch (e) {
+                        console.warn(`[Job ${jobId}] Failed to read story_caption cache:`, e.message);
                     }
-                } catch (e) {
-                    console.warn(`[Job ${jobId}] Failed to read story_caption cache:`, e.message);
                 }
-            }
 
-            if (!generatedCaption) {
-                if (state.translatedTranscript && state.translatedTranscript.length > 0) {
-                    if (hasLLMKey()) {
-                        const captionPrompt = job.targetLanguage === 'th'
-                            ? "Write a catchy, high-engagement headline/caption in Thai suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural spoken Thai."
-                            : "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese.";
-                        const response = await callLLM({
-                            contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
-                            systemInstruction: captionPrompt
-                        });
-                        
-                        if (response && response.text) {
-                            generatedCaption = response.text.trim();
+                if (!generatedCaption) {
+                    if (state.translatedTranscript && state.translatedTranscript.length > 0) {
+                        if (hasLLMKey()) {
+                            const captionPrompt = job.targetLanguage === 'th'
+                                ? "Write a catchy, high-engagement headline/caption in Thai suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural spoken Thai."
+                                : "Write a catchy, high-engagement headline/caption in Burmese suitable for a social media short video. Keep it under 15 words. Do not include any hashtags or emojis. Make it highly engaging and natural Burmese.";
+                            const response = await callLLM({
+                                contents: JSON.stringify(state.translatedTranscript.map(t => t.text)),
+                                systemInstruction: captionPrompt
+                            });
+                            
+                            if (response && response.text) {
+                                generatedCaption = response.text.trim();
+                            }
                         }
                     }
                 }
-            }
 
-            if (generatedCaption) {
-                db.prepare('UPDATE jobs SET coverText = ? WHERE id = ?').run(generatedCaption, jobId);
-                console.log(`[CAPTION-GENERATION] Final caption: ${generatedCaption}`);
+                if (generatedCaption) {
+                    db.prepare('UPDATE jobs SET coverText = ? WHERE id = ?').run(generatedCaption, jobId);
+                    console.log(`[CAPTION-GENERATION] Final caption: ${generatedCaption}`);
+                }
+            } catch (captionErr) {
+                console.error(`[CAPTION-GENERATION] Failed to generate cover text:`, captionErr);
             }
-        } catch (captionErr) {
-            console.error(`[CAPTION-GENERATION] Failed to generate cover text:`, captionErr);
         }
 
         updateJob(jobId, {

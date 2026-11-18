@@ -176,6 +176,7 @@ function App() {
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [keepOriginalGaps, setKeepOriginalGaps] = useState<boolean>(false);
   const [keepFullVideo, setKeepFullVideo] = useState<boolean>(false);
+  const [generateCaption, setGenerateCaption] = useState<boolean>(false);
   const [narratorMode, setNarratorMode] = useState<boolean>(false);
   const [fullRecapMode, setFullRecapMode] = useState<boolean>(false);
   const prevNarratorModeRef = useRef<boolean>(false);
@@ -862,6 +863,7 @@ function App() {
         formData.append('flipped', isFlipped.toString());
         formData.append('keepOriginalGaps', keepOriginalGaps.toString());
         formData.append('keepFullVideo', keepFullVideo.toString());
+        formData.append('generateCaption', generateCaption.toString());
         formData.append('narrationStyle', fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'));
         formData.append('targetLanguage', targetLanguage);
 
@@ -895,6 +897,7 @@ function App() {
           flipped: isFlipped.toString(),
           keepOriginalGaps: keepOriginalGaps.toString(),
           keepFullVideo: keepFullVideo.toString(),
+          generateCaption: generateCaption.toString(),
           narrationStyle: fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'),
           targetLanguage: targetLanguage,
           ...(musicEnabled && musicId ? {
@@ -1537,6 +1540,17 @@ function App() {
                                       </button>
                                   </div>
                                   )}
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title="ဖွင့်မှသာ video ရဲ့ ကပ်ရှင်စာသား (Copy ခလုတ်ပါတဲ့ စာသား) ကို Gemini နဲ့ ထုတ်မည်။ ပိတ်ထားရင် Gemini ကို အပိုမခေါ်ပါ။">
+                                      <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">ကပ်ရှင်စာသား ထုတ်မည်</span>
+                                      <button 
+                                          type="button"
+                                          onClick={() => setGenerateCaption(!generateCaption)} 
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${generateCaption ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                          title="ဖွင့်မှသာ video ရဲ့ ကပ်ရှင်စာသား (Copy ခလုတ်ပါတဲ့ စာသား) ကို Gemini နဲ့ ထုတ်မည်။ ပိတ်ထားရင် Gemini ကို အပိုမခေါ်ပါ။"
+                                      >
+                                          {generateCaption ? 'ON' : 'OFF'}
+                                      </button>
+                                  </div>
                                   <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title={fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"}>
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Narrator မုဒ်</span>
                                       <button 
@@ -2240,7 +2254,7 @@ function App() {
                           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
                               <a href={analysisData.videoUrl} download className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-900/30 transition-all hover:scale-105"><Download className="w-5 h-5" /> {targetLanguage === 'th' ? 'ထိုင်းဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်' : 'မြန်မာဗီဒီယို ဒေါင်းလုဒ်လုပ်ရန်'}</a>
                           </div>
-                          {analysisData.coverText && (
+                          {analysisData.coverText && analysisData.coverText.trim() !== '' && (
                               <div className="mt-6 bg-gray-900 border border-gray-800 rounded-2xl p-4 flex items-center justify-between gap-3">
                                   <p className="text-sm text-gray-300 flex-1">{analysisData.coverText}</p>
                                   <button

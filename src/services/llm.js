@@ -74,6 +74,7 @@ export async function callGemini(options, ...extraArgs) {
     for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
         try {
             console.log(`[LLM] Gemini request model=${targetModel} attempt=${attempt + 1}`);
+            const callStart = Date.now();
 
             const timeoutPromise = new Promise((_, reject) => {
                 const timer = setTimeout(() => {
@@ -90,6 +91,8 @@ export async function callGemini(options, ...extraArgs) {
                 }),
                 timeoutPromise
             ]);
+            const elapsed = ((Date.now() - callStart) / 1000).toFixed(1);
+            console.log(`[GEMINI-USAGE] call=translation prompt=${response?.usageMetadata?.promptTokenCount ?? 'n/a'} output=${response?.usageMetadata?.candidatesTokenCount ?? 'n/a'} total=${response?.usageMetadata?.totalTokenCount ?? 'n/a'} seconds=${elapsed}`);
 
             break;
         } catch (err) {

@@ -5,7 +5,7 @@ import { runFFmpeg } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { GEMINI_MODEL } from '../services/geminiConfig.js';
 
-export async function generateStoryContext(videoPath, durationSec, tempArea = null, targetLanguage = 'my') {
+export async function generateStoryContext(videoPath, durationSec, tempArea = null, targetLanguage = 'my', includeCaption = false) {
     const startTime = Date.now();
     let proxyPath = null;
     let uploadedFile = null;
@@ -85,13 +85,17 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
         const modelName = rawModel.replace(/^google\//, '');
 
         const langCaption = targetLanguage === 'th' ? 'written in Thai' : 'written in Burmese';
-        const promptText = `Watch this entire video and write a concise story synopsis in English for a translator who only has the dialogue text. Include: (1) genre and overall tone; (2) the main characters: names if they are said or shown on screen, otherwise a short descriptive label, plus gender, age group and their relationships to each other; (3) the setting; (4) the story beat by beat in chronological order with approximate timestamps (mm:ss), only the important events and turning points; (5) how the story ends. Maximum about 600 words. Do not transcribe or quote dialogue. Do not invent anything that is not shown or clearly implied.\n\nAfter the synopsis, add one final line starting exactly with "CAPTION:" followed by a catchy, high-engagement headline suitable for a social media short video, under 15 words, no hashtags, ${langCaption}.`;
+        let promptText = `Watch this entire video and write a concise story synopsis in English for a translator who only has the dialogue text. Include: (1) genre and overall tone; (2) the main characters: names if they are said or shown on screen, otherwise a short descriptive label, plus gender, age group and their relationships to each other; (3) the setting; (4) the story beat by beat in chronological order with approximate timestamps (mm:ss), only the important events and turning points; (5) how the story ends. Maximum about 600 words. Do not transcribe or quote dialogue. Do not invent anything that is not shown or clearly implied.`;
+        if (includeCaption) {
+            promptText += `\n\nAfter the synopsis, add one final line starting exactly with "CAPTION:" followed by a catchy, high-engagement headline suitable for a social media short video, under 15 words, no hashtags, ${langCaption}.`;
+        }
 
         console.log(`[STORY-CONTEXT] Calling generateContent with model ${modelName}...`);
 
         let response;
         try {
             console.log(`[LLM] Gemini request model=${modelName} attempt=1`);
+            const callStart = Date.now();
             response = await ai.models.generateContent({
                 model: modelName,
                 contents: [
@@ -107,6 +111,8 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
                     mediaResolution: 'MEDIA_RESOLUTION_LOW'
                 }
             });
+            const callElapsed = ((Date.now() - callStart) / 1000).toFixed(1);
+            console.log(`[GEMINI-USAGE] call=story-context prompt=${response?.usageMetadata?.promptTokenCount ?? 'n/a'} output=${response?.usageMetadata?.candidatesTokenCount ?? 'n/a'} total=${response?.usageMetadata?.totalTokenCount ?? 'n/a'} seconds=${callElapsed}`);
         } catch (configErr) {
             const errStr = (configErr.message || String(configErr)).toLowerCase();
             const status = configErr.status || configErr.statusCode || (configErr.response && configErr.response.status);
@@ -125,6 +131,7 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
             if (isMediaResError || is400) {
                 console.warn('[STORY-CONTEXT] generateContent with mediaResolution failed (mediaResolution/400), retrying without it:', configErr.message);
                 console.log(`[LLM] Gemini request model=${modelName} attempt=2`);
+                const retryStart = Date.now();
                 response = await ai.models.generateContent({
                     model: modelName,
                     contents: [
@@ -137,6 +144,8 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
                         }
                     ]
                 });
+                const retryElapsed = ((Date.now() - retryStart) / 1000).toFixed(1);
+                console.log(`[GEMINI-USAGE] call=story-context prompt=${response?.usageMetadata?.promptTokenCount ?? 'n/a'} output=${response?.usageMetadata?.candidatesTokenCount ?? 'n/a'} total=${response?.usageMetadata?.totalTokenCount ?? 'n/a'} seconds=${retryElapsed}`);
             } else {
                 console.warn('[STORY-CONTEXT] generateContent failed with unrecoverable error:', configErr.message);
                 return null;
@@ -148,20 +157,25 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
 
         if (response && response.text) {
             const rawText = response.text.trim();
-            const lines = rawText.split('\n');
-            let foundIndex = -1;
-            for (let i = lines.length - 1; i >= 0; i--) {
-                if (/^CAPTION:\s*/i.test(lines[i].trim())) {
-                    foundIndex = i;
-                    break;
+            if (includeCaption) {
+                const lines = rawText.split('\n');
+                let foundIndex = -1;
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    if (/^CAPTION:\s*/i.test(lines[i].trim())) {
+                        foundIndex = i;
+                        break;
+                    }
                 }
-            }
 
-            if (foundIndex !== -1) {
-                const capLine = lines[foundIndex].trim();
-                storyCaption = capLine.replace(/^CAPTION:\s*/i, '').trim() || null;
-                const synopsisLines = lines.slice(0, foundIndex).concat(lines.slice(foundIndex + 1));
-                storySynopsis = synopsisLines.join('\n').trim() || null;
+                if (foundIndex !== -1) {
+                    const capLine = lines[foundIndex].trim();
+                    storyCaption = capLine.replace(/^CAPTION:\s*/i, '').trim() || null;
+                    const synopsisLines = lines.slice(0, foundIndex).concat(lines.slice(foundIndex + 1));
+                    storySynopsis = synopsisLines.join('\n').trim() || null;
+                } else {
+                    storySynopsis = rawText;
+                    storyCaption = null;
+                }
             } else {
                 storySynopsis = rawText;
                 storyCaption = null;
