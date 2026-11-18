@@ -13,7 +13,7 @@ import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/in
 import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM, hasLLMKey } from '../services/llm.js';
-import { getTranslationSystemInstruction, getNarratorSystemInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
+import { getTranslationSystemInstruction, getNarratorSystemInstruction, getRecapBurmeseWriterInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
 import { generateStoryContext } from '../ai/storyContext.js';
 import { generateRecapLines } from '../ai/recapScenes.js';
 import { resolveWatermarkFont } from '../services/fonts.js';
@@ -345,17 +345,35 @@ export const processRecapPipeline = async (jobId) => {
                     throw new Error("LLM API key is not configured. Please add it in Settings.");
                 }
 
-                const translationInput = state.originalTranscript.map((t, index) => ({
-                    index,
-                    text: t.text
-                }));
+                const isRecapBurmese = isRecap && job.targetLanguage !== 'th';
+                const translationInput = state.originalTranscript.map((t, index) => {
+                    if (isRecapBurmese) {
+                        const start = Number.isFinite(t.start) ? t.start : (Array.isArray(t.timestamp) && Number.isFinite(t.timestamp[0]) ? t.timestamp[0] : 0);
+                        const end = Number.isFinite(t.end) ? t.end : (Array.isArray(t.timestamp) && Number.isFinite(t.timestamp[1]) ? t.timestamp[1] : start);
+                        const seconds = parseFloat(Math.max(0.1, end - start).toFixed(2));
+                        return {
+                            index,
+                            text: t.text,
+                            seconds,
+                            kind: t.kind === 'action' ? 'action' : 'dialogue'
+                        };
+                    }
+                    return {
+                        index,
+                        text: t.text
+                    };
+                });
 
                 let systemInstruction = job.targetLanguage === 'th'
                     ? (isNarratorOrRecap ? getThaiNarratorSystemInstruction() : getThaiTranslationSystemInstruction())
-                    : (isNarratorOrRecap ? getNarratorSystemInstruction(job.narrationStyle === 'recap') : getTranslationSystemInstruction());
+                    : (isRecap ? getRecapBurmeseWriterInstruction() : (isNarratorOrRecap ? getNarratorSystemInstruction(false) : getTranslationSystemInstruction()));
 
                 if (storyContext) {
-                    systemInstruction += "\n\n[STORY CONTEXT — background understanding of the whole video. Use it ONLY to correctly resolve who is who, relationships, genders, pronouns and tone, and to understand ambiguous lines. Do NOT change the translation style, structure, length or any rule above. Do NOT add events or information that are not in the given dialogue lines. Translate exactly the given items as before.]\n" + storyContext;
+                    if (isRecap) {
+                        systemInstruction += "\n\n[STORY CONTEXT - use it only to resolve who is who, relationships, genders and names; you may use it to keep the story consistent]\n" + storyContext;
+                    } else {
+                        systemInstruction += "\n\n[STORY CONTEXT — background understanding of the whole video. Use it ONLY to correctly resolve who is who, relationships, genders, pronouns and tone, and to understand ambiguous lines. Do NOT change the translation style, structure, length or any rule above. Do NOT add events or information that are not in the given dialogue lines. Translate exactly the given items as before.]\n" + storyContext;
+                    }
                 }
 
                 const totalLines = translationInput.length;

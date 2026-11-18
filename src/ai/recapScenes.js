@@ -44,6 +44,7 @@ function getChunkWhisperFallback(chunkWhisperLines, chunk) {
             return {
                 start: Math.max(chunk.start, s),
                 end: Math.min(chunk.end, e),
+                kind: 'dialogue',
                 text: (w.text || '').trim()
             };
         }).filter(l => l.text.length > 0 && l.end > l.start);
@@ -51,6 +52,7 @@ function getChunkWhisperFallback(chunkWhisperLines, chunk) {
     return [{
         start: chunk.start,
         end: chunk.end,
+        kind: 'dialogue',
         text: 'The story continues as events unfold.'
     }];
 }
@@ -64,6 +66,7 @@ function mergeAndNormalizeRecapLines(allLines, totalDurationSec) {
         .map(l => ({
             start: Math.max(0, Math.min(totalDurationSec, l.start)),
             end: Math.max(0, Math.min(totalDurationSec, l.end)),
+            kind: l.kind === 'action' ? 'action' : 'dialogue',
             text: l.text.trim()
         }))
         .sort((a, b) => a.start - b.start);
@@ -133,6 +136,13 @@ function mergeAndNormalizeRecapLines(allLines, totalDurationSec) {
     // Make lines contiguous over the whole video: sort, first start = 0, each item's end = next item's start, last end = durationSec
     finalLines.sort((a, b) => a.start - b.start);
 
+    for (let i = 0; i < finalLines.length - 1; i++) {
+        const gap = finalLines[i + 1].start - finalLines[i].end;
+        if (gap > 3) {
+            console.log(`[RECAP-CHECK] uncovered gap ${finalLines[i].end.toFixed(1)}-${finalLines[i + 1].start.toFixed(1)} (${gap.toFixed(1)}s)`);
+        }
+    }
+
     const n = finalLines.length;
     finalLines[0].start = 0;
     for (let i = 0; i < n - 1; i++) {
@@ -156,6 +166,7 @@ function mergeAndNormalizeRecapLines(allLines, totalDurationSec) {
                 timestamp: [sFloat, eFloat],
                 start: sFloat,
                 end: eFloat,
+                kind: item.kind === 'action' ? 'action' : 'dialogue',
                 text: item.text
             });
         }
@@ -234,6 +245,8 @@ export async function generateRecapLines(
     console.log(`[RECAP] Divided ${totalDur.toFixed(1)}s video into ${chunks.length} chunks (chunkSize=${CHUNK_SEC}s, overlap=${OVERLAP_SEC}s)`);
 
     const allChunkLines = [];
+    let chunksOk = 0;
+    let chunksFallback = 0;
     const RETRY_DELAYS = [10000, 30000, 60000];
 
     for (let c = 0; c < chunks.length; c++) {
@@ -247,6 +260,7 @@ export async function generateRecapLines(
                 if (Array.isArray(cachedLines) && cachedLines.length > 0) {
                     console.log(`[RECAP] Loaded chunk ${chunk.index + 1}/${chunks.length} from cache (${cachedLines.length} lines)`);
                     allChunkLines.push(...cachedLines);
+                    chunksOk++;
                     if (onProgress) {
                         onProgress(`Recap chunk ${chunk.index + 1}/${chunks.length} loaded from cache`);
                     }
@@ -383,9 +397,11 @@ REQUIREMENTS:
   {
     "start": 0.0,
     "end": 4.5,
+    "kind": "dialogue",
     "text": "English line describing the scene or dialogue"
   }
 ]
+Set "kind" to "dialogue" when the line mainly renders spoken words, and "action" when it narrates what is shown on screen.
 Do not wrap in markdown or backticks. Return JSON array only.`;
 
                 console.log(`[RECAP] Calling Gemini generateContent for chunk ${chunk.index + 1}/${chunks.length}...`);
@@ -455,9 +471,13 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
                         absEnd = absStart + 2.0;
                     }
 
+                    const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
+                    const kind = rawKind === 'action' ? 'action' : 'dialogue';
+
                     mappedLines.push({
                         start: absStart,
                         end: absEnd,
+                        kind,
                         text: txt
                     });
                 }
@@ -493,7 +513,10 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
             }
         }
 
-        if (!chunkSuccess) {
+        if (chunkSuccess) {
+            chunksOk++;
+        } else {
+            chunksFallback++;
             console.warn(`[RECAP] Chunk ${chunk.index} failed all attempts, gracefully falling back to Whisper dialogue lines`);
             generatedChunkLines = getChunkWhisperFallback(chunkWhisperLines, chunk);
         }
@@ -509,6 +532,7 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
 
     const merged = mergeAndNormalizeRecapLines(allChunkLines, totalDur);
     const durationTotal = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[RECAP-SUMMARY] chunks_ok=${chunksOk} chunks_fallback=${chunksFallback} lines=${merged.length}`);
     console.log(`[RECAP] Finished generating recap lines (${merged.length} lines) in ${durationTotal}s`);
 
     return merged;
