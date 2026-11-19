@@ -6,6 +6,7 @@ import { RecentDownloads } from './components/RecentDownloads';
 import { FeedbackForm } from './components/FeedbackForm';
 import { CreditGauge } from './components/CreditGauge';
 import { AIRecapTool } from './components/AIRecapTool';
+import { SrtExtractTool } from './components/SrtExtractTool';
 import { ThemeToggle } from './components/ThemeToggle';
 import { BoltConnector, ProcessingOrb } from './components/BrandFx';
 import { 
@@ -1299,6 +1300,10 @@ function App() {
           return <AIRecapTool />;
       }
 
+      if (activeView === 'srt-extract') {
+          return <SrtExtractTool />;
+      }
+
       // Default: Video Tool
       return (
           <div className="space-y-6">
@@ -2280,6 +2285,7 @@ function App() {
     { id: 'recent', label: 'မကြာသေးမီက ဒေါင်းလုဒ်များ', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
     { id: 'ai-recap-beta', label: 'AI Movie Recap (Beta)', icon: Play },
+    { id: 'srt-extract', label: 'SRT ထုတ်ရန်', icon: Play },
   ];
 
   return (

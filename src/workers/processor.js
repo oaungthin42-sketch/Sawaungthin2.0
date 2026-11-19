@@ -10,7 +10,7 @@ import { updateJob, getJob } from '../services/jobManager.js';
 import { getDuration, getVideoDimensions, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails, cropVideo } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
-import { formatTime, cleanupFiles, safeMoveFile } from '../utils/index.js';
+import { formatTime, generateSRT, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM, hasLLMKey } from '../services/llm.js';
 import { getTranslationSystemInstruction, getNarratorSystemInstruction, getRecapBurmeseWriterInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
@@ -154,9 +154,53 @@ export const processRecapPipeline = async (jobId) => {
     };
 
     try {
+        console.log(`[Job ${jobId}] Pipeline started. Current Step: ${job.currentStep || STEPS.UPLOAD}`);
+
+        if (job.jobType === 'srt-extract') {
+            updateJob(jobId, { progress: 1, status: 'Preparing Video' });
+
+            const videoWavPath = path.join(cacheDir, 'video.wav');
+            if (!hasCompletedStep(job.currentStep, STEPS.EXTRACT_VIDEO_WAV) || !fs.existsSync(videoWavPath)) {
+                advanceStep(STEPS.EXTRACT_VIDEO_WAV, 5, 'Extracting Original Audio');
+                if (!fs.existsSync(videoWavPath)) {
+                    await extractWav(job.videoPath, videoWavPath);
+                }
+            }
+
+            const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
+            if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
+                advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Audio');
+                const __t0 = Date.now();
+                state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache);
+                console.log(`[TIMING] transcribe took ${Math.round((Date.now() - __t0) / 1000)}s`);
+                saveState();
+            } else if (!state.originalTranscript && fs.existsSync(vidTranscriptCache)) {
+                state.originalTranscript = JSON.parse(fs.readFileSync(vidTranscriptCache, 'utf8'));
+            }
+
+            const transcriptChunks = Array.isArray(state.originalTranscript) ? state.originalTranscript : [];
+            const srtContent = generateSRT(transcriptChunks);
+            const srtPath = path.join(cacheDir, 'extracted.srt');
+            fs.writeFileSync(srtPath, srtContent, 'utf8');
+
+            updateJob(jobId, {
+                status: 'complete',
+                progress: 100,
+                currentStep: 'Done',
+                completed_at: Date.now(),
+                result: {
+                    srtPath,
+                    lineCount: transcriptChunks.length,
+                    originalTranscript: transcriptChunks
+                }
+            });
+
+            console.log(`[Job ${jobId}] SRT extraction completed successfully (${transcriptChunks.length} lines).`);
+            return;
+        }
+
         const keepTimeline = job.narrationStyle === 'recap' || !!job.keepFullVideo;
         const dubbing = !!job.keepFullVideo && job.narrationStyle !== 'recap';
-        console.log(`[Job ${jobId}] Pipeline started. Current Step: ${job.currentStep || STEPS.UPLOAD}`);
 
         updateJob(jobId, { progress: 1, status: 'Preparing Video' });
         // 0. CROP SOURCE VIDEO (if cropRect specified)
@@ -2289,7 +2333,7 @@ export const processRecapPipeline = async (jobId) => {
 
         try {
             const currentJob = getJob(jobId);
-            if (currentJob && currentJob.userId) {
+            if (currentJob && currentJob.userId && currentJob.jobType !== 'srt-extract') {
                 const userRow = db.prepare('SELECT role FROM users WHERE id = ?').get(currentJob.userId);
                 if (userRow && userRow.role !== 'admin') {
                     const refundAmount = currentJob.creditsCost !== undefined && currentJob.creditsCost !== null ? currentJob.creditsCost : 1;

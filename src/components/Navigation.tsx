@@ -12,7 +12,8 @@ import {
     X,
     Download,
     Send,
-    Sparkles
+    Sparkles,
+    FileText
 } from 'lucide-react';
 
 interface NavItem {
@@ -26,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
     { id: 'dashboard', label: 'ပင်မစာမျက်နှာ', icon: LayoutDashboard },
     { id: 'tool', label: 'ဗီဒီယို ကိရိယာ', icon: Video },
     { id: 'ai-recap-beta', label: 'AI Movie Recap (Beta)', icon: Sparkles },
+    { id: 'srt-extract', label: 'SRT ထုတ်ရန်', icon: FileText },
     { id: 'recent', label: 'မကြာသေးမီက ဒေါင်းလုဒ်များ', icon: Download },
     { id: 'credits', label: 'Credits', icon: CreditCard },
     { id: 'feedback', label: 'မှတ်ချက်', icon: MessageSquare },

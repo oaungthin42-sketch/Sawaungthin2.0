@@ -54,6 +54,7 @@ try { db.exec(`ALTER TABLE jobs ADD COLUMN musicPath TEXT`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN musicVolume INTEGER DEFAULT 30`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN musicMode TEXT DEFAULT 'loop'`); } catch (e) {}
 try { db.exec(`ALTER TABLE jobs ADD COLUMN musicPosition TEXT DEFAULT 'start'`); } catch (e) {}
+try { db.exec(`ALTER TABLE jobs ADD COLUMN jobType TEXT`); } catch (e) {}
 
 try {
     db.exec(`

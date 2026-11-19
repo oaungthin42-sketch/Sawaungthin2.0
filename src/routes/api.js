@@ -1144,6 +1144,72 @@ router.get('/play/:jobId', (req, res) => {
     res.redirect(job.result.videoUrl);
 });
 
+router.post('/extract-srt', authMiddleware, handleUpload, async (req, res) => {
+    const videoFile = req.file;
+    if (!videoFile) {
+        return res.status(400).json({ error: 'Video file is required' });
+    }
+
+    try {
+        const jobId = uuidv4();
+        const originalFilename = Buffer.from(videoFile.originalname, 'latin1').toString('utf8');
+
+        createJob(jobId, {
+            videoPath: videoFile.path,
+            audioPath: null,
+            originalFilename: originalFilename,
+            userId: req.user.id,
+            narrationStyle: 'translate',
+            targetLanguage: 'my',
+            jobType: 'srt-extract'
+        });
+
+        res.json({ jobId });
+        addJobToQueue(jobId);
+    } catch (err) {
+        console.error('[API] /extract-srt error:', err);
+        if (videoFile.path && fs.existsSync(videoFile.path)) {
+            try { fs.unlinkSync(videoFile.path); } catch (e) {}
+        }
+        res.status(500).json({ error: err.message || 'Failed to create SRT extraction job' });
+    }
+});
+
+router.get('/download-srt/:jobId', authMiddleware, (req, res) => {
+    const job = getJob(req.params.jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    if (job.userId !== req.user.id && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    if (job.status !== 'complete') {
+        return res.status(400).json({ error: 'SRT file is not ready yet' });
+    }
+
+    const srtPath = (job.result && job.result.srtPath)
+        ? job.result.srtPath
+        : path.join(process.cwd(), 'data', 'cache', req.params.jobId, 'extracted.srt');
+
+    if (!fs.existsSync(srtPath)) {
+        return res.status(404).json({ error: 'SRT file not found or expired' });
+    }
+
+    const rawName = job.originalFilename || 'subtitles';
+    const baseName = path.basename(rawName, path.extname(rawName)) || 'subtitles';
+    const downloadName = `${baseName}.srt`;
+    const asciiFallback = `${baseName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'subtitles'}.srt`;
+
+    const stat = fs.statSync(srtPath);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`
+    );
+    fs.createReadStream(srtPath).pipe(res);
+});
+
 
 router.get('/completed-jobs', authMiddleware, (req, res) => {
     const idsParam = req.query.ids;
