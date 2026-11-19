@@ -220,7 +220,7 @@ export async function generateRecapLines(
     // Divide video into configurable chunks (default 600s, clamped 300..3600) with 10s overlap
     const envChunkSec = parseInt(process.env.RECAP_CHUNK_SEC, 10);
     const settingChunkSec = parseInt(getSetting('RECAP_CHUNK_SEC'), 10);
-    const rawChunkSec = Number.isFinite(envChunkSec) ? envChunkSec : (Number.isFinite(settingChunkSec) ? settingChunkSec : 600);
+    const rawChunkSec = Number.isFinite(envChunkSec) ? envChunkSec : (Number.isFinite(settingChunkSec) ? settingChunkSec : 300);
     const CHUNK_SEC = Math.min(3600, Math.max(300, rawChunkSec));
     const OVERLAP_SEC = 10;
     const chunks = [];
@@ -290,6 +290,9 @@ export async function generateRecapLines(
 
         let chunkSuccess = false;
         let generatedChunkLines = [];
+        let bestLines = [];
+        let bestCoverage = -1;
+        let coverageHint = '';
 
         for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
             if (attempt > 0) {
@@ -384,11 +387,11 @@ export async function generateRecapLines(
                     promptText += `\n[SPOKEN DIALOGUE IN THIS CLIP (for reference so dialogue meaning is preserved)]:\n${whisperSnippet}\n`;
                 }
 
-                promptText += `
+                promptText += `${coverageHint}
 YOUR TASK:
 1. Act as a storyteller telling the story of this video from beginning to end. Write the narration as connected, flowing storytelling, where consecutive lines continue each other with connectors and cause and effect, not as isolated scene captions or short choppy sentences.
 2. Narrate ONLY what is shown or said inside this clip, at the moment it happens. The synopsis is background knowledge only. Never mention events, reveals, or outcomes that have not appeared yet at that timestamp (no spoilers, no foreshadowing).
-3. Cover the ENTIRE clip with no long silent gaps, including silent or action scenes.
+3. Cover the ENTIRE clip with no long silent gaps, including silent or action scenes. The last line MUST end within 3 seconds of ${chunk.duration.toFixed(1)}s. Never stop early. Silent or action scenes MUST also get lines. No gap between consecutive lines may exceed 8 seconds.
 4. Prefer fewer, longer lines (about 4-10 seconds each, 1-3 sentences) instead of many tiny lines.
 5. Each line must be speakable in about 80-90% of (end - start) seconds, at about 2 English words per second, because it will be translated into Burmese, which takes longer to speak. Never write a line longer than its time slot.
 
@@ -495,6 +498,29 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
                     throw new Error('No valid recap lines found in parsed array');
                 }
 
+                mappedLines.sort((a, b) => a.start - b.start);
+                const lastEnd = Math.max(0, Math.min(chunk.duration, Math.max(...mappedLines.map(l => l.end)) - chunk.start));
+                const firstStartRel = Math.max(0, mappedLines[0].start - chunk.start);
+                let maxGap = Math.max(firstStartRel, Math.max(0, chunk.duration - lastEnd));
+                let prevEndRel = Math.max(0, Math.min(chunk.duration, mappedLines[0].end - chunk.start));
+                for (let idx = 1; idx < mappedLines.length; idx++) {
+                    const currStartRel = Math.max(0, mappedLines[idx].start - chunk.start);
+                    const gap = currStartRel - prevEndRel;
+                    if (gap > maxGap) maxGap = gap;
+                    const currEndRel = Math.max(0, Math.min(chunk.duration, mappedLines[idx].end - chunk.start));
+                    if (currEndRel > prevEndRel) prevEndRel = currEndRel;
+                }
+                const coverage = lastEnd / chunk.duration;
+                console.log(`[RECAP-CHECK] chunk ${chunk.index} coverage=${(coverage * 100).toFixed(0)}% maxGap=${maxGap.toFixed(1)}s lines=${mappedLines.length}`);
+                if (coverage > bestCoverage) {
+                    bestCoverage = coverage;
+                    bestLines = mappedLines;
+                }
+                if (coverage < 0.9 || maxGap > 20) {
+                    coverageHint = `\n[IMPORTANT: your previous answer only covered up to ${Math.round(lastEnd)}s of ${Math.round(chunk.duration)}s. This time cover the whole clip up to the very end.]\n`;
+                    throw new Error(`Incomplete coverage (${(coverage * 100).toFixed(0)}%, maxGap=${maxGap.toFixed(1)}s)`);
+                }
+
                 generatedChunkLines = mappedLines;
                 chunkSuccess = true;
                 break;
@@ -524,6 +550,10 @@ Do not wrap in markdown or backticks. Return JSON array only.`;
 
         if (chunkSuccess) {
             chunksOk++;
+        } else if (bestLines.length > 0) {
+            chunksOk++;
+            console.warn(`[RECAP] Chunk ${chunk.index} had incomplete coverage after retries (best ${(bestCoverage * 100).toFixed(0)}%), using best Gemini lines (${bestLines.length} lines)`);
+            generatedChunkLines = bestLines;
         } else {
             chunksFallback++;
             console.warn(`[RECAP] Chunk ${chunk.index} failed all attempts, gracefully falling back to Whisper dialogue lines`);
