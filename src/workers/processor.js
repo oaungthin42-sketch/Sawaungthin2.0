@@ -10,7 +10,7 @@ import { updateJob, getJob } from '../services/jobManager.js';
 import { getDuration, getVideoDimensions, getStreamsDuration, extractWav, detectScenes, runFFmpeg, getAudioDetails, cropVideo } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
 import { transcribeWav, computeSimilarity, generateNarrationTTS } from '../ai/index.js';
-import { formatTime, generateSRT, cleanupFiles, safeMoveFile } from '../utils/index.js';
+import { formatTime, generateSRT, parseSRT, cleanupFiles, safeMoveFile } from '../utils/index.js';
 import db from '../services/db.js';
 import { callLLM, hasLLMKey } from '../services/llm.js';
 import { getTranslationSystemInstruction, getNarratorSystemInstruction, getRecapBurmeseWriterInstruction, getThaiTranslationSystemInstruction, getThaiNarratorSystemInstruction } from '../ai/translation.js';
@@ -286,10 +286,34 @@ export const processRecapPipeline = async (jobId) => {
         const vidTranscriptCache = path.join(cacheDir, 'vid_transcript.json');
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSCRIPT_ORIGINAL)) {
             advanceStep(STEPS.TRANSCRIPT_ORIGINAL, 25, 'Transcribing Original Audio');
-            const __t0 = Date.now();
-            state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache);
-            console.log(`[TIMING] transcribe took ${Math.round((Date.now() - __t0) / 1000)}s`);
-            saveState();
+            if (job.srtPath) {
+                if (!fs.existsSync(job.srtPath)) {
+                    throw new Error('Imported SRT file not found on disk.');
+                }
+                const srtText = fs.readFileSync(job.srtPath, 'utf8');
+                const parsed = parseSRT(srtText);
+                const vidDur = Number.isFinite(state.originalVideoDuration) && state.originalVideoDuration > 0 ? state.originalVideoDuration : Infinity;
+                const clamped = [];
+                for (const item of parsed) {
+                    const st = item.timestamp[0];
+                    if (st >= vidDur) continue;
+                    const en = Math.min(item.timestamp[1], vidDur);
+                    if (en <= st) continue;
+                    clamped.push({ timestamp: [st, en], text: item.text });
+                }
+                if (clamped.length === 0) {
+                    throw new Error('Imported SRT file contains no valid subtitle lines within the video duration.');
+                }
+                state.originalTranscript = clamped;
+                fs.writeFileSync(vidTranscriptCache, JSON.stringify(clamped, null, 2));
+                console.log(`[Job ${jobId}] Using imported SRT (${clamped.length} lines), skipping Whisper`);
+                saveState();
+            } else {
+                const __t0 = Date.now();
+                state.originalTranscript = await transcribeWav(videoWavPath, vidTranscriptCache);
+                console.log(`[TIMING] transcribe took ${Math.round((Date.now() - __t0) / 1000)}s`);
+                saveState();
+            }
         }
 
         
@@ -298,6 +322,12 @@ export const processRecapPipeline = async (jobId) => {
         if (!hasCompletedStep(job.currentStep, STEPS.TRANSLATE_BURMESE)) {
             advanceStep(STEPS.TRANSLATE_BURMESE, 30, job.targetLanguage === 'th' ? 'Translating to Thai' : 'Translating to Burmese');
 
+            if (job.srtPath) {
+                state.translatedTranscript = (state.originalTranscript || []).map(t => ({ ...t }));
+                fs.writeFileSync(translatedTranscriptCache, JSON.stringify(state.translatedTranscript, null, 2));
+                saveState();
+                console.log(`[Job ${jobId}] Using imported SRT as translated transcript, skipping translation`);
+            } else {
             const isNarratorOrRecap = job.narrationStyle === 'narrator' || job.narrationStyle === 'recap';
             const isRecap = job.narrationStyle === 'recap';
             const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
@@ -576,6 +606,7 @@ export const processRecapPipeline = async (jobId) => {
             }
 
             saveState();
+            }
         }
 
         // 4.5 GENERATE TTS
@@ -2376,6 +2407,7 @@ export const processRecapPipeline = async (jobId) => {
             if (currentJob && currentJob.status === 'complete' && currentJob.audioPath) filesToRemove.push(currentJob.audioPath);
             if (currentJob && currentJob.status === 'complete' && currentJob.musicPath) filesToRemove.push(currentJob.musicPath);
             if (currentJob && currentJob.status === 'complete' && currentJob.videoPath) filesToRemove.push(currentJob.videoPath);
+            if (currentJob && currentJob.status === 'complete' && currentJob.srtPath) filesToRemove.push(currentJob.srtPath);
             if (currentJob && currentJob.status === 'complete' && state.originalUncroppedVideoPath && typeof state.originalUncroppedVideoPath === 'string') {
                 filesToRemove.push(state.originalUncroppedVideoPath);
             }

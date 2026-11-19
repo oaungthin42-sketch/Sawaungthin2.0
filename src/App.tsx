@@ -207,6 +207,13 @@ function App() {
   const [musicPreviewUrl, setMusicPreviewUrl] = useState<string | null>(null);
   const musicInputRef = useRef<HTMLInputElement>(null);
   const musicAudioRef = useRef<HTMLAudioElement>(null);
+
+  const [srtEnabled, setSrtEnabled] = useState<boolean>(false);
+  const [srtId, setSrtId] = useState<string | null>(null);
+  const [srtInfo, setSrtInfo] = useState<{ name: string; lineCount: number } | null>(null);
+  const [srtUploading, setSrtUploading] = useState<boolean>(false);
+  const [srtError, setSrtError] = useState<string>('');
+  const srtInputRef = useRef<HTMLInputElement>(null);
   
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -833,6 +840,38 @@ function App() {
     setMusicError('');
   };
 
+  const handleSrtFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    setSrtUploading(true);
+    setSrtError('');
+
+    const formData = new FormData();
+    formData.append('srt', file);
+    try {
+      const res = await axios.post('/api/upload-srt', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setSrtId(res.data.srtId);
+      setSrtInfo({ name: file.name, lineCount: res.data.lineCount });
+    } catch (err: any) {
+      setSrtError(err.response?.data?.error || err.message || 'SRT ဖိုင် တင်မရပါ');
+      setSrtId(null);
+      setSrtInfo(null);
+    } finally {
+      setSrtUploading(false);
+    }
+  };
+
+  const handleRemoveSrt = () => {
+    setSrtId(null);
+    setSrtInfo(null);
+    setSrtError('');
+    if (srtInputRef.current) srtInputRef.current.value = '';
+  };
+
   const startAnalysis = async () => {
     if (!hasVideo) return;
 
@@ -868,6 +907,10 @@ function App() {
         formData.append('narrationStyle', fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'));
         formData.append('targetLanguage', targetLanguage);
 
+        if (srtEnabled && srtId) {
+          formData.append('srtId', srtId);
+        }
+
         if (musicEnabled && musicId) {
           formData.append('musicId', musicId);
           formData.append('musicVolume', musicVolume.toString());
@@ -901,6 +944,7 @@ function App() {
           generateCaption: generateCaption.toString(),
           narrationStyle: fullRecapMode ? 'recap' : (narratorMode ? 'narrator' : 'translate'),
           targetLanguage: targetLanguage,
+          ...(srtEnabled && srtId ? { srtId } : {}),
           ...(musicEnabled && musicId ? {
             musicId: musicId,
             musicVolume: musicVolume.toString(),
@@ -941,6 +985,12 @@ function App() {
           clearInterval(interval);
           setAnalysisData(job.result);
           setStatus('complete');
+          setSrtEnabled(false);
+          setSrtId(null);
+          setSrtInfo(null);
+          setSrtUploading(false);
+          setSrtError('');
+          if (srtInputRef.current) srtInputRef.current.value = '';
           localStorage.removeItem('superclick_active_job');
           
           try {
@@ -1018,6 +1068,12 @@ function App() {
     setFullRecapMode(false);
     setNarratorMode(false);
     prevNarratorModeRef.current = false;
+    setSrtEnabled(false);
+    setSrtId(null);
+    setSrtInfo(null);
+    setSrtUploading(false);
+    setSrtError('');
+    if (srtInputRef.current) srtInputRef.current.value = '';
     setCurrentStep(1);
   };
 
@@ -1556,24 +1612,25 @@ function App() {
                                           {generateCaption ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
-                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title={fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"}>
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title={srtEnabled ? "SRT ဖြင့် လုပ်မည် ဖွင့်ထားသောကြောင့် ပိတ်ထားပါသည်" : (fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်")}>
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Narrator မုဒ်</span>
                                       <button 
                                           type="button"
-                                          disabled={fullRecapMode}
+                                          disabled={fullRecapMode || srtEnabled}
                                           onClick={() => setNarratorMode(!narratorMode)} 
                                           className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${
-                                              (fullRecapMode || narratorMode) ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
-                                          } ${fullRecapMode ? 'opacity-80 cursor-not-allowed' : ''}`}
-                                          title={fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်"}
+                                              (!srtEnabled && (fullRecapMode || narratorMode)) ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                                          } ${(fullRecapMode || srtEnabled) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                          title={srtEnabled ? "SRT ဖြင့် လုပ်မည် ဖွင့်ထားသောကြောင့် ပိတ်ထားပါသည်" : (fullRecapMode ? "Full Recap မုဒ် ဖွင့်ထားသောကြောင့် Narrator မုဒ် အလိုအလျောက် ပွင့်နေပါသည်" : "မူရင်းစကားကို ဘာသာပြန်မည့်အစား ဇာတ်လမ်းပြောပြသူ (narrator) အနေနဲ့ ပြောမည်")}
                                       >
-                                          {(fullRecapMode || narratorMode) ? 'ON' : 'OFF'}
+                                          {(!srtEnabled && (fullRecapMode || narratorMode)) ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
-                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title="ဗီဒီယိုတစ်ခုလုံးကို တိတ်ဆိတ်/လှုပ်ရှားမှုအခန်းများပါမကျန် ဇာတ်လမ်းပြောပြသူ (movie-recap) အဖြစ် အပြည့်အစုံ ရှင်းပြပြောမည်">
+                                  <div className="flex items-center gap-3 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none" title={srtEnabled ? "SRT ဖြင့် လုပ်မည် ဖွင့်ထားသောကြောင့် ပိတ်ထားပါသည်" : "ဗီဒီယိုတစ်ခုလုံးကို တိတ်ဆိတ်/လှုပ်ရှားမှုအခန်းများပါမကျန် ဇာတ်လမ်းပြောပြသူ (movie-recap) အဖြစ် အပြည့်အစုံ ရှင်းပြပြောမည်"}>
                                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Full Recap</span>
                                       <button 
                                           type="button"
+                                          disabled={srtEnabled}
                                           onClick={() => {
                                               const next = !fullRecapMode;
                                               if (next) {
@@ -1584,10 +1641,10 @@ function App() {
                                               }
                                               setFullRecapMode(next);
                                           }}
-                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${fullRecapMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                                          title="ဗီဒီယိုတစ်ခုလုံးကို တိတ်ဆိတ်/လှုပ်ရှားမှုအခန်းများပါမကျန် ဇာတ်လမ်းပြောပြသူ (movie-recap) အဖြစ် အပြည့်အစုံ ရှင်းပြပြောမည်"
+                                          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${(!srtEnabled && fullRecapMode) ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'} ${srtEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                          title={srtEnabled ? "SRT ဖြင့် လုပ်မည် ဖွင့်ထားသောကြောင့် ပိတ်ထားပါသည်" : "ဗီဒီယိုတစ်ခုလုံးကို တိတ်ဆိတ်/လှုပ်ရှားမှုအခန်းများပါမကျန် ဇာတ်လမ်းပြောပြသူ (movie-recap) အဖြစ် အပြည့်အစုံ ရှင်းပြပြောမည်"}
                                       >
-                                          {fullRecapMode ? 'ON' : 'OFF'}
+                                          {(!srtEnabled && fullRecapMode) ? 'ON' : 'OFF'}
                                       </button>
                                   </div>
                                   <div className="flex items-center gap-2 bg-gray-900/50 px-4 py-2 rounded-xl border border-gray-800 flex-1 justify-between sm:flex-none">
@@ -1610,6 +1667,100 @@ function App() {
                                           </button>
                                       )}
                                   </div>
+                              </div>
+                            )}
+
+                            {hasVideo && (
+                              <div className="bg-gray-900/40 border border-gray-900 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto space-y-4">
+                                <div className="flex items-center justify-between gap-4">
+                                  <div>
+                                    <h3 className="text-xs font-bold text-gray-200 uppercase tracking-widest">SRT ဖြင့် လုပ်မည်</h3>
+                                    <p className="text-xs text-gray-500 mt-1">ဘာသာပြန်ပြီးသား SRT ထည့်ပါ၊ AI ဘာသာပြန်ခြင်းကို ကျော်ပြီး ဒီ SRT ကိုပဲ သုံးမည်</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = !srtEnabled;
+                                      setSrtEnabled(next);
+                                      if (next) {
+                                        setNarratorMode(false);
+                                        setFullRecapMode(false);
+                                      } else {
+                                        setSrtId(null);
+                                        setSrtInfo(null);
+                                        setSrtError('');
+                                        if (srtInputRef.current) srtInputRef.current.value = '';
+                                      }
+                                    }}
+                                    className={`w-8 h-8 shrink-0 flex items-center justify-center rounded-lg transition-colors text-xs font-bold ${
+                                      srtEnabled ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                                    }`}
+                                  >
+                                    {srtEnabled ? 'ON' : 'OFF'}
+                                  </button>
+                                </div>
+
+                                {srtEnabled && (
+                                  <div className="space-y-3 pt-2 border-t border-gray-800/80">
+                                    <input
+                                      type="file"
+                                      ref={srtInputRef}
+                                      accept=".srt,text/plain"
+                                      className="hidden"
+                                      onChange={handleSrtFileChange}
+                                    />
+
+                                    {!srtId ? (
+                                      <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-gray-800 rounded-xl bg-gray-950/40 space-y-2">
+                                        <button
+                                          type="button"
+                                          disabled={srtUploading}
+                                          onClick={() => srtInputRef.current?.click()}
+                                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all"
+                                        >
+                                          {srtUploading ? (
+                                            <>
+                                              <Loader2 className="w-4 h-4 animate-spin" />
+                                              <span>SRT တင်နေသည်...</span>
+                                            </>
+                                          ) : (
+                                            <span>SRT ဖိုင် ရွေးရန် (.srt)</span>
+                                          )}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center justify-between bg-gray-950/60 p-4 rounded-xl border border-gray-800 gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-bold text-white truncate">{srtInfo?.name}</p>
+                                          <p className="text-xs text-indigo-400 font-semibold">{srtInfo?.lineCount} လိုင်း</p>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <button
+                                            type="button"
+                                            disabled={srtUploading}
+                                            onClick={() => srtInputRef.current?.click()}
+                                            className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                                          >
+                                            {srtUploading && <Loader2 className="w-3 h-3 animate-spin" />}
+                                            <span>ပြောင်းမည်</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={srtUploading}
+                                            onClick={handleRemoveSrt}
+                                            className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/60 disabled:opacity-50 text-red-400 text-xs font-bold rounded-lg border border-red-900/30 transition-colors"
+                                          >
+                                            ဖျက်မည်
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {srtError && (
+                                      <p className="text-xs text-red-400">{srtError}</p>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -2162,7 +2313,7 @@ function App() {
                              <div className="w-full space-y-3">
                                <button 
                                  onClick={startAnalysis} 
-                                 disabled={!hasVideo || (musicEnabled && !musicId) || musicUploading} 
+                                 disabled={!hasVideo || (musicEnabled && !musicId) || musicUploading || (srtEnabled && !srtId) || srtUploading} 
                                  className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:scale-100 text-white font-bold text-lg rounded-2xl shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.02] active:scale-95"
                                >
                                  AI ဖြင့် လုပ်ဆောင်မည်
@@ -2170,6 +2321,11 @@ function App() {
                                {((musicEnabled && !musicId) || musicUploading) && (
                                  <p className="text-amber-400 text-xs text-center font-medium">
                                    သီချင်းရွေးပါ၊ ဒါမှမဟုတ် အဆင့် ၄ မှာ ပိတ်ပါ
+                                 </p>
+                               )}
+                               {((srtEnabled && !srtId) || srtUploading) && (
+                                 <p className="text-amber-400 text-xs text-center font-medium">
+                                   {srtUploading ? 'SRT ဖိုင် တင်နေပါသည်၊ ခဏစောင့်ပါ' : 'SRT ဖိုင်ရွေးပါ၊ ဒါမှမဟုတ် အဆင့် ၁ မှာ SRT ဖြင့် လုပ်မည် ကို ပိတ်ပါ'}
                                  </p>
                                )}
                              </div>

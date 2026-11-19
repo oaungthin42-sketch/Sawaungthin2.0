@@ -14,7 +14,7 @@ import db from '../services/db.js';
 import { authMiddleware, adminOnly } from './auth.js';
 import { decrypt } from '../services/settings.js';
 import { getDuration } from '../ffmpeg/index.js';
-import { computeCreditsForDuration } from '../utils/index.js';
+import { computeCreditsForDuration, parseSRT } from '../utils/index.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import ffmpeg from 'fluent-ffmpeg';
 
@@ -350,6 +350,12 @@ const musicUpload = multer({
 });
 const pendingMusic = new Map();
 
+const srtUpload = multer({
+    dest: tmpDir,
+    limits: { fileSize: 5 * 1024 * 1024 }
+});
+const pendingSrt = new Map();
+
 const handleUpload = (req, res, next) => {
     upload.single('video')(req, res, (err) => {
         if (err instanceof multer.MulterError) {
@@ -448,6 +454,90 @@ router.post('/upload-music', authMiddleware, (req, res) => {
                 try { fs.unlinkSync(finalPath); } catch (e) {}
             }
             res.status(500).json({ error: "Failed to process music file." });
+        }
+    });
+});
+
+router.post('/upload-srt', authMiddleware, (req, res) => {
+    srtUpload.single('srt')(req, res, async (err) => {
+        if (err instanceof multer.MulterError) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                if (req.file && fs.existsSync(req.file.path)) {
+                    try { fs.unlinkSync(req.file.path); } catch (e) {}
+                }
+                return res.status(400).json({ error: 'SRT ဖိုင်က ကြီးလွန်းတယ် (5MB အထိ)' });
+            }
+            return res.status(400).json({ error: err.message });
+        } else if (err) {
+            return res.status(500).json({ error: 'SRT ဖိုင် တင်မရပါ' });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ error: 'SRT ဖိုင် မရှိပါ' });
+        }
+
+        const ext = path.extname(req.file.originalname || '').toLowerCase();
+        if (ext !== '.srt') {
+            if (fs.existsSync(req.file.path)) {
+                try { fs.unlinkSync(req.file.path); } catch (e) {}
+            }
+            return res.status(400).json({ error: 'SRT ဖိုင် (.srt) သာ ရွေးချယ်ပါ' });
+        }
+
+        const srtDir = path.join(process.cwd(), 'data', 'srt');
+        if (!fs.existsSync(srtDir)) fs.mkdirSync(srtDir, { recursive: true });
+
+        const srtId = uuidv4();
+        const finalPath = path.join(srtDir, `${srtId}.srt`);
+
+        try {
+            const rawText = fs.readFileSync(req.file.path, 'utf8');
+            const parsed = parseSRT(rawText);
+            if (!parsed || parsed.length < 1) {
+                if (fs.existsSync(req.file.path)) {
+                    try { fs.unlinkSync(req.file.path); } catch (e) {}
+                }
+                return res.status(400).json({ error: 'SRT ဖိုင်ထဲတွင် စာတန်းမတွေ့ပါ သို့မဟုတ် ဖိုင်ပုံစံ မှားနေပါသည်' });
+            }
+
+            fs.copyFileSync(req.file.path, finalPath);
+            try { fs.unlinkSync(req.file.path); } catch (e) {}
+
+            const now = Date.now();
+            for (const [id, entry] of pendingSrt.entries()) {
+                if (now - entry.createdAt > 2 * 60 * 60 * 1000) {
+                    if (entry.filePath && fs.existsSync(entry.filePath)) {
+                        try { fs.unlinkSync(entry.filePath); } catch (e) {}
+                    }
+                    pendingSrt.delete(id);
+                }
+            }
+
+            pendingSrt.set(srtId, {
+                userId: req.user.id,
+                filePath: finalPath,
+                lineCount: parsed.length,
+                createdAt: now
+            });
+
+            const firstLine = parsed[0].text;
+            const lastEndSeconds = parsed.reduce((max, item) => Math.max(max, item.timestamp[1]), 0);
+
+            res.json({
+                srtId,
+                lineCount: parsed.length,
+                firstLine,
+                lastEndSeconds
+            });
+        } catch (uploadErr) {
+            console.error('[API] upload-srt error:', uploadErr);
+            if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+                try { fs.unlinkSync(req.file.path); } catch (e) {}
+            }
+            if (fs.existsSync(finalPath)) {
+                try { fs.unlinkSync(finalPath); } catch (e) {}
+            }
+            res.status(400).json({ error: 'SRT ဖိုင် ဖတ်ရာတွင် အမှားဖြစ်ပွားခဲ့သည်။' });
         }
     });
 });
@@ -609,7 +699,21 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
     const subtitleStyle = body.subtitleStyle === 'single' ? 'single' : 'twotone';
     const speed = parseFloat(body.speed) || 1.0;
     const flipped = body.flipped === 'true' ? 1 : 0;
-    const narrationStyle = body.narrationStyle === 'recap' ? 'recap' : (body.narrationStyle === 'narrator' ? 'narrator' : 'translate');
+
+    const rawSrtId = typeof body.srtId === 'string' ? body.srtId.trim() : '';
+    let srtPath = null;
+    if (rawSrtId) {
+        const s = pendingSrt.get(rawSrtId);
+        if (!s || s.userId !== user.id || !s.filePath || !fs.existsSync(s.filePath)) {
+            if (localVideoPath && fs.existsSync(localVideoPath)) {
+                try { fs.unlinkSync(localVideoPath); } catch (e) {}
+            }
+            throw new Error('SRT ဖိုင် သက်တမ်းကုန်သွားပါပြီ (သို့မဟုတ် ရှာမတွေ့ပါ)။ ကျေးဇူးပြု၍ SRT ဖိုင်ကို ပြန်တင်ပါ။');
+        }
+        srtPath = s.filePath;
+    }
+
+    const narrationStyle = srtPath ? 'translate' : (body.narrationStyle === 'recap' ? 'recap' : (body.narrationStyle === 'narrator' ? 'narrator' : 'translate'));
     const keepFullVideo = narrationStyle === 'recap' ? 0 : (body.keepFullVideo === 'true' ? 1 : 0);
     const keepOriginalGaps = keepFullVideo === 1 ? 0 : (body.keepOriginalGaps === 'true' ? 1 : 0);
     const generateCaption = body.generateCaption === 'true' ? 1 : 0;
@@ -667,11 +771,15 @@ async function createRecapJobFromLocalFile(localVideoPath, originalFilename, use
         musicMode: musicMode,
         musicPosition: musicPosition,
         userId: user.id,
-        cropRect: cropRect
+        cropRect: cropRect,
+        srtPath: srtPath
     });
 
     if (musicId && pendingMusic.has(musicId)) {
         pendingMusic.delete(musicId);
+    }
+    if (rawSrtId && pendingSrt.has(rawSrtId)) {
+        pendingSrt.delete(rawSrtId);
     }
 
     updateJob(jobId, { 
@@ -794,7 +902,7 @@ router.post('/process-recap-url', authMiddleware, express.json(), async (req, re
         if (fs.existsSync(tempFilePath)) {
             try { fs.unlinkSync(tempFilePath); } catch (e) {}
         }
-        if (err.message.includes('Failed to read video duration') || err.message.includes('Insufficient credits')) {
+        if (err.message.includes('Failed to read video duration') || err.message.includes('Insufficient credits') || err.message.includes('SRT')) {
             return res.status(400).json({ error: err.message });
         }
         res.status(400).json({ error: 'Could not download video from this URL' });
@@ -987,7 +1095,7 @@ router.post('/process-recap-from-token', authMiddleware, express.json(), async (
     } catch (err) {
         console.error('[API] Process from token failed:', err);
         pendingUrlDownloads.delete(token);
-        if (err.message.includes('Failed to read video duration') || err.message.includes('Insufficient credits')) {
+        if (err.message.includes('Failed to read video duration') || err.message.includes('Insufficient credits') || err.message.includes('SRT')) {
             return res.status(400).json({ error: err.message });
         }
         res.status(400).json({ error: 'Could not process video from this token' });

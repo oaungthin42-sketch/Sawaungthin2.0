@@ -2,8 +2,8 @@ import db from './db.js';
 
 export const createJob = (id, data) => {
     const stmt = db.prepare(`
-        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, cropRect, keepOriginalGaps, keepFullVideo, generateCaption, narrationStyle, targetLanguage, musicPath, musicVolume, musicMode, musicPosition, subtitleEnabled, subtitleSize, subtitleStyle, jobType)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, videoPath, audioPath, status, progress, currentStep, created_at, originalFilename, blurBoxes, watermarkText, subtitlePosition, selectedFontId, subtitleColor, speed, flipped, userId, cropRect, keepOriginalGaps, keepFullVideo, generateCaption, narrationStyle, targetLanguage, musicPath, musicVolume, musicMode, musicPosition, subtitleEnabled, subtitleSize, subtitleStyle, jobType, srtPath)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
         id, 
@@ -35,7 +35,8 @@ export const createJob = (id, data) => {
         data.subtitleEnabled !== undefined ? (data.subtitleEnabled ? 1 : 0) : 1,
         data.subtitleSize !== undefined && data.subtitleSize !== null && data.subtitleSize !== '' ? Number(data.subtitleSize) : null,
         data.subtitleStyle || 'twotone',
-        data.jobType || null
+        data.jobType || null,
+        data.srtPath || null
     );
     return getJob(id);
 };
