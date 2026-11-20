@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../services/db.js';
 import { encrypt, decrypt } from '../services/settings.js';
+import { getUserGeminiKey } from '../services/userKey.js';
 import { authMiddleware, adminOnly } from './auth.js';
 import axios from 'axios';
 
@@ -210,6 +211,72 @@ router.post('/admin/payment-requests/:id/reject', authMiddleware, adminOnly, (re
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: 'Failed to reject request' });
+    }
+});
+
+const maskGeminiKey = (key) => {
+    if (!key || key.length < 8) return null;
+    return `${key.slice(0, 4)}...${key.slice(-4)}`;
+};
+
+router.get('/gemini-key', authMiddleware, (req, res) => {
+    try {
+        const key = getUserGeminiKey(req.user.id);
+        res.json({
+            hasKey: !!key,
+            masked: key ? maskGeminiKey(key) : null
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'Gemini Key စစ်ဆေး၍ မရပါ' });
+    }
+});
+
+router.post('/gemini-key', authMiddleware, async (req, res) => {
+    try {
+        const rawKey = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+        if (!rawKey.startsWith('AIza') || rawKey.length < 30) {
+            return res.status(400).json({ error: 'Key ပုံစံ မမှန်ပါ (AIza ဖြင့် စပြီး အနည်းဆုံး စာလုံး ၃၀ ရှိရပါမည်)' });
+        }
+
+        let response;
+        try {
+            response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
+                method: 'GET',
+                headers: {
+                    'x-goog-api-key': rawKey
+                },
+                signal: AbortSignal.timeout(15000)
+            });
+        } catch (fetchErr) {
+            return res.status(502).json({ error: 'စစ်ဆေး၍ မရပါ၊ နောက်မှ ပြန်ကြိုးစားပါ' });
+        }
+
+        if (response.status === 400 || response.status === 401 || response.status === 403) {
+            return res.status(400).json({ error: 'Key မမှန်ပါ' });
+        }
+
+        if (!response.ok) {
+            return res.status(502).json({ error: 'စစ်ဆေး၍ မရပါ၊ နောက်မှ ပြန်ကြိုးစားပါ' });
+        }
+
+        const encryptedKey = encrypt(rawKey);
+        db.prepare('UPDATE users SET gemini_api_key = ? WHERE id = ?').run(encryptedKey, req.user.id);
+
+        res.json({
+            ok: true,
+            masked: maskGeminiKey(rawKey)
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'Key သိမ်းဆည်း၍ မရပါ' });
+    }
+});
+
+router.delete('/gemini-key', authMiddleware, (req, res) => {
+    try {
+        db.prepare('UPDATE users SET gemini_api_key = NULL WHERE id = ?').run(req.user.id);
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Key ဖယ်ရှား၍ မရပါ' });
     }
 });
 

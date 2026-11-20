@@ -57,7 +57,8 @@ router.post('/google', async (req, res) => {
         db.prepare("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?").run(user.id);
         req.session.userId = user.id;
         console.log(`[AUTH] Session set for user ${user.id} (${user.email}). Session ID: ${req.sessionID}`);
-        res.json({ success: true, user });
+        const { gemini_api_key: _ignoredKey, ...safeUser } = user;
+        res.json({ success: true, user: safeUser });
 
     } catch (error) {
         console.error("Auth error", error);
@@ -77,7 +78,8 @@ router.get('/me', (req, res) => {
         req.session.destroy();
         return res.status(403).json({ error: 'Your account has been suspended' });
     }
-    res.json({ user });
+    const { gemini_api_key: _ignoredKey, ...safeUser } = user;
+    res.json({ user: safeUser });
 });
 
 router.post('/logout', (req, res) => {
@@ -102,7 +104,8 @@ export const authMiddleware = (req, res, next) => {
     if (user.status === 'suspended') {
         return res.status(403).json({ error: 'Your account has been suspended' });
     }
-    req.user = user;
+    const { gemini_api_key: _ignoredKey, ...safeUser } = user;
+    req.user = safeUser;
     next();
 };
 

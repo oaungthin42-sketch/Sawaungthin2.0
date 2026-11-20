@@ -13,7 +13,7 @@ import {
   UploadCloud, AlertCircle, CheckCircle, Loader2, Download, 
   Play, Menu, 
   Volume2, ArrowRight, Check, X, CreditCard, Star, Copy, Crop,
-  Zap
+  Zap, Key, ExternalLink, Trash2
 } from 'lucide-react';
 import axios from 'axios';
 import { CropEditor, CropRect } from './components/CropEditor';
@@ -273,6 +273,15 @@ function App() {
   const [useVoiceClone, setUseVoiceClone] = useState(false);
   const [selectedReferenceVoiceId, setSelectedReferenceVoiceId] = useState<string>('');
 
+  const [userGeminiHasKey, setUserGeminiHasKey] = useState(false);
+  const [userGeminiMasked, setUserGeminiMasked] = useState<string | null>(null);
+  const [userGeminiKeyLoading, setUserGeminiKeyLoading] = useState(false);
+  const [userGeminiKeyInput, setUserGeminiKeyInput] = useState('');
+  const [userGeminiSaving, setUserGeminiSaving] = useState(false);
+  const [userGeminiDeleting, setUserGeminiDeleting] = useState(false);
+  const [userGeminiSuccess, setUserGeminiSuccess] = useState<string | null>(null);
+  const [userGeminiError, setUserGeminiError] = useState<string | null>(null);
+
   useEffect(() => {
     axios.get('/api/auth/me').then(res => {
       const userData = res.data.user;
@@ -358,6 +367,11 @@ function App() {
   const logout = () => {
       axios.post('/api/auth/logout').then(() => {
           localStorage.removeItem('superclick_recent_jobs');
+          setUserGeminiHasKey(false);
+          setUserGeminiMasked(null);
+          setUserGeminiKeyInput('');
+          setUserGeminiSuccess(null);
+          setUserGeminiError(null);
           setUser(null);
       });
   };
@@ -370,6 +384,7 @@ function App() {
       fetchUserFeedback();
       fetchTelegramLink();
       fetchBankInfo();
+      fetchUserGeminiKey();
     }
     if (user?.role === 'admin') {
       fetchSettings();
@@ -406,6 +421,59 @@ function App() {
 
   const fetchBankInfo = () => {
     axios.get('/api/bank-info').then(res => setBankInfo(res.data)).catch(() => {});
+  };
+
+  const fetchUserGeminiKey = async () => {
+    setUserGeminiKeyLoading(true);
+    try {
+      const res = await axios.get('/api/user/gemini-key');
+      setUserGeminiHasKey(!!res.data?.hasKey);
+      setUserGeminiMasked(res.data?.masked || null);
+    } catch (e) {
+      console.error('Failed to load user Gemini key status', e);
+    } finally {
+      setUserGeminiKeyLoading(false);
+    }
+  };
+
+  const handleSaveUserGeminiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserGeminiError(null);
+    setUserGeminiSuccess(null);
+    const trimmed = userGeminiKeyInput.trim();
+    if (!trimmed) {
+      setUserGeminiError('Gemini API Key ထည့်ပေးပါ');
+      return;
+    }
+    setUserGeminiSaving(true);
+    try {
+      const res = await axios.post('/api/user/gemini-key', { key: trimmed });
+      setUserGeminiHasKey(true);
+      setUserGeminiMasked(res.data?.masked || null);
+      setUserGeminiKeyInput('');
+      setUserGeminiSuccess('Gemini API Key ကို သိမ်းဆည်းပြီးပါပြီ');
+    } catch (err: any) {
+      setUserGeminiError(err?.response?.data?.error || 'Key သိမ်းဆည်း၍ မရပါ');
+    } finally {
+      setUserGeminiSaving(false);
+    }
+  };
+
+  const handleDeleteUserGeminiKey = async () => {
+    setUserGeminiError(null);
+    setUserGeminiSuccess(null);
+    setUserGeminiDeleting(true);
+    try {
+      await axios.delete('/api/user/gemini-key');
+      setUserGeminiHasKey(false);
+      setUserGeminiMasked(null);
+      setUserGeminiKeyInput('');
+      setUserGeminiSuccess('Gemini API Key ကို ဖယ်ရှားပြီးပါပြီ');
+    } catch (err: any) {
+      setUserGeminiError(err?.response?.data?.error || 'Key ဖယ်ရှား၍ မရပါ');
+    } finally {
+      setUserGeminiDeleting(false);
+    }
   };
   
   const fetchUserFeedback = async () => {
@@ -1237,115 +1305,198 @@ function App() {
 
       if (activeView === 'credits') {
           return (
-              <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl max-w-2xl mx-auto space-y-6 text-center">
-                  <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto">
-                      <CreditCard className="w-8 h-8" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-white mb-6">သင့် Credit လက်ကျန်</h2>
-                  {user?.role === 'admin'
-                      ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2">∞ Unlimited</div>
-                      : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>)}
-                  <p className="text-gray-400 my-8">Credits ကို မြန်မာ AI အသံထပ် ဗီဒီယိုများ လုပ်ဆောင်ရာတွင် အသုံးပြုပါသည်။</p>
-                  
-                  <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-3 mb-6">
-                      <h3 className="text-lg font-bold text-white mb-1">Credit Package ရွေးချယ်ပါ</h3>
-                      <div className="space-y-2">
-                          {CREDIT_PACKAGES.map((pkg, i) => (
-                              <button
-                                  key={i}
-                                  onClick={() => setSelectedPackage(i)}
-                                  className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition-all text-left ${
-                                      selectedPackage === i
-                                          ? 'bg-indigo-950/40 border-indigo-500'
-                                          : 'bg-gray-900 border-gray-800 hover:border-gray-700'
-                                  }`}
-                              >
-                                  <div className="flex items-center gap-3">
-                                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                                          selectedPackage === i ? 'border-indigo-400' : 'border-gray-600'
-                                      }`}>
-                                          {selectedPackage === i && <div className="w-2.5 h-2.5 rounded-full bg-indigo-400" />}
-                                      </div>
-                                      <div>
-                                          <p className="text-sm font-bold text-white">{pkg.credits} Credits</p>
-                                          <p className="text-xs text-emerald-400">+{pkg.bonus} Free</p>
-                                      </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                      {pkg.tag && (
-                                          <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-md">
-                                              {pkg.tag}
-                                          </span>
-                                      )}
-                                      <span className="text-sm font-bold text-white">{pkg.price} THB</span>
-                                  </div>
-                              </button>
-                          ))}
+              <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-6 text-center">
+                      <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto">
+                          <CreditCard className="w-8 h-8" />
                       </div>
-                      <div className="flex items-center justify-between pt-3 mt-1 border-t border-gray-800">
-                          <div>
-                              <p className="text-xs text-gray-500">စုစုပေါင်း ရရှိမည့် Credits</p>
-                              <p className="text-lg font-bold text-white">
-                                  {CREDIT_PACKAGES[selectedPackage].credits + CREDIT_PACKAGES[selectedPackage].bonus} Credits
-                              </p>
-                          </div>
-                          <span className="text-sm font-bold text-indigo-400">
-                              {CREDIT_PACKAGES[selectedPackage].price} THB
-                          </span>
-                      </div>
-                  </div>
-                  
-                  <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
-                      <h3 className="text-lg font-bold text-white">ဘဏ်မှတစ်ဆင့် Credits ဝယ်ရန်</h3>
-                      <div className="p-4 bg-gray-900 rounded-xl space-y-3 font-mono text-sm text-gray-300">
-                          <div className="flex items-center justify-between">
-                              <span className="text-gray-500">Bank:</span>
-                              <span className="text-white font-bold">{bankInfo.bankName || '-'}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                              <span className="text-gray-500">Account Name:</span>
-                              <span className="text-white font-bold">{bankInfo.accountName || '-'}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                              <span className="text-gray-500">Account Number:</span>
-                              <div className="flex items-center gap-2">
-                                  <span className="text-white font-bold">{bankInfo.accountNumber || '-'}</span>
+                      <h2 className="text-2xl font-bold text-white mb-6">သင့် Credit လက်ကျန်</h2>
+                      {user?.role === 'admin'
+                          ? <div className="text-amber-400 font-bold text-4xl flex items-center justify-center gap-2">∞ Unlimited</div>
+                          : (credits !== null ? <CreditGauge credits={credits} /> : <div className="text-6xl font-bold font-mono text-white tracking-tighter">...</div>)}
+                      <p className="text-gray-400 my-8">Credits ကို မြန်မာ AI အသံထပ် ဗီဒီယိုများ လုပ်ဆောင်ရာတွင် အသုံးပြုပါသည်။</p>
+                      
+                      <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-3 mb-6">
+                          <h3 className="text-lg font-bold text-white mb-1">Credit Package ရွေးချယ်ပါ</h3>
+                          <div className="space-y-2">
+                              {CREDIT_PACKAGES.map((pkg, i) => (
                                   <button
-                                      onClick={() => copyToClipboard(bankInfo.accountNumber || '')}
-                                      className="text-indigo-400 hover:text-indigo-300"
-                                      title="Copy account number"
+                                      key={i}
+                                      onClick={() => setSelectedPackage(i)}
+                                      className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition-all text-left ${
+                                          selectedPackage === i
+                                              ? 'bg-indigo-950/40 border-indigo-500'
+                                              : 'bg-gray-900 border-gray-800 hover:border-gray-700'
+                                      }`}
                                   >
-                                      <Copy className="w-4 h-4" />
+                                      <div className="flex items-center gap-3">
+                                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                              selectedPackage === i ? 'border-indigo-400' : 'border-gray-600'
+                                          }`}>
+                                              {selectedPackage === i && <div className="w-2.5 h-2.5 rounded-full bg-indigo-400" />}
+                                          </div>
+                                          <div>
+                                              <p className="text-sm font-bold text-white">{pkg.credits} Credits</p>
+                                              <p className="text-xs text-emerald-400">+{pkg.bonus} Free</p>
+                                          </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          {pkg.tag && (
+                                              <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-md">
+                                                  {pkg.tag}
+                                              </span>
+                                          )}
+                                          <span className="text-sm font-bold text-white">{pkg.price} THB</span>
+                                      </div>
                                   </button>
+                              ))}
+                          </div>
+                          <div className="flex items-center justify-between pt-3 mt-1 border-t border-gray-800">
+                              <div>
+                                  <p className="text-xs text-gray-500">စုစုပေါင်း ရရှိမည့် Credits</p>
+                                  <p className="text-lg font-bold text-white">
+                                      {CREDIT_PACKAGES[selectedPackage].credits + CREDIT_PACKAGES[selectedPackage].bonus} Credits
+                                  </p>
                               </div>
+                              <span className="text-sm font-bold text-indigo-400">
+                                  {CREDIT_PACKAGES[selectedPackage].price} THB
+                              </span>
                           </div>
                       </div>
                       
-                      {slipUploadSuccess ? (
-                          <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl font-medium flex items-center gap-2">
-                              <CheckCircle className="w-5 h-5" />
-                              Submitted — waiting for admin approval.
-                          </div>
-                      ) : (
-                          <div className="space-y-4 mt-6">
-                              <p className="text-sm text-gray-400">ငွေလွှဲပြီးပါက အောက်တွင် ငွေလွှဲဖြတ်ပိုင်းကို တင်ပေးပါ။</p>
-                              <div className="flex items-center gap-4">
-                                  <input 
-                                      type="file" 
-                                      accept="image/*"
-                                      onChange={(e) => setSlipFile(e.target.files?.[0] || null)}
-                                      className="flex-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-indigo-500/10 file:text-indigo-400 hover:file:bg-indigo-500/20"
-                                  />
+                      <div className="bg-gray-950 p-6 rounded-2xl text-left border border-gray-800 space-y-4">
+                          <h3 className="text-lg font-bold text-white">ဘဏ်မှတစ်ဆင့် Credits ဝယ်ရန်</h3>
+                          <div className="p-4 bg-gray-900 rounded-xl space-y-3 font-mono text-sm text-gray-300">
+                              <div className="flex items-center justify-between">
+                                  <span className="text-gray-500">Bank:</span>
+                                  <span className="text-white font-bold">{bankInfo.bankName || '-'}</span>
                               </div>
-                              <button 
-                                  onClick={handleSlipUpload}
-                                  disabled={!slipFile || uploadingSlip}
-                                  className="w-full bg-indigo-600 disabled:bg-gray-800 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold transition-all disabled:text-gray-500 flex items-center justify-center gap-2"
+                              <div className="flex items-center justify-between">
+                                  <span className="text-gray-500">Account Name:</span>
+                                  <span className="text-white font-bold">{bankInfo.accountName || '-'}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                  <span className="text-gray-500">Account Number:</span>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-white font-bold">{bankInfo.accountNumber || '-'}</span>
+                                      <button
+                                          onClick={() => copyToClipboard(bankInfo.accountNumber || '')}
+                                          className="text-indigo-400 hover:text-indigo-300"
+                                          title="Copy account number"
+                                      >
+                                          <Copy className="w-4 h-4" />
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                          
+                          {slipUploadSuccess ? (
+                              <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl font-medium flex items-center gap-2">
+                                  <CheckCircle className="w-5 h-5" />
+                                  Submitted — waiting for admin approval.
+                              </div>
+                          ) : (
+                              <div className="space-y-4 mt-6">
+                                  <p className="text-sm text-gray-400">ငွေလွှဲပြီးပါက အောက်တွင် ငွေလွှဲဖြတ်ပိုင်းကို တင်ပေးပါ။</p>
+                                  <div className="flex items-center gap-4">
+                                      <input 
+                                          type="file" 
+                                          accept="image/*"
+                                          onChange={(e) => setSlipFile(e.target.files?.[0] || null)}
+                                          className="flex-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-indigo-500/10 file:text-indigo-400 hover:file:bg-indigo-500/20"
+                                      />
+                                  </div>
+                                  <button 
+                                      onClick={handleSlipUpload}
+                                      disabled={!slipFile || uploadingSlip}
+                                      className="w-full bg-indigo-600 disabled:bg-gray-800 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold transition-all disabled:text-gray-500 flex items-center justify-center gap-2"
+                                  >
+                                      {uploadingSlip && <Loader2 className="w-4 h-4 animate-spin" />}
+                                      ငွေလွှဲဖြတ်ပိုင်း တင်မည်
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+
+                  <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-5 text-left">
+                      <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                              <div className="w-11 h-11 bg-orange-500/10 text-orange-400 rounded-2xl flex items-center justify-center shrink-0">
+                                  <Key className="w-5 h-5" />
+                              </div>
+                              <div>
+                                  <h3 className="text-xl font-bold text-white">ကိုယ့် Gemini API Key</h3>
+                                  <p className="text-sm text-gray-400 mt-1">
+                                      ကိုယ့် Gemini key ထည့်ရင် AI သုံးတဲ့ အပိုင်းတွေ (Recap, ဘာသာပြန်) ကို ကိုယ့် key နဲ့ အလုပ်လုပ်မည်။ Key ကို Google AI Studio မှာ အခမဲ့ ယူနိုင်ပါသည်။{' '}
+                                      <a
+                                          href="https://aistudio.google.com/apikey"
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 font-semibold underline underline-offset-2"
+                                      >
+                                          Key ယူရန်
+                                          <ExternalLink className="w-3.5 h-3.5" />
+                                      </a>
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+
+                      {userGeminiError && (
+                          <div className="p-3.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 shrink-0" />
+                              <span>{userGeminiError}</span>
+                          </div>
+                      )}
+
+                      {userGeminiSuccess && (
+                          <div className="p-3.5 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl text-sm flex items-center gap-2">
+                              <CheckCircle className="w-4 h-4 shrink-0" />
+                              <span>{userGeminiSuccess}</span>
+                          </div>
+                      )}
+
+                      {userGeminiKeyLoading ? (
+                          <div className="p-4 bg-gray-950 border border-gray-800 rounded-2xl flex items-center gap-2 text-sm text-gray-400">
+                              <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                              <span>Key အခြေအနေ စစ်ဆေးနေသည်...</span>
+                          </div>
+                      ) : userGeminiHasKey ? (
+                          <div className="p-4 bg-gray-950 border border-gray-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="inline-flex items-center gap-2.5 text-emerald-400 font-medium text-sm bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2 rounded-xl">
+                                  <CheckCircle className="w-4 h-4 shrink-0" />
+                                  <span className="font-mono">သုံးနေသည် ({userGeminiMasked})</span>
+                              </div>
+                              <button
+                                  type="button"
+                                  onClick={handleDeleteUserGeminiKey}
+                                  disabled={userGeminiDeleting}
+                                  className="px-4 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                               >
-                                  {uploadingSlip && <Loader2 className="w-4 h-4 animate-spin" />}
-                                  ငွေလွှဲဖြတ်ပိုင်း တင်မည်
+                                  {userGeminiDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                  ဖယ်ရှားမည်
                               </button>
                           </div>
+                      ) : (
+                          <form onSubmit={handleSaveUserGeminiKey} className="space-y-3 bg-gray-950 p-5 rounded-2xl border border-gray-800">
+                              <input
+                                  type="password"
+                                  value={userGeminiKeyInput}
+                                  onChange={(e) => setUserGeminiKeyInput(e.target.value)}
+                                  placeholder="AIza..."
+                                  autoComplete="off"
+                                  className="w-full bg-gray-900 border border-gray-700 focus:border-orange-500 focus:outline-none rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 font-mono"
+                              />
+                              <button
+                                  type="submit"
+                                  disabled={userGeminiSaving || !userGeminiKeyInput.trim()}
+                                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 disabled:from-gray-800 disabled:to-gray-800 disabled:text-gray-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+                              >
+                                  {userGeminiSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                                  Key Save
+                              </button>
+                          </form>
                       )}
                   </div>
               </div>

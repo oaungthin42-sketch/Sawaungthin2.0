@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { runFFmpeg } from '../ffmpeg/index.js';
-import { getSetting } from '../services/settings.js';
+import { getEffectiveGeminiKey } from '../services/userKey.js';
 import { getGeminiModel } from '../services/geminiConfig.js';
 
 export async function generateStoryContext(videoPath, durationSec, tempArea = null, targetLanguage = 'my', includeCaption = false) {
@@ -12,7 +12,7 @@ export async function generateStoryContext(videoPath, durationSec, tempArea = nu
     let ai = null;
 
     try {
-        const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+        const apiKey = getEffectiveGeminiKey();
         if (!apiKey) {
             console.warn('[STORY-CONTEXT] GEMINI_API_KEY is not configured, skipping story context');
             return null;

@@ -3,6 +3,7 @@ import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { runFFmpeg, getDuration } from '../ffmpeg/index.js';
 import { getSetting } from '../services/settings.js';
+import { getEffectiveGeminiKey } from '../services/userKey.js';
 import { getGeminiModel } from '../services/geminiConfig.js';
 
 function parseJsonArrayLenient(text) {
@@ -207,7 +208,7 @@ export async function generateRecapLines(
         }
     }
 
-    const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    const apiKey = getEffectiveGeminiKey();
     if (!apiKey) {
         console.warn('[RECAP] GEMINI_API_KEY is not configured, falling back to whisper transcript');
         return whisperTranscript;

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { UploadCloud, FileText, Download, AlertCircle, CheckCircle, RotateCcw, Film, X, Copy, Check, Loader2, Sparkles } from 'lucide-react';
+import { UploadCloud, FileText, Download, AlertCircle, CheckCircle, RotateCcw, Film, X, Copy, Check, Loader2, Sparkles, ArrowRightLeft } from 'lucide-react';
 import axios from 'axios';
 
 const GEMINI_TRANSLATION_INSTRUCTION = `Translate the subtitle text of the SRT below into natural spoken Burmese for TTS narration.
@@ -11,11 +11,21 @@ const GEMINI_TRANSLATION_INSTRUCTION = `Translate the subtitle text of the SRT b
 - Keep each person's gender and pronoun consistent across the whole file. Transliterate names the same way every time.
 - Burmese script only: no English letters, and no digits. Write all numbers in Burmese words.`;
 
+const GEMINI_TEXT_ONLY_INSTRUCTION = `Translate each numbered line below into natural spoken Burmese for TTS narration.
+- Keep every line number and the "N. " prefix exactly as given. One output line per input line. Never merge, split, skip or reorder lines.
+- Output the numbered lines only. No notes or explanations.
+- Use spoken endings (တယ်, ပါတယ်, ခဲ့တယ်, ဘူး). Never written endings (သည်, ပါသည်, ခဲ့သည်).
+- Short, natural, varied sentences. Do not translate word by word.
+- Faithful meaning only. Do not add, remove or summarize. Keep each line about as long as the original.
+- Keep each person's gender and pronoun consistent across all lines. Transliterate names the same way every time.
+- Burmese script only: no English letters, and no digits. Write all numbers in Burmese words.`;
+
 const SRT_PART_SIZE = 200;
 
 interface SrtBlock {
     raw: string;
     number: number;
+    timestampLine: string;
     textOnly: string;
 }
 
@@ -44,6 +54,8 @@ const parseSrtBlocks = (rawText: string): SrtBlock[] => {
             subNumber = parseInt(lines[0].trim(), 10);
         }
 
+        const timestampLine = timeIdx !== -1 ? lines[timeIdx].trim() : '';
+
         let textLines: string[];
         if (timeIdx !== -1) {
             textLines = lines.slice(timeIdx + 1);
@@ -61,9 +73,189 @@ const parseSrtBlocks = (rawText: string): SrtBlock[] => {
         return {
             raw: block,
             number: subNumber,
+            timestampLine,
             textOnly
         };
     });
+};
+
+const cleanPastedTranslation = (raw: string): string => {
+    return raw
+        .replace(/^\uFEFF/, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/^[ \t]*```[^\n]*$/gm, '')
+        .replace(/```/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/__/g, '')
+        .trim();
+};
+
+const NUMBERED_LINE_REGEX = /^(?:\[\s*(\d+)\s*\]|(\d+)\s*(?:\.(?!\d)|\)|:(?!\d)|\s+-\s*|-\s+))\s*(.*)$/;
+
+interface ParseTranslationResult {
+    ok: boolean;
+    srtText: string;
+    lineCount: number;
+    expectedCount: number;
+    receivedCount: number;
+    missingNumbers: number[];
+    extraNumbers: number[];
+    errorTitle?: string;
+    errorDetail?: string;
+}
+
+const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTranslationResult => {
+    const expectedCount = blocks.length;
+    const cleaned = cleanPastedTranslation(rawTranslation);
+    if (!cleaned) {
+        return {
+            ok: false,
+            srtText: '',
+            lineCount: 0,
+            expectedCount,
+            receivedCount: 0,
+            missingNumbers: [],
+            extraNumbers: [],
+            errorTitle: 'ဘာသာပြန်စာသား မတွေ့ပါ',
+            errorDetail: 'Gemini ဘာသာပြန်ထားတဲ့ စာကို အပေါ်က အကွက်ထဲမှာ paste လုပ်ပေးပါ။'
+        };
+    }
+
+    const lines = cleaned
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+    const parsedMap = new Map<number, string>();
+    let hasAnyNumberPrefix = false;
+
+    if (cleaned.includes('-->')) {
+        hasAnyNumberPrefix = true;
+        const srtBlocksRaw = cleaned
+            .split(/\n\s*\n/)
+            .map((b) => b.trim())
+            .filter(Boolean);
+        const srtTimeLineRegex = /^\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->/;
+
+        for (const block of srtBlocksRaw) {
+            const blockLines = block.split('\n').map((l) => l.trim());
+            const firstLine = blockLines[0] || '';
+            if (!/^\d+$/.test(firstLine)) continue;
+            const num = parseInt(firstLine, 10);
+            const timeIdx = blockLines.findIndex((l) => srtTimeLineRegex.test(l) || l.includes('-->'));
+            if (timeIdx === -1) continue;
+            const textPart = blockLines
+                .slice(timeIdx + 1)
+                .filter(Boolean)
+                .join(' ');
+            parsedMap.set(num, textPart);
+        }
+    } else {
+        let lastNum: number | null = null;
+
+        for (const line of lines) {
+            const match = line.match(NUMBERED_LINE_REGEX);
+            if (match) {
+                hasAnyNumberPrefix = true;
+                const num = parseInt(match[1] || match[2], 10);
+                const textPart = (match[3] || '').trim();
+                parsedMap.set(num, textPart);
+                lastNum = num;
+            } else if (hasAnyNumberPrefix && lastNum !== null) {
+                const prev = parsedMap.get(lastNum) || '';
+                parsedMap.set(lastNum, prev ? `${prev} ${line}` : line);
+            }
+        }
+    }
+
+    const expectedNumbers = blocks.map((b) => b.number);
+    const expectedSet = new Set(expectedNumbers);
+
+    if (hasAnyNumberPrefix) {
+        const validEntries = Array.from(parsedMap.entries()).filter(([, txt]) => txt.trim().length > 0);
+        const validSet = new Set(validEntries.map(([num]) => num));
+        const missingNumbers = expectedNumbers.filter((num) => !validSet.has(num));
+        const extraNumbers = validEntries
+            .map(([num]) => num)
+            .filter((num) => !expectedSet.has(num))
+            .sort((a, b) => a - b);
+
+        const receivedCount = validEntries.length;
+
+        if (missingNumbers.length > 0) {
+            return {
+                ok: false,
+                srtText: '',
+                lineCount: 0,
+                expectedCount,
+                receivedCount,
+                missingNumbers,
+                extraNumbers
+            };
+        }
+
+        const rebuilt = blocks
+            .map((block) => {
+                const translated = (parsedMap.get(block.number) || '').trim();
+                if (block.timestampLine) {
+                    return `${block.number}\n${block.timestampLine}\n${translated}`;
+                }
+                return `${block.number}\n${translated}`;
+            })
+            .join('\n\n') + '\n';
+
+        return {
+            ok: true,
+            srtText: rebuilt,
+            lineCount: blocks.length,
+            expectedCount,
+            receivedCount,
+            missingNumbers: [],
+            extraNumbers
+        };
+    }
+
+    // No numbered prefix on any line: map 1st non-empty line -> 1st block, etc.
+    const receivedCount = lines.length;
+    if (receivedCount !== expectedCount) {
+        const missingNumbers = receivedCount < expectedCount
+            ? blocks.slice(receivedCount).map((b) => b.number)
+            : [];
+        return {
+            ok: false,
+            srtText: '',
+            lineCount: 0,
+            expectedCount,
+            receivedCount,
+            missingNumbers,
+            extraNumbers: [],
+            errorTitle: missingNumbers.length > 0 ? undefined : 'စာကြောင်းအရေအတွက် မကိုက်ညီပါ',
+            errorDetail: missingNumbers.length > 0
+                ? undefined
+                : 'နံပါတ်မပါသော စာကြောင်းအရေအတွက်သည် မူရင်း SRT စာကြောင်းအရေအတွက်ထက် ပိုနေပါသည်။ နံပါတ်တပ်ပြီး ပြန်ထည့်ပါ သို့မဟုတ် အရေအတွက် ကိုက်ညီအောင် စစ်ဆေးပါ။'
+        };
+    }
+
+    const rebuilt = blocks
+        .map((block, idx) => {
+            const translated = lines[idx].trim();
+            if (block.timestampLine) {
+                return `${block.number}\n${block.timestampLine}\n${translated}`;
+            }
+            return `${block.number}\n${translated}`;
+        })
+        .join('\n\n') + '\n';
+
+    return {
+        ok: true,
+        srtText: rebuilt,
+        lineCount: blocks.length,
+        expectedCount,
+        receivedCount,
+        missingNumbers: [],
+        extraNumbers: []
+    };
 };
 
 export const SrtExtractTool: React.FC = () => {
@@ -85,7 +277,22 @@ export const SrtExtractTool: React.FC = () => {
     const [copiedKeys, setCopiedKeys] = useState<Record<string, boolean>>({});
     const [copyToast, setCopyToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+    const [instructionMode, setInstructionMode] = useState<'srt' | 'text'>('srt');
+    const [uploadedSrtFilename, setUploadedSrtFilename] = useState<string | null>(null);
+    const [pastedTranslation, setPastedTranslation] = useState<string>('');
+    const [convertedSrt, setConvertedSrt] = useState<string>('');
+    const [convertedCount, setConvertedCount] = useState<number>(0);
+    const [convertError, setConvertError] = useState<{
+        expectedCount: number;
+        receivedCount: number;
+        missingNumbers: number[];
+        errorTitle?: string;
+        errorDetail?: string;
+    } | null>(null);
+    const [convertWarning, setConvertWarning] = useState<string | null>(null);
+
     const videoInputRef = useRef<HTMLInputElement>(null);
+    const srtFileInputRef = useRef<HTMLInputElement>(null);
     const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -252,10 +459,17 @@ export const SrtExtractTool: React.FC = () => {
     };
 
     const getSrtFilename = (originalName?: string | null) => {
-        const name = originalName || videoFile?.name || 'subtitles';
+        const name = originalName || videoFile?.name || uploadedSrtFilename || 'subtitles';
         const dotIdx = name.lastIndexOf('.');
         const base = dotIdx > 0 ? name.slice(0, dotIdx) : name;
         return `${base || 'subtitles'}.srt`;
+    };
+
+    const getTranslatedSrtFilename = () => {
+        const name = videoFile?.name || uploadedSrtFilename || 'subtitles';
+        const dotIdx = name.lastIndexOf('.');
+        const base = dotIdx > 0 ? name.slice(0, dotIdx) : name;
+        return `${base || 'subtitles'}_my.srt`;
     };
 
     const handleFileSelect = (file: File | null | undefined) => {
@@ -313,8 +527,18 @@ export const SrtExtractTool: React.FC = () => {
         setSrtLoading(false);
         setSrtLoadError('');
         setCopiedKeys({});
+        setInstructionMode('srt');
+        setUploadedSrtFilename(null);
+        setPastedTranslation('');
+        setConvertedSrt('');
+        setConvertedCount(0);
+        setConvertError(null);
+        setConvertWarning(null);
         clearToastTimer();
         setCopyToast(null);
+        if (srtFileInputRef.current) {
+            srtFileInputRef.current.value = '';
+        }
 
         const formData = new FormData();
         formData.append('video', videoFile);
@@ -385,6 +609,79 @@ export const SrtExtractTool: React.FC = () => {
         }
     };
 
+    const handleOriginalSrtFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            setSrtRawText(text);
+            setSrtLoadError('');
+            setUploadedSrtFilename(file.name);
+            setConvertedSrt('');
+            setConvertedCount(0);
+            setConvertError(null);
+            setConvertWarning(null);
+        } catch {
+            showToast('error', 'SRT ဖိုင် ဖတ်၍ မရပါ။');
+        }
+    };
+
+    const handleConvertToSrt = () => {
+        setConvertedSrt('');
+        setConvertedCount(0);
+        setConvertError(null);
+        setConvertWarning(null);
+        setCopiedKeys((prev) => {
+            const next = { ...prev };
+            delete next['converted-srt'];
+            return next;
+        });
+
+        if (srtBlocks.length === 0) {
+            setConvertError({
+                expectedCount: 0,
+                receivedCount: 0,
+                missingNumbers: [],
+                errorTitle: 'မူရင်း SRT မရှိသေးပါ',
+                errorDetail: 'မူရင်း SRT ဖိုင် (.srt) ကို အရင်ရွေးချယ်ပေးပါ။'
+            });
+            return;
+        }
+
+        const result = buildTranslatedSrt(srtBlocks, pastedTranslation);
+        if (!result.ok) {
+            setConvertError({
+                expectedCount: result.expectedCount,
+                receivedCount: result.receivedCount,
+                missingNumbers: result.missingNumbers,
+                errorTitle: result.errorTitle,
+                errorDetail: result.errorDetail
+            });
+            return;
+        }
+
+        setConvertedSrt(result.srtText);
+        setConvertedCount(result.lineCount);
+        if (result.extraNumbers.length > 0) {
+            setConvertWarning(
+                `သတိပေးချက်: အပိုပါနေသော စာကြောင်းနံပါတ်များ (${result.extraNumbers.join(', ')}) ကို ကျော်သွားပြီး မူရင်း ${result.expectedCount} ကြောင်းဖြင့် SRT ထုတ်ပေးထားပါသည်။`
+            );
+        }
+    };
+
+    const handleDownloadConvertedSrt = () => {
+        if (!convertedSrt) return;
+        const blob = new Blob([convertedSrt], { type: 'text/plain;charset=utf-8' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', getTranslatedSrtFilename());
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    };
+
     const reset = () => {
         stopPolling();
         setVideoFile(null);
@@ -401,10 +698,20 @@ export const SrtExtractTool: React.FC = () => {
         setSrtLoading(false);
         setSrtLoadError('');
         setCopiedKeys({});
+        setInstructionMode('srt');
+        setUploadedSrtFilename(null);
+        setPastedTranslation('');
+        setConvertedSrt('');
+        setConvertedCount(0);
+        setConvertError(null);
+        setConvertWarning(null);
         clearToastTimer();
         setCopyToast(null);
         if (videoInputRef.current) {
             videoInputRef.current.value = '';
+        }
+        if (srtFileInputRef.current) {
+            srtFileInputRef.current.value = '';
         }
     };
 
@@ -710,34 +1017,216 @@ export const SrtExtractTool: React.FC = () => {
                         )}
 
                         <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4 sm:p-5 space-y-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <h5 className="text-sm font-bold text-white">ဘာသာပြန်ညွှန်ကြားချက်</h5>
+                            <div className="inline-flex p-1 bg-gray-900 border border-gray-800 rounded-xl gap-1">
                                 <button
                                     type="button"
-                                    onClick={() => handleCopy('instruction', GEMINI_TRANSLATION_INSTRUCTION)}
-                                    className={`px-4 py-2 rounded-xl font-bold text-xs transition-all inline-flex items-center gap-1.5 ${
-                                        copiedKeys['instruction']
-                                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/25'
-                                            : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25'
+                                    onClick={() => setInstructionMode('srt')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                        instructionMode === 'srt'
+                                            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow'
+                                            : 'text-gray-400 hover:text-white'
                                     }`}
                                 >
-                                    {copiedKeys['instruction'] ? (
-                                        <span>✓ ကူးပြီး</span>
-                                    ) : (
-                                        <>
-                                            <Copy className="w-3.5 h-3.5" />
-                                            <span>ညွှန်ကြားချက် ကူးယူမည်</span>
-                                        </>
-                                    )}
+                                    SRT အတွက်
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setInstructionMode('text')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                        instructionMode === 'text'
+                                            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow'
+                                            : 'text-gray-400 hover:text-white'
+                                    }`}
+                                >
+                                    စာသားသက်သက်အတွက်
+                                </button>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <h5 className="text-sm font-bold text-white">ဘာသာပြန်ညွှန်ကြားချက်</h5>
+                                {instructionMode === 'srt' ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopy('instruction-srt', GEMINI_TRANSLATION_INSTRUCTION)}
+                                        className={`px-4 py-2 rounded-xl font-bold text-xs transition-all inline-flex items-center gap-1.5 ${
+                                            copiedKeys['instruction-srt']
+                                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/25'
+                                                : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25'
+                                        }`}
+                                    >
+                                        {copiedKeys['instruction-srt'] ? (
+                                            <span>✓ ကူးပြီး</span>
+                                        ) : (
+                                            <>
+                                                <Copy className="w-3.5 h-3.5" />
+                                                <span>ညွှန်ကြားချက် ကူးယူမည်</span>
+                                            </>
+                                        )}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopy('instruction-text', GEMINI_TEXT_ONLY_INSTRUCTION)}
+                                        className={`px-4 py-2 rounded-xl font-bold text-xs transition-all inline-flex items-center gap-1.5 ${
+                                            copiedKeys['instruction-text']
+                                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/25'
+                                                : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25'
+                                        }`}
+                                    >
+                                        {copiedKeys['instruction-text'] ? (
+                                            <span>✓ ကူးပြီး</span>
+                                        ) : (
+                                            <>
+                                                <Copy className="w-3.5 h-3.5" />
+                                                <span>ညွှန်ကြားချက် ကူးယူမည်</span>
+                                            </>
+                                        )}
+                                    </button>
+                                )}
                             </div>
                             <textarea
                                 readOnly
-                                value={GEMINI_TRANSLATION_INSTRUCTION}
+                                value={instructionMode === 'srt' ? GEMINI_TRANSLATION_INSTRUCTION : GEMINI_TEXT_ONLY_INSTRUCTION}
                                 rows={7}
                                 className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3 text-xs text-gray-300 font-mono leading-relaxed resize-none focus:outline-none overflow-y-auto"
                             />
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {(status === 'idle' || status === 'complete') && (
+                <div className="max-w-2xl mx-auto">
+                    <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 sm:p-8 space-y-5">
+                        <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center">
+                                <ArrowRightLeft className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <h4 className="text-base font-bold text-white">ဘာသာပြန်စာ ပြန်ထည့်ရန်</h4>
+                                <p className="text-xs text-gray-400">
+                                    Gemini ဘာသာပြန်ထားတဲ့ နံပါတ်တပ်စာသားကို မူရင်းအချိန်များဖြင့် SRT ဖိုင်အဖြစ် ပြန်ပြောင်းပေးပါသည်
+                                </p>
+                            </div>
+                        </div>
+
+                        {srtBlocks.length === 0 && (
+                            <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4 space-y-2.5">
+                                <label className="block text-xs font-bold text-gray-300">
+                                    မူရင်း SRT ဖိုင် ရွေးပါ (.srt)
+                                </label>
+                                <input
+                                    ref={srtFileInputRef}
+                                    type="file"
+                                    accept=".srt,text/plain"
+                                    onChange={handleOriginalSrtFilePick}
+                                    className="block w-full text-xs text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-orange-500/15 file:text-orange-400 hover:file:bg-orange-500/25 cursor-pointer"
+                                />
+                            </div>
+                        )}
+
+                        <textarea
+                            value={pastedTranslation}
+                            onChange={(e) => {
+                                setPastedTranslation(e.target.value);
+                                if (convertedSrt) {
+                                    setConvertedSrt('');
+                                    setConvertedCount(0);
+                                }
+                                if (convertError) setConvertError(null);
+                                if (convertWarning) setConvertWarning(null);
+                            }}
+                            rows={8}
+                            placeholder="Gemini ဘာသာပြန်ထားတဲ့ စာကို ဒီမှာ paste လုပ်ပါ"
+                            className="w-full bg-gray-950 border border-gray-800 focus:border-orange-500 focus:outline-none rounded-2xl p-4 text-xs sm:text-sm text-gray-200 placeholder-gray-500 leading-relaxed resize-y"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={handleConvertToSrt}
+                                className="px-6 py-3 rounded-xl font-bold text-sm transition-all bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25 inline-flex items-center gap-2"
+                            >
+                                <FileText className="w-4 h-4" />
+                                <span>SRT ပြုလုပ်မည်</span>
+                            </button>
+                            {srtBlocks.length > 0 && (
+                                <span className="text-xs text-gray-400">
+                                    မူရင်း SRT{uploadedSrtFilename ? ` (${uploadedSrtFilename})` : ''}: စုစုပေါင်း {srtBlocks.length} ကြောင်း
+                                </span>
+                            )}
+                        </div>
+
+                        {convertError && (
+                            <div className="bg-red-950/25 border border-red-500/30 rounded-2xl p-4 space-y-1.5 text-sm text-red-300">
+                                <div className="flex items-start gap-2">
+                                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                    <div className="space-y-1">
+                                        {convertError.missingNumbers.length > 0 ? (
+                                            <p className="font-bold text-red-400">
+                                                ပျက်နေသော စာကြောင်း: {convertError.missingNumbers.join(', ')} — Gemini ကို ဒီနံပါတ်တွေပဲ ထပ်ပြန်ခိုင်းပါ
+                                            </p>
+                                        ) : (
+                                            <p className="font-bold text-red-400">
+                                                {convertError.errorTitle || 'SRT ပြုလုပ်၍ မရပါ'}
+                                            </p>
+                                        )}
+                                        {convertError.errorDetail && (
+                                            <p className="text-xs text-red-300">{convertError.errorDetail}</p>
+                                        )}
+                                        {convertError.expectedCount > 0 && (
+                                            <p className="text-xs text-red-200 font-semibold">
+                                                ရှိသင့်သည် {convertError.expectedCount}၊ ရရှိသည် {convertError.receivedCount}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {convertWarning && (
+                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-xs text-amber-300 flex items-start gap-2">
+                                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                <span>{convertWarning}</span>
+                            </div>
+                        )}
+
+                        {convertedSrt && (
+                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 space-y-4">
+                                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                                    <CheckCircle className="w-4 h-4 shrink-0" />
+                                    <span>SRT အသင့်ဖြစ်ပါပြီ ({convertedCount} ကြောင်း)</span>
+                                </div>
+                                <div className="flex flex-wrap gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handleDownloadConvertedSrt}
+                                        className="px-5 py-2.5 rounded-xl font-bold text-xs transition-all bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25 inline-flex items-center gap-1.5"
+                                    >
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>ဘာသာပြန် SRT ဒေါင်းလုဒ်လုပ်မည်</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopy('converted-srt', convertedSrt)}
+                                        className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all inline-flex items-center gap-1.5 ${
+                                            copiedKeys['converted-srt']
+                                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/25'
+                                                : 'bg-gray-800 hover:bg-gray-700 text-white border border-gray-700'
+                                        }`}
+                                    >
+                                        {copiedKeys['converted-srt'] ? (
+                                            <span>✓ ကူးပြီး</span>
+                                        ) : (
+                                            <>
+                                                <Copy className="w-3.5 h-3.5" />
+                                                <span>ဘာသာပြန် SRT ကူးယူမည်</span>
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

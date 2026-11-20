@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
-import { getSetting } from '../services/settings.js';
+import { getUserGeminiKey, runWithUserKey, getEffectiveGeminiKey } from '../services/userKey.js';
 import db from '../services/db.js';
 import { authMiddleware } from './auth.js';
 import { GoogleGenAI } from '@google/genai';
@@ -165,7 +165,7 @@ async function trimSilence(sourceVideoPath, outputPath, workDir) {
 }
 
 async function generateNarrationScript(sourceVideoPath) {
-    const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    const apiKey = getEffectiveGeminiKey();
     if (!apiKey) {
         throw new Error("GEMINI_API_KEY is missing");
     }
@@ -431,7 +431,7 @@ router.post('/process', authMiddleware, upload.single('video'), async (req, res)
 
             console.log(`[AI Recap] Generating narration script for job ${jobId}...`);
             updateProgress(20, 'Analyzing video and generating narration...');
-            const scenes = await generateNarrationScript(sourceVideoPath);
+            const scenes = await runWithUserKey(getUserGeminiKey(req.user.id), () => generateNarrationScript(sourceVideoPath));
             console.log(`[AI Recap] Narration script generated successfully.`);
             
             db.prepare(`UPDATE ai_recap_jobs SET status = 'done', resultJson = ?, cleanedVideoPath = ? WHERE id = ?`).run(JSON.stringify({ scenes }), sourceVideoPath, jobId);

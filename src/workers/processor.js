@@ -17,6 +17,7 @@ import { getTranslationSystemInstruction, getNarratorSystemInstruction, getRecap
 import { generateStoryContext } from '../ai/storyContext.js';
 import { generateRecapLines } from '../ai/recapScenes.js';
 import { resolveWatermarkFont } from '../services/fonts.js';
+import { getUserGeminiKey, runWithUserKey, getEffectiveGeminiKey } from '../services/userKey.js';
 
 function parseJsonArrayLenient(text) {
     let clean = (text || '').trim();
@@ -109,7 +110,7 @@ const hasCompletedStep = (currentStep, targetStep) => {
     return currentIdx > targetIdx;
 };
 
-export const processRecapPipeline = async (jobId) => {
+const processRecapPipelineInner = async (jobId) => {
     let job = getJob(jobId);
     if (!job || !job.videoPath) throw new Error("Invalid job data: missing videoPath");
 
@@ -330,7 +331,7 @@ export const processRecapPipeline = async (jobId) => {
             } else {
             const isNarratorOrRecap = job.narrationStyle === 'narrator' || job.narrationStyle === 'recap';
             const isRecap = job.narrationStyle === 'recap';
-            const geminiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+            const geminiKey = getEffectiveGeminiKey();
 
             let storyContext = null;
             if (isNarratorOrRecap && !isRecap && geminiKey) {
@@ -2422,4 +2423,10 @@ export const processRecapPipeline = async (jobId) => {
         } finally {
         }
     }
+};
+
+export const processRecapPipeline = async (jobId) => {
+    const job = getJob(jobId);
+    const key = job && job.userId ? getUserGeminiKey(job.userId) : null;
+    return runWithUserKey(key, () => processRecapPipelineInner(jobId));
 };

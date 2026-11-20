@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { getSetting } from './settings.js';
 import { getGeminiModel } from './geminiConfig.js';
+import { hasUserGeminiKey, getEffectiveGeminiKey } from './userKey.js';
 
 function parseLLMOptions(options, ...extraArgs) {
     let systemInstruction = '';
@@ -26,19 +27,22 @@ function parseLLMOptions(options, ...extraArgs) {
 }
 
 export function hasLLMKey() {
+    if (hasUserGeminiKey()) {
+        return true;
+    }
     const provider = (getSetting('LLM_PROVIDER') || 'gemini').trim().toLowerCase();
     if (provider === 'openrouter') {
         const key = getSetting('OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY;
         return !!(key && key.trim());
     }
-    const key = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    const key = getEffectiveGeminiKey();
     return !!(key && key.trim());
 }
 
 export async function callGemini(options, ...extraArgs) {
     const { systemInstruction, contents, model, isJson } = parseLLMOptions(options, ...extraArgs);
 
-    const apiKey = getSetting('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    const apiKey = getEffectiveGeminiKey();
     if (!apiKey || !apiKey.trim()) {
         throw new Error("Gemini API key is not configured. Please add your GEMINI_API_KEY in Settings.");
     }
@@ -246,6 +250,9 @@ export async function callOpenRouter(options, ...extraArgs) {
 }
 
 export async function callLLM(options, ...extraArgs) {
+    if (hasUserGeminiKey()) {
+        return callGemini(options, ...extraArgs);
+    }
     const provider = (getSetting('LLM_PROVIDER') || 'gemini').trim().toLowerCase();
     if (provider === 'openrouter') {
         return callOpenRouter(options, ...extraArgs);
