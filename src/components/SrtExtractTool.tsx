@@ -79,11 +79,27 @@ const parseSrtBlocks = (rawText: string): SrtBlock[] => {
     });
 };
 
+const TRAILING_ZW_NUMBER_REGEX = /[\u200B\u200C\u200D\u2060\uFEFF]+\s*[0-9\u1040-\u1049]{1,4}\s*$/;
+const ZERO_WIDTH_CHARS_REGEX = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
+const TRAILING_TOKEN_REGEX = /^(.+?)\s+([0-9\u1040-\u1049]{1,4})$/;
+
+const cleanSubtitleText = (rawText: string): string => {
+    const original = String(rawText ?? '');
+    let cleaned = original.replace(TRAILING_ZW_NUMBER_REGEX, '');
+    cleaned = cleaned.replace(ZERO_WIDTH_CHARS_REGEX, '');
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    if (cleaned) return cleaned;
+    return original.replace(ZERO_WIDTH_CHARS_REGEX, '').replace(/\s+/g, ' ').trim() || original.trim();
+};
+
 const cleanPastedTranslation = (raw: string): string => {
     return raw
         .replace(/^\uFEFF/, '')
         .replace(/\r\n/g, '\n')
         .replace(/\r/g, '\n')
+        .replace(/[\u200B\u200C\u200D\u2060\uFEFF]+\s*[0-9\u1040-\u1049]{1,4}[ \t]*(?=\n|$)/g, '')
+        .replace(/[\u200B\u200C\u200D\u2060\uFEFF]+(?=\n|$)/g, '')
+        .replace(ZERO_WIDTH_CHARS_REGEX, '')
         .replace(/^[ \t]*```[^\n]*$/gm, '')
         .replace(/```/g, '')
         .replace(/\*\*/g, '')
@@ -94,7 +110,7 @@ const cleanPastedTranslation = (raw: string): string => {
 const LEADING_LIST_MARKER_REGEX = /^\s*[\[\(]?[0-9\u1040-\u1049]{1,4}[\]\)]?\s*(?:[.:)\-\u104A\u104B]|\s-\s)\s*/;
 
 const stripLeadingListMarkers = (text: string): string => {
-    const original = text.trim();
+    const original = cleanSubtitleText(text);
     if (!original) return '';
     let stripped = original;
     for (let pass = 0; pass < 2; pass++) {
@@ -143,6 +159,8 @@ const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
 
     const entries: ParsedSrtEntry[] = [];
     let current: { start: number; end: number; textLines: string[] } | null = null;
+    let firstExplicitIndex: number | null = null;
+    let entryCount = 0;
 
     const finishCurrent = () => {
         if (!current) return;
@@ -151,7 +169,7 @@ const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
             entries.push({
                 start: current.start,
                 end: current.end,
-                text: stripLeadingListMarkers(joinedText)
+                text: stripLeadingListMarkers(cleanSubtitleText(joinedText))
             });
         }
         current = null;
@@ -164,6 +182,7 @@ const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
         const match = trimmed.match(SRT_FULL_TIME_LINE_REGEX);
         if (match) {
             finishCurrent();
+            entryCount++;
             const start = toSrtSeconds(match[1], match[2], match[3], match[4]);
             const end = toSrtSeconds(match[5], match[6], match[7], match[8]);
             if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start) {
@@ -174,12 +193,29 @@ const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
             continue;
         }
 
-        if (/^\d+$/.test(trimmed) && isNextNonEmptyTimeLine(i)) {
+        const bareDigits = trimmed.replace(ZERO_WIDTH_CHARS_REGEX, '').trim();
+        if (/^\d+$/.test(bareDigits) && isNextNonEmptyTimeLine(i)) {
+            if (entryCount === 0 && firstExplicitIndex === null) {
+                firstExplicitIndex = parseInt(bareDigits, 10);
+            }
             continue;
         }
 
         if (current) {
-            current.textLines.push(trimmed);
+            let lineText = trimmed;
+            if (isNextNonEmptyTimeLine(i)) {
+                const baseIndex = firstExplicitIndex !== null ? firstExplicitIndex : 1;
+                const nextEntryIndex = baseIndex + entryCount;
+                const cleanedLine = cleanSubtitleText(lineText);
+                const tokMatch = cleanedLine.match(TRAILING_TOKEN_REGEX);
+                if (tokMatch && nextEntryIndex >= 2) {
+                    const tokNum = parseInt(toAsciiDigits(tokMatch[2]), 10);
+                    if (tokNum === nextEntryIndex && tokMatch[1].trim()) {
+                        lineText = tokMatch[1].trim();
+                    }
+                }
+            }
+            current.textLines.push(lineText);
         }
     }
 
@@ -269,7 +305,7 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
 
         const rebuilt = blocks
             .map((block, idx) => {
-                const translated = stripLeadingListMarkers(matchedTexts[idx] || '');
+                const translated = stripLeadingListMarkers(cleanSubtitleText(matchedTexts[idx] || ''));
                 if (block.timestampLine) {
                     return `${block.number}\n${block.timestampLine}\n${translated}`;
                 }
@@ -339,7 +375,7 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
 
         const rebuilt = blocks
             .map((block) => {
-                const translated = stripLeadingListMarkers(parsedMap.get(block.number) || '');
+                const translated = stripLeadingListMarkers(cleanSubtitleText(parsedMap.get(block.number) || ''));
                 if (block.timestampLine) {
                     return `${block.number}\n${block.timestampLine}\n${translated}`;
                 }
@@ -381,7 +417,7 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
 
     const rebuilt = blocks
         .map((block, idx) => {
-            const translated = stripLeadingListMarkers(lines[idx]);
+            const translated = stripLeadingListMarkers(cleanSubtitleText(lines[idx]));
             if (block.timestampLine) {
                 return `${block.number}\n${block.timestampLine}\n${translated}`;
             }
@@ -464,6 +500,11 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
     }, []);
 
     const srtBlocks = useMemo(() => parseSrtBlocks(srtRawText), [srtRawText]);
+
+    const convertedPreviewBlocks = useMemo(
+        () => (convertedSrt ? parseSrtBlocks(convertedSrt).slice(0, 3) : []),
+        [convertedSrt]
+    );
 
     const srtParts = useMemo(() => {
         const parts: { partNumber: number; startNum: number; endNum: number; blocks: SrtBlock[] }[] = [];
@@ -1396,6 +1437,28 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
                                         )}
                                     </button>
                                 </div>
+
+                                {convertedPreviewBlocks.length > 0 && (
+                                    <div className="pt-3 border-t border-emerald-500/20 space-y-2">
+                                        <p className="text-[11px] font-bold text-emerald-300/90">
+                                            အစမ်းကြည့်ရှုရန် (ပထမ ၃ ကြောင်း)
+                                        </p>
+                                        <div className="space-y-2">
+                                            {convertedPreviewBlocks.map((block) => (
+                                                <div
+                                                    key={block.number}
+                                                    className="bg-gray-950/70 border border-gray-800/80 rounded-xl px-3.5 py-2.5 text-xs space-y-0.5"
+                                                >
+                                                    <div className="flex items-center gap-2 text-[11px] font-mono text-gray-400">
+                                                        <span className="font-bold text-emerald-400">#{block.number}</span>
+                                                        {block.timestampLine && <span>{block.timestampLine}</span>}
+                                                    </div>
+                                                    <p className="text-gray-200 leading-relaxed break-words">{block.textOnly}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

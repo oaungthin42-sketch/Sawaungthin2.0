@@ -28,6 +28,11 @@ export function parseSRT(text) {
     const lines = normalized.split('\n');
     const timeLineRegex = /^\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})(?:\s.*)?$/;
     const leadingMarkerRegex = /^\s*[\[\(]?[0-9\u1040-\u1049]{1,4}[\]\)]?\s*(?:[.:)\-\u104A\u104B]|\s-\s)\s*/;
+    const trailingZwNumberRegex = /[\u200B\u200C\u200D\u2060\uFEFF]+\s*[0-9\u1040-\u1049]{1,4}\s*$/;
+    const zeroWidthCharsRegex = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
+    const trailingTokenRegex = /^(.+?)\s+([0-9\u1040-\u1049]{1,4})$/;
+
+    const toAsciiDigits = (value) => value.replace(/[\u1040-\u1049]/g, (ch) => String(ch.charCodeAt(0) - 0x1040));
 
     const toSeconds = (h, m, s, ms) => {
         const hh = parseInt(h, 10);
@@ -48,8 +53,17 @@ export function parseSRT(text) {
         return false;
     };
 
+    const cleanSubtitleText = (rawText) => {
+        const original = String(rawText ?? '');
+        let cleaned = original.replace(trailingZwNumberRegex, '');
+        cleaned = cleaned.replace(zeroWidthCharsRegex, '');
+        cleaned = cleaned.replace(/\s+/g, ' ').trim();
+        if (cleaned) return cleaned;
+        return original.replace(zeroWidthCharsRegex, '').replace(/\s+/g, ' ').trim() || original.trim();
+    };
+
     const stripLeadingMarkers = (rawText) => {
-        const original = rawText.trim();
+        const original = cleanSubtitleText(rawText);
         if (!original) return '';
         let stripped = original;
         for (let pass = 0; pass < 2; pass++) {
@@ -63,6 +77,8 @@ export function parseSRT(text) {
 
     const results = [];
     let current = null;
+    let firstExplicitIndex = null;
+    let entryCount = 0;
 
     const finishCurrent = () => {
         if (!current) return;
@@ -70,7 +86,7 @@ export function parseSRT(text) {
         if (joinedText) {
             results.push({
                 timestamp: [current.startSec, current.endSec],
-                text: stripLeadingMarkers(joinedText)
+                text: stripLeadingMarkers(cleanSubtitleText(joinedText))
             });
         }
         current = null;
@@ -83,6 +99,7 @@ export function parseSRT(text) {
         const match = trimmed.match(timeLineRegex);
         if (match) {
             finishCurrent();
+            entryCount++;
             const startSec = toSeconds(match[1], match[2], match[3], match[4]);
             const endSec = toSeconds(match[5], match[6], match[7], match[8]);
             if (Number.isFinite(startSec) && Number.isFinite(endSec) && startSec >= 0 && endSec > startSec) {
@@ -93,12 +110,29 @@ export function parseSRT(text) {
             continue;
         }
 
-        if (/^\d+$/.test(trimmed) && isNextNonEmptyTimeLine(i)) {
+        const bareDigits = trimmed.replace(zeroWidthCharsRegex, '').trim();
+        if (/^\d+$/.test(bareDigits) && isNextNonEmptyTimeLine(i)) {
+            if (entryCount === 0 && firstExplicitIndex === null) {
+                firstExplicitIndex = parseInt(bareDigits, 10);
+            }
             continue;
         }
 
         if (current) {
-            current.textLines.push(trimmed);
+            let lineText = trimmed;
+            if (isNextNonEmptyTimeLine(i)) {
+                const baseIndex = firstExplicitIndex !== null ? firstExplicitIndex : 1;
+                const nextEntryIndex = baseIndex + entryCount;
+                const withoutZw = cleanSubtitleText(lineText);
+                const tokMatch = withoutZw.match(trailingTokenRegex);
+                if (tokMatch && nextEntryIndex >= 2) {
+                    const tokNum = parseInt(toAsciiDigits(tokMatch[2]), 10);
+                    if (tokNum === nextEntryIndex && tokMatch[1].trim()) {
+                        lineText = tokMatch[1].trim();
+                    }
+                }
+            }
+            current.textLines.push(lineText);
         }
     }
 
