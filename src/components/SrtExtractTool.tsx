@@ -258,7 +258,11 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
     };
 };
 
-export const SrtExtractTool: React.FC = () => {
+interface SrtExtractToolProps {
+    onUseSrt?: () => void;
+}
+
+export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
     const [videoFile, setVideoFile] = useState<File | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'complete' | 'error'>('idle');
@@ -680,6 +684,24 @@ export const SrtExtractTool: React.FC = () => {
         link.click();
         link.remove();
         window.URL.revokeObjectURL(url);
+    };
+
+    const handleUseInMainTool = () => {
+        if (!convertedSrt) return;
+        try {
+            localStorage.setItem(
+                'superclick_pending_srt',
+                JSON.stringify({
+                    text: convertedSrt,
+                    name: getTranslatedSrtFilename(),
+                    lines: convertedCount,
+                    ts: Date.now()
+                })
+            );
+        } catch {
+            // Ignore localStorage quota or restricted storage errors
+        }
+        onUseSrt?.();
     };
 
     const reset = () => {
@@ -1200,8 +1222,15 @@ export const SrtExtractTool: React.FC = () => {
                                 <div className="flex flex-wrap gap-3">
                                     <button
                                         type="button"
-                                        onClick={handleDownloadConvertedSrt}
+                                        onClick={handleUseInMainTool}
                                         className="px-5 py-2.5 rounded-xl font-bold text-xs transition-all bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25 inline-flex items-center gap-1.5"
+                                    >
+                                        <span>ပင်မ Tool မှာ သုံးမည် →</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleDownloadConvertedSrt}
+                                        className="px-5 py-2.5 rounded-xl font-bold text-xs transition-all bg-gray-800 hover:bg-gray-700 text-white border border-gray-700 inline-flex items-center gap-1.5"
                                     >
                                         <Download className="w-3.5 h-3.5" />
                                         <span>ဘာသာပြန် SRT ဒေါင်းလုဒ်လုပ်မည်</span>

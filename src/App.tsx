@@ -213,6 +213,9 @@ function App() {
   const [srtInfo, setSrtInfo] = useState<{ name: string; lineCount: number } | null>(null);
   const [srtUploading, setSrtUploading] = useState<boolean>(false);
   const [srtError, setSrtError] = useState<string>('');
+  const [pendingSrt, setPendingSrt] = useState<{ text: string; name: string; lines: number; ts: number } | null>(null);
+  const [pastedSrtText, setPastedSrtText] = useState<string>('');
+  const autoEnabledPendingTsRef = useRef<number | null>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
   
   const previewContainerRef = useRef<HTMLDivElement>(null);
@@ -908,14 +911,54 @@ function App() {
     setMusicError('');
   };
 
-  const handleSrtFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
+  const PENDING_SRT_KEY = 'superclick_pending_srt';
+  const PENDING_SRT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
+  const readFreshPendingSrt = (): { text: string; name: string; lines: number; ts: number } | null => {
+    try {
+      const raw = localStorage.getItem(PENDING_SRT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.text !== 'string' || !parsed.text.trim()) return null;
+      if (typeof parsed.ts !== 'number' || Date.now() - parsed.ts >= PENDING_SRT_MAX_AGE_MS) {
+        return null;
+      }
+      return {
+        text: parsed.text,
+        name: typeof parsed.name === 'string' && parsed.name ? parsed.name : 'translated.srt',
+        lines: typeof parsed.lines === 'number' ? parsed.lines : 0,
+        ts: parsed.ts
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    if (activeView === 'tool') {
+      const fresh = readFreshPendingSrt();
+      setPendingSrt(fresh);
+      if (fresh && !srtId && status === 'idle' && autoEnabledPendingTsRef.current !== fresh.ts) {
+        autoEnabledPendingTsRef.current = fresh.ts;
+        setSrtEnabled(true);
+        setNarratorMode(false);
+        setFullRecapMode(false);
+      }
+    }
+  }, [activeView]);
+
+  useEffect(() => {
+    if (srtEnabled || (hasVideo && status === 'idle' && currentStep === 1)) {
+      setPendingSrt(readFreshPendingSrt());
+    }
+  }, [srtEnabled, hasVideo, status, currentStep]);
+
+  const uploadSrtFromText = async (text: string, name: string): Promise<boolean> => {
+    const filename = name || 'translated.srt';
     setSrtUploading(true);
     setSrtError('');
 
+    const file = new File([text], filename, { type: 'text/plain' });
     const formData = new FormData();
     formData.append('srt', file);
     try {
@@ -923,13 +966,63 @@ function App() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setSrtId(res.data.srtId);
-      setSrtInfo({ name: file.name, lineCount: res.data.lineCount });
+      setSrtInfo({ name: filename, lineCount: res.data.lineCount });
+      return true;
     } catch (err: any) {
       setSrtError(err.response?.data?.error || err.message || 'SRT ဖိုင် တင်မရပါ');
       setSrtId(null);
       setSrtInfo(null);
+      return false;
     } finally {
       setSrtUploading(false);
+    }
+  };
+
+  const handleSrtFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    let text = '';
+    try {
+      text = await file.text();
+    } catch {
+      setSrtError('ဖိုင် ဖတ်၍ မရပါ၊ SRT စာကို ကူးပြီး အောက်က အကွက်ထဲ paste လုပ်ပါ');
+      setSrtId(null);
+      setSrtInfo(null);
+      return;
+    }
+
+    await uploadSrtFromText(text, file.name);
+  };
+
+  const handleUsePendingSrt = async () => {
+    if (!pendingSrt) return;
+    const ok = await uploadSrtFromText(pendingSrt.text, pendingSrt.name);
+    if (ok) {
+      try {
+        localStorage.removeItem(PENDING_SRT_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      setPendingSrt(null);
+    }
+  };
+
+  const handleDismissPendingSrt = () => {
+    try {
+      localStorage.removeItem(PENDING_SRT_KEY);
+    } catch {
+      // ignore storage errors
+    }
+    setPendingSrt(null);
+  };
+
+  const handleUsePastedSrt = async () => {
+    if (!pastedSrtText.trim()) return;
+    const ok = await uploadSrtFromText(pastedSrtText, 'pasted.srt');
+    if (ok) {
+      setPastedSrtText('');
     }
   };
 
@@ -1058,6 +1151,7 @@ function App() {
           setSrtInfo(null);
           setSrtUploading(false);
           setSrtError('');
+          setPastedSrtText('');
           if (srtInputRef.current) srtInputRef.current.value = '';
           localStorage.removeItem('superclick_active_job');
           
@@ -1141,6 +1235,7 @@ function App() {
     setSrtInfo(null);
     setSrtUploading(false);
     setSrtError('');
+    setPastedSrtText('');
     if (srtInputRef.current) srtInputRef.current.value = '';
     setCurrentStep(1);
   };
@@ -1508,7 +1603,7 @@ function App() {
       }
 
       if (activeView === 'srt-extract') {
-          return <SrtExtractTool />;
+          return <SrtExtractTool onUseSrt={() => setActiveView('tool')} />;
       }
 
       // Default: Video Tool
@@ -1840,6 +1935,7 @@ function App() {
                                         setSrtId(null);
                                         setSrtInfo(null);
                                         setSrtError('');
+                                        setPastedSrtText('');
                                         if (srtInputRef.current) srtInputRef.current.value = '';
                                       }
                                     }}
@@ -1862,22 +1958,80 @@ function App() {
                                     />
 
                                     {!srtId ? (
-                                      <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-gray-800 rounded-xl bg-gray-950/40 space-y-2">
-                                        <button
-                                          type="button"
-                                          disabled={srtUploading}
-                                          onClick={() => srtInputRef.current?.click()}
-                                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all"
-                                        >
-                                          {srtUploading ? (
-                                            <>
-                                              <Loader2 className="w-4 h-4 animate-spin" />
-                                              <span>SRT တင်နေသည်...</span>
-                                            </>
-                                          ) : (
-                                            <span>SRT ဖိုင် ရွေးရန် (.srt)</span>
-                                          )}
-                                        </button>
+                                      <div className="space-y-3">
+                                        {pendingSrt && (
+                                          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 space-y-3">
+                                            <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                                              <CheckCircle className="w-4 h-4 shrink-0" />
+                                              <span>ဘာသာပြန် SRT အသင့်ရှိပါသည် ({pendingSrt.lines} ကြောင်း)</span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <button
+                                                type="button"
+                                                disabled={srtUploading}
+                                                onClick={handleUsePendingSrt}
+                                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all"
+                                              >
+                                                {srtUploading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                                <span>ဒီ SRT ကို သုံးမည်</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                disabled={srtUploading}
+                                                onClick={handleDismissPendingSrt}
+                                                className="px-3 py-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-gray-300 font-bold text-xs rounded-xl border border-gray-800 transition-colors"
+                                              >
+                                                မသုံးတော့ပါ
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        <div className="bg-gray-950/40 border border-gray-800 rounded-xl p-4 space-y-3">
+                                          <textarea
+                                            rows={5}
+                                            value={pastedSrtText}
+                                            onChange={(e) => {
+                                              setPastedSrtText(e.target.value);
+                                              if (srtError) setSrtError('');
+                                            }}
+                                            placeholder="ဘာသာပြန်ပြီးသား SRT စာကို ဒီမှာ paste လုပ်ပါ"
+                                            className="w-full bg-gray-950 border border-gray-800 focus:border-indigo-500 focus:outline-none rounded-xl p-3 text-xs text-gray-200 placeholder-gray-500 leading-relaxed resize-y"
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={srtUploading || !pastedSrtText.trim()}
+                                            onClick={handleUsePastedSrt}
+                                            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all"
+                                          >
+                                            {srtUploading ? (
+                                              <>
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                <span>SRT တင်နေသည်...</span>
+                                              </>
+                                            ) : (
+                                              <span>SRT စာ အသုံးပြုမည်</span>
+                                            )}
+                                          </button>
+                                        </div>
+
+                                        <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-gray-800 rounded-xl bg-gray-950/40 space-y-2">
+                                          <button
+                                            type="button"
+                                            disabled={srtUploading}
+                                            onClick={() => srtInputRef.current?.click()}
+                                            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all"
+                                          >
+                                            {srtUploading ? (
+                                              <>
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                <span>SRT တင်နေသည်...</span>
+                                              </>
+                                            ) : (
+                                              <span>SRT ဖိုင် ရွေးရန် (.srt)</span>
+                                            )}
+                                          </button>
+                                        </div>
                                       </div>
                                     ) : (
                                       <div className="flex items-center justify-between bg-gray-950/60 p-4 rounded-xl border border-gray-800 gap-3">
