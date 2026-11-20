@@ -993,6 +993,13 @@ function App() {
       return;
     }
 
+    if (!text.includes('-->')) {
+      setSrtError("ဒီစာမှာ အချိန် (-->) မပါပါ။ နံပါတ်တပ်စာသားကို 'SRT ထုတ်ရန်' စာမျက်နှာရဲ့ 'ဘာသာပြန်စာ ပြန်ထည့်ရန်' မှာ paste လုပ်ပြီး 'ပင်မ Tool မှာ သုံးမည်' ကို နှိပ်ပါ။");
+      setSrtId(null);
+      setSrtInfo(null);
+      return;
+    }
+
     await uploadSrtFromText(text, file.name);
   };
 
@@ -1020,6 +1027,10 @@ function App() {
 
   const handleUsePastedSrt = async () => {
     if (!pastedSrtText.trim()) return;
+    if (!pastedSrtText.includes('-->')) {
+      setSrtError("ဒီစာမှာ အချိန် (-->) မပါပါ။ နံပါတ်တပ်စာသားကို 'SRT ထုတ်ရန်' စာမျက်နှာရဲ့ 'ဘာသာပြန်စာ ပြန်ထည့်ရန်' မှာ paste လုပ်ပြီး 'ပင်မ Tool မှာ သုံးမည်' ကို နှိပ်ပါ။");
+      return;
+    }
     const ok = await uploadSrtFromText(pastedSrtText, 'pasted.srt');
     if (ok) {
       setPastedSrtText('');

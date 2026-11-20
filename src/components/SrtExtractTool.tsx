@@ -91,7 +91,103 @@ const cleanPastedTranslation = (raw: string): string => {
         .trim();
 };
 
-const NUMBERED_LINE_REGEX = /^(?:\[\s*(\d+)\s*\]|(\d+)\s*(?:\.(?!\d)|\)|:(?!\d)|\s+-\s*|-\s+))\s*(.*)$/;
+const LEADING_LIST_MARKER_REGEX = /^\s*[\[\(]?[0-9\u1040-\u1049]{1,4}[\]\)]?\s*(?:[.:)\-\u104A\u104B]|\s-\s)\s*/;
+
+const stripLeadingListMarkers = (text: string): string => {
+    const original = text.trim();
+    if (!original) return '';
+    let stripped = original;
+    for (let pass = 0; pass < 2; pass++) {
+        const next = stripped.replace(LEADING_LIST_MARKER_REGEX, '');
+        if (next === stripped) break;
+        stripped = next;
+    }
+    stripped = stripped.trim();
+    return stripped || original;
+};
+
+const toAsciiDigits = (value: string): string => {
+    return value.replace(/[\u1040-\u1049]/g, (ch) => String(ch.charCodeAt(0) - 0x1040));
+};
+
+const SRT_FULL_TIME_LINE_REGEX = /^\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})(?:\s.*)?$/;
+
+const toSrtSeconds = (h: string, m: string, s: string, ms: string): number => {
+    const hh = parseInt(h, 10);
+    const mm = parseInt(m, 10);
+    const ss = parseInt(s, 10);
+    const msec = parseInt(String(ms).padEnd(3, '0').slice(0, 3), 10);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss) || !Number.isFinite(msec)) return NaN;
+    if (mm >= 60 || ss >= 60) return NaN;
+    return hh * 3600 + mm * 60 + ss + msec / 1000;
+};
+
+interface ParsedSrtEntry {
+    start: number;
+    end: number;
+    text: string;
+}
+
+const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
+    const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+
+    const isNextNonEmptyTimeLine = (fromIndex: number): boolean => {
+        for (let j = fromIndex + 1; j < lines.length; j++) {
+            const trimmed = lines[j].trim();
+            if (!trimmed) continue;
+            return SRT_FULL_TIME_LINE_REGEX.test(trimmed);
+        }
+        return false;
+    };
+
+    const entries: ParsedSrtEntry[] = [];
+    let current: { start: number; end: number; textLines: string[] } | null = null;
+
+    const finishCurrent = () => {
+        if (!current) return;
+        const joinedText = current.textLines.join(' ').replace(/\s+/g, ' ').trim();
+        if (joinedText) {
+            entries.push({
+                start: current.start,
+                end: current.end,
+                text: stripLeadingListMarkers(joinedText)
+            });
+        }
+        current = null;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (!trimmed) continue;
+
+        const match = trimmed.match(SRT_FULL_TIME_LINE_REGEX);
+        if (match) {
+            finishCurrent();
+            const start = toSrtSeconds(match[1], match[2], match[3], match[4]);
+            const end = toSrtSeconds(match[5], match[6], match[7], match[8]);
+            if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start) {
+                current = { start, end, textLines: [] };
+            } else {
+                current = null;
+            }
+            continue;
+        }
+
+        if (/^\d+$/.test(trimmed) && isNextNonEmptyTimeLine(i)) {
+            continue;
+        }
+
+        if (current) {
+            current.textLines.push(trimmed);
+        }
+    }
+
+    finishCurrent();
+    return entries;
+};
+
+const NUMBERED_LINE_REGEX = /^(?:\[\s*([0-9\u1040-\u1049]+)\s*\]|([0-9\u1040-\u1049]+)\s*(?:(?:\.(?![0-9\u1040-\u1049]))|\)|(?::(?![0-9\u1040-\u1049]))|\u104A|\u104B|\s+-\s*|-\s+))\s*(.*)$/;
 
 interface ParseTranslationResult {
     ok: boolean;
@@ -122,6 +218,76 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
         };
     }
 
+    if (cleaned.includes('-->')) {
+        const pastedEntries = parseLineBasedSrtEntries(cleaned);
+        const used = new Array<boolean>(pastedEntries.length).fill(false);
+        let matchedTexts: (string | null)[] = new Array<string | null>(blocks.length).fill(null);
+        let matchedCount = 0;
+
+        for (let i = 0; i < blocks.length; i++) {
+            const origMatch = blocks[i].timestampLine.match(SRT_FULL_TIME_LINE_REGEX);
+            const origStart = origMatch ? toSrtSeconds(origMatch[1], origMatch[2], origMatch[3], origMatch[4]) : NaN;
+            if (!Number.isFinite(origStart)) continue;
+
+            let bestIdx = -1;
+            let bestDiff = Infinity;
+            for (let j = 0; j < pastedEntries.length; j++) {
+                if (used[j]) continue;
+                const diff = Math.abs(pastedEntries[j].start - origStart);
+                if (diff <= 0.25 + 1e-6 && diff < bestDiff) {
+                    bestDiff = diff;
+                    bestIdx = j;
+                }
+            }
+
+            if (bestIdx !== -1) {
+                used[bestIdx] = true;
+                matchedTexts[i] = pastedEntries[bestIdx].text;
+                matchedCount++;
+            }
+        }
+
+        if (matchedCount < blocks.length * 0.9 && pastedEntries.length === blocks.length) {
+            matchedTexts = pastedEntries.map((entry) => entry.text);
+        }
+
+        const missingNumbers = blocks
+            .filter((_, idx) => matchedTexts[idx] === null)
+            .map((b) => b.number);
+
+        if (missingNumbers.length > 0) {
+            return {
+                ok: false,
+                srtText: '',
+                lineCount: 0,
+                expectedCount,
+                receivedCount: pastedEntries.length,
+                missingNumbers,
+                extraNumbers: []
+            };
+        }
+
+        const rebuilt = blocks
+            .map((block, idx) => {
+                const translated = stripLeadingListMarkers(matchedTexts[idx] || '');
+                if (block.timestampLine) {
+                    return `${block.number}\n${block.timestampLine}\n${translated}`;
+                }
+                return `${block.number}\n${translated}`;
+            })
+            .join('\n\n') + '\n';
+
+        return {
+            ok: true,
+            srtText: rebuilt,
+            lineCount: blocks.length,
+            expectedCount,
+            receivedCount: pastedEntries.length,
+            missingNumbers: [],
+            extraNumbers: []
+        };
+    }
+
     const lines = cleaned
         .split('\n')
         .map((l) => l.trim())
@@ -129,43 +295,19 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
 
     const parsedMap = new Map<number, string>();
     let hasAnyNumberPrefix = false;
+    let lastNum: number | null = null;
 
-    if (cleaned.includes('-->')) {
-        hasAnyNumberPrefix = true;
-        const srtBlocksRaw = cleaned
-            .split(/\n\s*\n/)
-            .map((b) => b.trim())
-            .filter(Boolean);
-        const srtTimeLineRegex = /^\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->/;
-
-        for (const block of srtBlocksRaw) {
-            const blockLines = block.split('\n').map((l) => l.trim());
-            const firstLine = blockLines[0] || '';
-            if (!/^\d+$/.test(firstLine)) continue;
-            const num = parseInt(firstLine, 10);
-            const timeIdx = blockLines.findIndex((l) => srtTimeLineRegex.test(l) || l.includes('-->'));
-            if (timeIdx === -1) continue;
-            const textPart = blockLines
-                .slice(timeIdx + 1)
-                .filter(Boolean)
-                .join(' ');
+    for (const line of lines) {
+        const match = line.match(NUMBERED_LINE_REGEX);
+        if (match) {
+            hasAnyNumberPrefix = true;
+            const num = parseInt(toAsciiDigits(match[1] || match[2]), 10);
+            const textPart = (match[3] || '').trim();
             parsedMap.set(num, textPart);
-        }
-    } else {
-        let lastNum: number | null = null;
-
-        for (const line of lines) {
-            const match = line.match(NUMBERED_LINE_REGEX);
-            if (match) {
-                hasAnyNumberPrefix = true;
-                const num = parseInt(match[1] || match[2], 10);
-                const textPart = (match[3] || '').trim();
-                parsedMap.set(num, textPart);
-                lastNum = num;
-            } else if (hasAnyNumberPrefix && lastNum !== null) {
-                const prev = parsedMap.get(lastNum) || '';
-                parsedMap.set(lastNum, prev ? `${prev} ${line}` : line);
-            }
+            lastNum = num;
+        } else if (hasAnyNumberPrefix && lastNum !== null) {
+            const prev = parsedMap.get(lastNum) || '';
+            parsedMap.set(lastNum, prev ? `${prev} ${line}` : line);
         }
     }
 
@@ -197,7 +339,7 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
 
         const rebuilt = blocks
             .map((block) => {
-                const translated = (parsedMap.get(block.number) || '').trim();
+                const translated = stripLeadingListMarkers(parsedMap.get(block.number) || '');
                 if (block.timestampLine) {
                     return `${block.number}\n${block.timestampLine}\n${translated}`;
                 }
@@ -239,7 +381,7 @@ const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTr
 
     const rebuilt = blocks
         .map((block, idx) => {
-            const translated = lines[idx].trim();
+            const translated = stripLeadingListMarkers(lines[idx]);
             if (block.timestampLine) {
                 return `${block.number}\n${block.timestampLine}\n${translated}`;
             }
