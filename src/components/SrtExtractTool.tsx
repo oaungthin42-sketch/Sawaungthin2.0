@@ -79,9 +79,10 @@ const parseSrtBlocks = (rawText: string): SrtBlock[] => {
     });
 };
 
+const TRANSLATED_PARTS_STORAGE_KEY = 'superclick_translated_parts';
+
 const TRAILING_ZW_NUMBER_REGEX = /[\u200B\u200C\u200D\u2060\uFEFF]+\s*[0-9\u1040-\u1049]{1,4}\s*$/;
 const ZERO_WIDTH_CHARS_REGEX = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
-const TRAILING_TOKEN_REGEX = /^(.+?)\s+([0-9\u1040-\u1049]{1,4})$/;
 
 const cleanSubtitleText = (rawText: string): string => {
     const original = String(rawText ?? '');
@@ -97,8 +98,9 @@ const cleanPastedTranslation = (raw: string): string => {
         .replace(/^\uFEFF/, '')
         .replace(/\r\n/g, '\n')
         .replace(/\r/g, '\n')
-        .replace(/[\u200B\u200C\u200D\u2060\uFEFF]+\s*[0-9\u1040-\u1049]{1,4}[ \t]*(?=\n|$)/g, '')
-        .replace(/[\u200B\u200C\u200D\u2060\uFEFF]+(?=\n|$)/g, '')
+        // Strip trailing zero-width+digits only when preceded by visible text on the same line,
+        // preserving standalone "\u200b2" index lines.
+        .replace(/(\S[^\n]*?)[\u200B\u200C\u200D\u2060\uFEFF]+\s*[0-9\u1040-\u1049]{1,4}[ \t]*(?=\n|$)/g, '$1')
         .replace(ZERO_WIDTH_CHARS_REGEX, '')
         .replace(/^[ \t]*```[^\n]*$/gm, '')
         .replace(/```/g, '')
@@ -138,38 +140,61 @@ const toSrtSeconds = (h: string, m: string, s: string, ms: string): number => {
     return hh * 3600 + mm * 60 + ss + msec / 1000;
 };
 
-interface ParsedSrtEntry {
+const parseLenientSrtTime = (rawPart: string): number => {
+    const cleaned = toAsciiDigits(rawPart.trim());
+    const match = cleaned.match(/^(\d{1,2}):(\d{1,2}):(\d{1,2})(?:[,.](\d{1,3}))?(?:\s|$)/);
+    if (!match) return NaN;
+    const hh = parseInt(match[1], 10);
+    const mm = parseInt(match[2], 10);
+    const ss = parseInt(match[3], 10);
+    const msec = match[4] ? parseInt(match[4].padEnd(3, '0').slice(0, 3), 10) : 0;
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss) || !Number.isFinite(msec)) return NaN;
+    if (mm >= 60 || ss >= 60) return NaN;
+    return hh * 3600 + mm * 60 + ss + msec / 1000;
+};
+
+interface ParsedTranslationEntry {
+    index: number | null;
     start: number;
     end: number;
+    timeValid: boolean;
     text: string;
 }
 
-const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
-    const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
+const parsePastedSrtWithArrows = (cleanedText: string): ParsedTranslationEntry[] => {
+    const withoutZeroWidth = cleanedText.replace(ZERO_WIDTH_CHARS_REGEX, '');
+    const lines = withoutZeroWidth.split('\n');
 
     const isNextNonEmptyTimeLine = (fromIndex: number): boolean => {
         for (let j = fromIndex + 1; j < lines.length; j++) {
             const trimmed = lines[j].trim();
             if (!trimmed) continue;
-            return SRT_FULL_TIME_LINE_REGEX.test(trimmed);
+            return trimmed.includes('-->');
         }
         return false;
     };
 
-    const entries: ParsedSrtEntry[] = [];
-    let current: { start: number; end: number; textLines: string[] } | null = null;
-    let firstExplicitIndex: number | null = null;
-    let entryCount = 0;
+    const entries: ParsedTranslationEntry[] = [];
+    let pendingIndex: number | null = null;
+    let current: {
+        index: number | null;
+        start: number;
+        end: number;
+        timeValid: boolean;
+        textLines: string[];
+    } | null = null;
 
     const finishCurrent = () => {
         if (!current) return;
         const joinedText = current.textLines.join(' ').replace(/\s+/g, ' ').trim();
-        if (joinedText) {
+        const cleanedText = stripLeadingListMarkers(cleanSubtitleText(joinedText));
+        if (cleanedText) {
             entries.push({
+                index: current.index,
                 start: current.start,
                 end: current.end,
-                text: stripLeadingListMarkers(cleanSubtitleText(joinedText))
+                timeValid: current.timeValid,
+                text: cleanedText
             });
         }
         current = null;
@@ -179,43 +204,38 @@ const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
         const trimmed = lines[i].trim();
         if (!trimmed) continue;
 
-        const match = trimmed.match(SRT_FULL_TIME_LINE_REGEX);
-        if (match) {
+        if (trimmed.includes('-->')) {
             finishCurrent();
-            entryCount++;
-            const start = toSrtSeconds(match[1], match[2], match[3], match[4]);
-            const end = toSrtSeconds(match[5], match[6], match[7], match[8]);
-            if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start) {
-                current = { start, end, textLines: [] };
-            } else {
-                current = null;
-            }
+            const arrowIdx = trimmed.indexOf('-->');
+            const start = parseLenientSrtTime(trimmed.slice(0, arrowIdx));
+            const end = parseLenientSrtTime(trimmed.slice(arrowIdx + 3));
+            const timeValid =
+                Number.isFinite(start) &&
+                Number.isFinite(end) &&
+                start >= 0 &&
+                end > start &&
+                !(start === 0 && end === 0);
+
+            current = {
+                index: pendingIndex,
+                start,
+                end,
+                timeValid,
+                textLines: []
+            };
+            pendingIndex = null;
             continue;
         }
 
-        const bareDigits = trimmed.replace(ZERO_WIDTH_CHARS_REGEX, '').trim();
-        if (/^\d+$/.test(bareDigits) && isNextNonEmptyTimeLine(i)) {
-            if (entryCount === 0 && firstExplicitIndex === null) {
-                firstExplicitIndex = parseInt(bareDigits, 10);
-            }
+        if (/^[0-9\u1040-\u1049]+$/.test(trimmed) && isNextNonEmptyTimeLine(i)) {
+            finishCurrent();
+            const idx = parseInt(toAsciiDigits(trimmed), 10);
+            pendingIndex = Number.isFinite(idx) ? idx : null;
             continue;
         }
 
         if (current) {
-            let lineText = trimmed;
-            if (isNextNonEmptyTimeLine(i)) {
-                const baseIndex = firstExplicitIndex !== null ? firstExplicitIndex : 1;
-                const nextEntryIndex = baseIndex + entryCount;
-                const cleanedLine = cleanSubtitleText(lineText);
-                const tokMatch = cleanedLine.match(TRAILING_TOKEN_REGEX);
-                if (tokMatch && nextEntryIndex >= 2) {
-                    const tokNum = parseInt(toAsciiDigits(tokMatch[2]), 10);
-                    if (tokNum === nextEntryIndex && tokMatch[1].trim()) {
-                        lineText = tokMatch[1].trim();
-                    }
-                }
-            }
-            current.textLines.push(lineText);
+            current.textLines.push(trimmed);
         }
     }
 
@@ -225,215 +245,226 @@ const parseLineBasedSrtEntries = (text: string): ParsedSrtEntry[] => {
 
 const NUMBERED_LINE_REGEX = /^(?:\[\s*([0-9\u1040-\u1049]+)\s*\]|([0-9\u1040-\u1049]+)\s*(?:(?:\.(?![0-9\u1040-\u1049]))|\)|(?::(?![0-9\u1040-\u1049]))|\u104A|\u104B|\s+-\s*|-\s+))\s*(.*)$/;
 
-interface ParseTranslationResult {
-    ok: boolean;
-    srtText: string;
-    lineCount: number;
-    expectedCount: number;
-    receivedCount: number;
-    missingNumbers: number[];
-    extraNumbers: number[];
-    errorTitle?: string;
-    errorDetail?: string;
-}
-
-const buildTranslatedSrt = (blocks: SrtBlock[], rawTranslation: string): ParseTranslationResult => {
-    const expectedCount = blocks.length;
-    const cleaned = cleanPastedTranslation(rawTranslation);
-    if (!cleaned) {
-        return {
-            ok: false,
-            srtText: '',
-            lineCount: 0,
-            expectedCount,
-            receivedCount: 0,
-            missingNumbers: [],
-            extraNumbers: [],
-            errorTitle: 'ဘာသာပြန်စာသား မတွေ့ပါ',
-            errorDetail: 'Gemini ဘာသာပြန်ထားတဲ့ စာကို အပေါ်က အကွက်ထဲမှာ paste လုပ်ပေးပါ။'
-        };
-    }
-
-    if (cleaned.includes('-->')) {
-        const pastedEntries = parseLineBasedSrtEntries(cleaned);
-        const used = new Array<boolean>(pastedEntries.length).fill(false);
-        let matchedTexts: (string | null)[] = new Array<string | null>(blocks.length).fill(null);
-        let matchedCount = 0;
-
-        for (let i = 0; i < blocks.length; i++) {
-            const origMatch = blocks[i].timestampLine.match(SRT_FULL_TIME_LINE_REGEX);
-            const origStart = origMatch ? toSrtSeconds(origMatch[1], origMatch[2], origMatch[3], origMatch[4]) : NaN;
-            if (!Number.isFinite(origStart)) continue;
-
-            let bestIdx = -1;
-            let bestDiff = Infinity;
-            for (let j = 0; j < pastedEntries.length; j++) {
-                if (used[j]) continue;
-                const diff = Math.abs(pastedEntries[j].start - origStart);
-                if (diff <= 0.25 + 1e-6 && diff < bestDiff) {
-                    bestDiff = diff;
-                    bestIdx = j;
-                }
-            }
-
-            if (bestIdx !== -1) {
-                used[bestIdx] = true;
-                matchedTexts[i] = pastedEntries[bestIdx].text;
-                matchedCount++;
-            }
-        }
-
-        if (matchedCount < blocks.length * 0.9 && pastedEntries.length === blocks.length) {
-            matchedTexts = pastedEntries.map((entry) => entry.text);
-        }
-
-        const missingNumbers = blocks
-            .filter((_, idx) => matchedTexts[idx] === null)
-            .map((b) => b.number);
-
-        if (missingNumbers.length > 0) {
-            return {
-                ok: false,
-                srtText: '',
-                lineCount: 0,
-                expectedCount,
-                receivedCount: pastedEntries.length,
-                missingNumbers,
-                extraNumbers: []
-            };
-        }
-
-        const rebuilt = blocks
-            .map((block, idx) => {
-                const translated = stripLeadingListMarkers(cleanSubtitleText(matchedTexts[idx] || ''));
-                if (block.timestampLine) {
-                    return `${block.number}\n${block.timestampLine}\n${translated}`;
-                }
-                return `${block.number}\n${translated}`;
-            })
-            .join('\n\n') + '\n';
-
-        return {
-            ok: true,
-            srtText: rebuilt,
-            lineCount: blocks.length,
-            expectedCount,
-            receivedCount: pastedEntries.length,
-            missingNumbers: [],
-            extraNumbers: []
-        };
-    }
-
-    const lines = cleaned
+const parsePastedWithoutArrows = (cleanedText: string): ParsedTranslationEntry[] => {
+    const lines = cleanedText
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean);
 
-    const parsedMap = new Map<number, string>();
+    const entries: ParsedTranslationEntry[] = [];
     let hasAnyNumberPrefix = false;
-    let lastNum: number | null = null;
+    let current: { index: number; textLines: string[] } | null = null;
+
+    const finishCurrent = () => {
+        if (!current) return;
+        const joinedText = current.textLines.join(' ').replace(/\s+/g, ' ').trim();
+        const cleanedEntryText = stripLeadingListMarkers(cleanSubtitleText(joinedText));
+        if (cleanedEntryText) {
+            entries.push({
+                index: current.index,
+                start: NaN,
+                end: NaN,
+                timeValid: false,
+                text: cleanedEntryText
+            });
+        }
+        current = null;
+    };
 
     for (const line of lines) {
         const match = line.match(NUMBERED_LINE_REGEX);
         if (match) {
             hasAnyNumberPrefix = true;
+            finishCurrent();
             const num = parseInt(toAsciiDigits(match[1] || match[2]), 10);
             const textPart = (match[3] || '').trim();
-            parsedMap.set(num, textPart);
-            lastNum = num;
-        } else if (hasAnyNumberPrefix && lastNum !== null) {
-            const prev = parsedMap.get(lastNum) || '';
-            parsedMap.set(lastNum, prev ? `${prev} ${line}` : line);
+            current = {
+                index: num,
+                textLines: textPart ? [textPart] : []
+            };
+        } else if (hasAnyNumberPrefix && current) {
+            current.textLines.push(line);
         }
     }
 
-    const expectedNumbers = blocks.map((b) => b.number);
-    const expectedSet = new Set(expectedNumbers);
+    finishCurrent();
 
     if (hasAnyNumberPrefix) {
-        const validEntries = Array.from(parsedMap.entries()).filter(([, txt]) => txt.trim().length > 0);
-        const validSet = new Set(validEntries.map(([num]) => num));
-        const missingNumbers = expectedNumbers.filter((num) => !validSet.has(num));
-        const extraNumbers = validEntries
-            .map(([num]) => num)
-            .filter((num) => !expectedSet.has(num))
-            .sort((a, b) => a - b);
+        return entries;
+    }
 
-        const receivedCount = validEntries.length;
+    return lines
+        .map((line) => stripLeadingListMarkers(cleanSubtitleText(line)))
+        .filter(Boolean)
+        .map((text) => ({
+            index: null,
+            start: NaN,
+            end: NaN,
+            timeValid: false,
+            text
+        }));
+};
 
-        if (missingNumbers.length > 0) {
-            return {
-                ok: false,
-                srtText: '',
-                lineCount: 0,
-                expectedCount,
-                receivedCount,
-                missingNumbers,
-                extraNumbers
-            };
+interface MatchDiagnostics {
+    parsed: number;
+    byIndex: number;
+    byTime: number;
+    byOrder: number;
+    unmatched: number;
+    dups: number;
+}
+
+interface MatchTranslationResult {
+    matchedMap: Record<number, string>;
+    matchedCount: number;
+    diagnostics: MatchDiagnostics;
+    indexTimeWarning: boolean;
+}
+
+const matchTranslationEntries = (blocks: SrtBlock[], rawTranslation: string): MatchTranslationResult => {
+    const cleaned = cleanPastedTranslation(rawTranslation);
+    if (!cleaned) {
+        return {
+            matchedMap: {},
+            matchedCount: 0,
+            diagnostics: {
+                parsed: 0,
+                byIndex: 0,
+                byTime: 0,
+                byOrder: 0,
+                unmatched: 0,
+                dups: 0
+            },
+            indexTimeWarning: false
+        };
+    }
+
+    const parsedEntries = cleaned.includes('-->')
+        ? parsePastedSrtWithArrows(cleaned)
+        : parsePastedWithoutArrows(cleaned);
+
+    const N = blocks.length;
+    const origStarts = blocks.map((b) => {
+        const m = b.timestampLine.match(SRT_FULL_TIME_LINE_REGEX);
+        return m ? toSrtSeconds(m[1], m[2], m[3], m[4]) : NaN;
+    });
+    const origIdxByNumber = new Map<number, number>();
+    blocks.forEach((b, idx) => {
+        if (!origIdxByNumber.has(b.number)) {
+            origIdxByNumber.set(b.number, idx);
         }
+    });
 
-        const rebuilt = blocks
-            .map((block) => {
-                const translated = stripLeadingListMarkers(cleanSubtitleText(parsedMap.get(block.number) || ''));
-                if (block.timestampLine) {
-                    return `${block.number}\n${block.timestampLine}\n${translated}`;
+    const usedOriginal = new Array<boolean>(N).fill(false);
+    const handledParsed = new Array<boolean>(parsedEntries.length).fill(false);
+    const matchedMap: Record<number, string> = {};
+
+    let byIndex = 0;
+    let byTime = 0;
+    let byOrder = 0;
+    let unmatched = 0;
+    let dups = 0;
+    let indexTimeMismatchCount = 0;
+
+    // 3a. Match by index (1..N), ignoring timestamps. First assignment wins; later duplicates counted in dups.
+    for (let j = 0; j < parsedEntries.length; j++) {
+        const entry = parsedEntries[j];
+        if (entry.index !== null && Number.isInteger(entry.index) && entry.index >= 1 && entry.index <= N) {
+            const targetOrigIdx = origIdxByNumber.has(entry.index)
+                ? origIdxByNumber.get(entry.index)!
+                : entry.index - 1;
+            if (usedOriginal[targetOrigIdx]) {
+                dups++;
+                handledParsed[j] = true;
+            } else {
+                usedOriginal[targetOrigIdx] = true;
+                handledParsed[j] = true;
+                matchedMap[blocks[targetOrigIdx].number] = entry.text;
+                byIndex++;
+
+                const origStart = origStarts[targetOrigIdx];
+                if (entry.timeValid && Number.isFinite(origStart) && Math.abs(entry.start - origStart) > 10) {
+                    indexTimeMismatchCount++;
                 }
-                return `${block.number}\n${translated}`;
-            })
-            .join('\n\n') + '\n';
-
-        return {
-            ok: true,
-            srtText: rebuilt,
-            lineCount: blocks.length,
-            expectedCount,
-            receivedCount,
-            missingNumbers: [],
-            extraNumbers
-        };
-    }
-
-    // No numbered prefix on any line: map 1st non-empty line -> 1st block, etc.
-    const receivedCount = lines.length;
-    if (receivedCount !== expectedCount) {
-        const missingNumbers = receivedCount < expectedCount
-            ? blocks.slice(receivedCount).map((b) => b.number)
-            : [];
-        return {
-            ok: false,
-            srtText: '',
-            lineCount: 0,
-            expectedCount,
-            receivedCount,
-            missingNumbers,
-            extraNumbers: [],
-            errorTitle: missingNumbers.length > 0 ? undefined : 'စာကြောင်းအရေအတွက် မကိုက်ညီပါ',
-            errorDetail: missingNumbers.length > 0
-                ? undefined
-                : 'နံပါတ်မပါသော စာကြောင်းအရေအတွက်သည် မူရင်း SRT စာကြောင်းအရေအတွက်ထက် ပိုနေပါသည်။ နံပါတ်တပ်ပြီး ပြန်ထည့်ပါ သို့မဟုတ် အရေအတွက် ကိုက်ညီအောင် စစ်ဆေးပါ။'
-        };
-    }
-
-    const rebuilt = blocks
-        .map((block, idx) => {
-            const translated = stripLeadingListMarkers(cleanSubtitleText(lines[idx]));
-            if (block.timestampLine) {
-                return `${block.number}\n${block.timestampLine}\n${translated}`;
             }
-            return `${block.number}\n${translated}`;
-        })
-        .join('\n\n') + '\n';
+        }
+    }
+
+    // 3b. Entries without index: if timeValid, match nearest unused original block within 0.5 s.
+    for (let j = 0; j < parsedEntries.length; j++) {
+        if (handledParsed[j]) continue;
+        const entry = parsedEntries[j];
+        if (entry.index === null && entry.timeValid) {
+            let bestIdx = -1;
+            let bestDiff = Infinity;
+            for (let i = 0; i < N; i++) {
+                if (usedOriginal[i]) continue;
+                const origStart = origStarts[i];
+                if (!Number.isFinite(origStart)) continue;
+                const diff = Math.abs(entry.start - origStart);
+                if (diff <= 0.5 + 1e-6 && diff < bestDiff) {
+                    bestDiff = diff;
+                    bestIdx = i;
+                }
+            }
+            if (bestIdx !== -1) {
+                usedOriginal[bestIdx] = true;
+                handledParsed[j] = true;
+                matchedMap[blocks[bestIdx].number] = entry.text;
+                byTime++;
+            }
+        }
+    }
+
+    // 3c. Otherwise, if number of pasted entries equals N, match remaining by order.
+    for (let j = 0; j < parsedEntries.length; j++) {
+        if (handledParsed[j]) continue;
+        if (parsedEntries.length === N && !usedOriginal[j]) {
+            usedOriginal[j] = true;
+            handledParsed[j] = true;
+            matchedMap[blocks[j].number] = parsedEntries[j].text;
+            byOrder++;
+        } else {
+            unmatched++;
+        }
+    }
+
+    const indexTimeWarning = byIndex > 0 && indexTimeMismatchCount / byIndex > 0.2;
 
     return {
-        ok: true,
-        srtText: rebuilt,
-        lineCount: blocks.length,
-        expectedCount,
-        receivedCount,
-        missingNumbers: [],
-        extraNumbers: []
+        matchedMap,
+        matchedCount: byIndex + byTime + byOrder,
+        diagnostics: {
+            parsed: parsedEntries.length,
+            byIndex,
+            byTime,
+            byOrder,
+            unmatched,
+            dups
+        },
+        indexTimeWarning
     };
+};
+
+const formatNumberRanges = (nums: number[]): string => {
+    if (nums.length === 0) return '';
+    const sorted = [...nums].sort((a, b) => a - b);
+    const ranges: string[] = [];
+    let start = sorted[0];
+    let prev = sorted[0];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const curr = sorted[i];
+        if (curr === prev + 1) {
+            prev = curr;
+        } else {
+            ranges.push(start === prev ? `${start}` : `${start}–${prev}`);
+            start = curr;
+            prev = curr;
+        }
+    }
+    ranges.push(start === prev ? `${start}` : `${start}–${prev}`);
+    return ranges.join(', ');
 };
 
 interface SrtExtractToolProps {
@@ -462,16 +493,10 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
     const [instructionMode, setInstructionMode] = useState<'srt' | 'text'>('srt');
     const [uploadedSrtFilename, setUploadedSrtFilename] = useState<string | null>(null);
     const [pastedTranslation, setPastedTranslation] = useState<string>('');
-    const [convertedSrt, setConvertedSrt] = useState<string>('');
-    const [convertedCount, setConvertedCount] = useState<number>(0);
-    const [convertError, setConvertError] = useState<{
-        expectedCount: number;
-        receivedCount: number;
-        missingNumbers: number[];
-        errorTitle?: string;
-        errorDetail?: string;
-    } | null>(null);
+    const [translatedMap, setTranslatedMap] = useState<Record<number, string>>({});
+    const [convertError, setConvertError] = useState<string | null>(null);
     const [convertWarning, setConvertWarning] = useState<string | null>(null);
+    const [lastDiagnostics, setLastDiagnostics] = useState<MatchDiagnostics | null>(null);
 
     const videoInputRef = useRef<HTMLInputElement>(null);
     const srtFileInputRef = useRef<HTMLInputElement>(null);
@@ -500,6 +525,69 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
     }, []);
 
     const srtBlocks = useMemo(() => parseSrtBlocks(srtRawText), [srtRawText]);
+
+    const originalSig = useMemo(() => {
+        if (srtBlocks.length === 0) return '';
+        return `${srtBlocks.length}|${srtBlocks[0].timestampLine}|${srtBlocks[srtBlocks.length - 1].timestampLine}`;
+    }, [srtBlocks]);
+
+    useEffect(() => {
+        if (!originalSig) {
+            setTranslatedMap({});
+            return;
+        }
+        try {
+            const raw = localStorage.getItem(TRANSLATED_PARTS_STORAGE_KEY);
+            if (!raw) {
+                setTranslatedMap({});
+                return;
+            }
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.sig === originalSig && parsed.map && typeof parsed.map === 'object') {
+                const restored: Record<number, string> = {};
+                for (const [k, v] of Object.entries(parsed.map)) {
+                    const num = Number(k);
+                    if (Number.isInteger(num) && typeof v === 'string' && v.trim()) {
+                        restored[num] = v;
+                    }
+                }
+                setTranslatedMap(restored);
+            } else {
+                setTranslatedMap({});
+            }
+        } catch {
+            setTranslatedMap({});
+        }
+    }, [originalSig]);
+
+    const missingBlocks = useMemo(
+        () => srtBlocks.filter((b) => !translatedMap[b.number]?.trim()),
+        [srtBlocks, translatedMap]
+    );
+    const doneCount = srtBlocks.length - missingBlocks.length;
+    const missingRangesText = useMemo(
+        () => formatNumberRanges(missingBlocks.map((b) => b.number)),
+        [missingBlocks]
+    );
+
+    const isAllTranslated = srtBlocks.length > 0 && doneCount === srtBlocks.length;
+
+    const convertedSrt = useMemo(() => {
+        if (!isAllTranslated) return '';
+        return (
+            srtBlocks
+                .map((block) => {
+                    const translated = stripLeadingListMarkers(cleanSubtitleText(translatedMap[block.number] || ''));
+                    if (block.timestampLine) {
+                        return `${block.number}\n${block.timestampLine}\n${translated}`;
+                    }
+                    return `${block.number}\n${translated}`;
+                })
+                .join('\n\n') + '\n'
+        );
+    }, [isAllTranslated, srtBlocks, translatedMap]);
+
+    const convertedCount = isAllTranslated ? srtBlocks.length : 0;
 
     const convertedPreviewBlocks = useMemo(
         () => (convertedSrt ? parseSrtBlocks(convertedSrt).slice(0, 3) : []),
@@ -717,10 +805,15 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
         setInstructionMode('srt');
         setUploadedSrtFilename(null);
         setPastedTranslation('');
-        setConvertedSrt('');
-        setConvertedCount(0);
+        setTranslatedMap({});
+        try {
+            localStorage.removeItem(TRANSLATED_PARTS_STORAGE_KEY);
+        } catch {
+            // Ignore localStorage errors
+        }
         setConvertError(null);
         setConvertWarning(null);
+        setLastDiagnostics(null);
         clearToastTimer();
         setCopyToast(null);
         if (srtFileInputRef.current) {
@@ -796,6 +889,23 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
         }
     };
 
+    const saveTranslatedParts = (sig: string, map: Record<number, string>) => {
+        if (!sig) return;
+        try {
+            localStorage.setItem(TRANSLATED_PARTS_STORAGE_KEY, JSON.stringify({ sig, map }));
+        } catch {
+            // Ignore localStorage quota or restricted storage errors
+        }
+    };
+
+    const clearTranslatedPartsStorage = () => {
+        try {
+            localStorage.removeItem(TRANSLATED_PARTS_STORAGE_KEY);
+        } catch {
+            // Ignore localStorage errors
+        }
+    };
+
     const handleOriginalSrtFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -804,56 +914,79 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
             setSrtRawText(text);
             setSrtLoadError('');
             setUploadedSrtFilename(file.name);
-            setConvertedSrt('');
-            setConvertedCount(0);
             setConvertError(null);
             setConvertWarning(null);
+            setLastDiagnostics(null);
+            setCopiedKeys((prev) => {
+                const next = { ...prev };
+                delete next['copy-missing'];
+                delete next['converted-srt'];
+                return next;
+            });
         } catch {
             showToast('error', 'SRT ဖိုင် ဖတ်၍ မရပါ။');
         }
     };
 
-    const handleConvertToSrt = () => {
-        setConvertedSrt('');
-        setConvertedCount(0);
+    const handleAddPart = () => {
+        if (srtBlocks.length === 0) {
+            setConvertError('မူရင်း SRT ဖိုင် (.srt) ကို အရင်ရွေးချယ်ပေးပါ။');
+            setConvertWarning(null);
+            return;
+        }
+
+        const result = matchTranslationEntries(srtBlocks, pastedTranslation);
+        setLastDiagnostics(result.diagnostics);
+
+        if (result.matchedCount === 0) {
+            setConvertError('ဒီစာထဲက နံပါတ်/အချိန်တွေ မူရင်း SRT နဲ့ မကိုက်ပါ');
+            setConvertWarning(null);
+            return;
+        }
+
+        const nextMap: Record<number, string> = {
+            ...translatedMap,
+            ...result.matchedMap
+        };
+        setTranslatedMap(nextMap);
+        saveTranslatedParts(originalSig, nextMap);
+        setPastedTranslation('');
         setConvertError(null);
-        setConvertWarning(null);
+        setConvertWarning(
+            result.indexTimeWarning
+                ? 'နံပါတ်တွေ မူရင်းနဲ့ မကိုက်နိုင်ပါ၊ အပိုင်းမှန်မမှန် စစ်ပါ'
+                : null
+        );
         setCopiedKeys((prev) => {
             const next = { ...prev };
+            delete next['copy-missing'];
             delete next['converted-srt'];
             return next;
         });
+    };
 
-        if (srtBlocks.length === 0) {
-            setConvertError({
-                expectedCount: 0,
-                receivedCount: 0,
-                missingNumbers: [],
-                errorTitle: 'မူရင်း SRT မရှိသေးပါ',
-                errorDetail: 'မူရင်း SRT ဖိုင် (.srt) ကို အရင်ရွေးချယ်ပေးပါ။'
-            });
+    const handleCopyMissingPart = async () => {
+        if (missingBlocks.length === 0) return;
+        const chunk = missingBlocks.slice(0, SRT_PART_SIZE);
+        const content = chunk.map((b) => b.raw).join('\n\n');
+        await handleCopy('copy-missing', content);
+    };
+
+    const handleClearParts = () => {
+        if (!window.confirm('စုထားသမျှ ဘာသာပြန်စာများကို ဖျက်မှာ သေချာပါသလား?')) {
             return;
         }
-
-        const result = buildTranslatedSrt(srtBlocks, pastedTranslation);
-        if (!result.ok) {
-            setConvertError({
-                expectedCount: result.expectedCount,
-                receivedCount: result.receivedCount,
-                missingNumbers: result.missingNumbers,
-                errorTitle: result.errorTitle,
-                errorDetail: result.errorDetail
-            });
-            return;
-        }
-
-        setConvertedSrt(result.srtText);
-        setConvertedCount(result.lineCount);
-        if (result.extraNumbers.length > 0) {
-            setConvertWarning(
-                `သတိပေးချက်: အပိုပါနေသော စာကြောင်းနံပါတ်များ (${result.extraNumbers.join(', ')}) ကို ကျော်သွားပြီး မူရင်း ${result.expectedCount} ကြောင်းဖြင့် SRT ထုတ်ပေးထားပါသည်။`
-            );
-        }
+        setTranslatedMap({});
+        clearTranslatedPartsStorage();
+        setConvertError(null);
+        setConvertWarning(null);
+        setLastDiagnostics(null);
+        setCopiedKeys((prev) => {
+            const next = { ...prev };
+            delete next['copy-missing'];
+            delete next['converted-srt'];
+            return next;
+        });
     };
 
     const handleDownloadConvertedSrt = () => {
@@ -906,10 +1039,11 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
         setInstructionMode('srt');
         setUploadedSrtFilename(null);
         setPastedTranslation('');
-        setConvertedSrt('');
-        setConvertedCount(0);
+        setTranslatedMap({});
+        clearTranslatedPartsStorage();
         setConvertError(null);
         setConvertWarning(null);
+        setLastDiagnostics(null);
         clearToastTimer();
         setCopyToast(null);
         if (videoInputRef.current) {
@@ -1303,16 +1437,35 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
             {(status === 'idle' || status === 'complete') && (
                 <div className="max-w-2xl mx-auto">
                     <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 sm:p-8 space-y-5">
-                        <div className="flex items-center gap-2.5">
-                            <div className="w-9 h-9 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center">
-                                <ArrowRightLeft className="w-4 h-4" />
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-9 h-9 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center">
+                                    <ArrowRightLeft className="w-4 h-4" />
+                                </div>
+                                <div>
+                                    <h4 className="text-base font-bold text-white">ဘာသာပြန်စာ ပြန်ထည့်ရန်</h4>
+                                    <p className="text-xs text-gray-400">
+                                        Gemini ဘာသာပြန်ထားတဲ့ စာသားကို အပိုင်းလိုက်ထည့်ပြီး မူရင်းအချိန်များဖြင့် SRT ဖိုင်အဖြစ် ပြန်ပြောင်းပေးပါသည်
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <h4 className="text-base font-bold text-white">ဘာသာပြန်စာ ပြန်ထည့်ရန်</h4>
-                                <p className="text-xs text-gray-400">
-                                    Gemini ဘာသာပြန်ထားတဲ့ နံပါတ်တပ်စာသားကို မူရင်းအချိန်များဖြင့် SRT ဖိုင်အဖြစ် ပြန်ပြောင်းပေးပါသည်
-                                </p>
-                            </div>
+
+                            {status === 'idle' && copyToast && (
+                                <div
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 border ${
+                                        copyToast.type === 'success'
+                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                            : 'bg-red-500/10 border-red-500/30 text-red-400'
+                                    }`}
+                                >
+                                    {copyToast.type === 'success' ? (
+                                        <Check className="w-3.5 h-3.5" />
+                                    ) : (
+                                        <AlertCircle className="w-3.5 h-3.5" />
+                                    )}
+                                    <span>{copyToast.message}</span>
+                                </div>
+                            )}
                         </div>
 
                         {srtBlocks.length === 0 && (
@@ -1330,14 +1483,40 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
                             </div>
                         )}
 
+                        {srtBlocks.length > 0 && (
+                            <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4 space-y-2.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                    <span className="font-bold text-white">
+                                        {doneCount}/{srtBlocks.length} ပြည့်စုံပြီး
+                                    </span>
+                                    <span className="text-gray-400">
+                                        မူရင်း SRT{uploadedSrtFilename ? ` (${uploadedSrtFilename})` : ''}: စုစုပေါင်း {srtBlocks.length} ကြောင်း
+                                    </span>
+                                </div>
+                                <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                                    <div
+                                        className={`h-2 rounded-full transition-all duration-300 ${
+                                            isAllTranslated
+                                                ? 'bg-emerald-500'
+                                                : 'bg-gradient-to-r from-orange-500 to-amber-500'
+                                        }`}
+                                        style={{
+                                            width: `${Math.min(100, Math.round((doneCount / srtBlocks.length) * 100))}%`
+                                        }}
+                                    />
+                                </div>
+                                {missingRangesText && (
+                                    <p className="text-xs text-amber-300/90 break-words leading-relaxed">
+                                        ကျန်သေးသည်: {missingRangesText}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <textarea
                             value={pastedTranslation}
                             onChange={(e) => {
                                 setPastedTranslation(e.target.value);
-                                if (convertedSrt) {
-                                    setConvertedSrt('');
-                                    setConvertedCount(0);
-                                }
                                 if (convertError) setConvertError(null);
                                 if (convertWarning) setConvertWarning(null);
                             }}
@@ -1346,45 +1525,60 @@ export const SrtExtractTool: React.FC<SrtExtractToolProps> = ({ onUseSrt }) => {
                             className="w-full bg-gray-950 border border-gray-800 focus:border-orange-500 focus:outline-none rounded-2xl p-4 text-xs sm:text-sm text-gray-200 placeholder-gray-500 leading-relaxed resize-y"
                         />
 
+                        {lastDiagnostics && (
+                            <p className="text-xs text-gray-400 leading-relaxed">
+                                ဖတ်ရသည်: {lastDiagnostics.parsed} · နံပါတ်နဲ့ကိုက်: {lastDiagnostics.byIndex} · အချိန်နဲ့ကိုက်: {lastDiagnostics.byTime} · အစဉ်နဲ့ကိုက်: {lastDiagnostics.byOrder} · မကိုက်: {lastDiagnostics.unmatched} · ထပ်နေသည်: {lastDiagnostics.dups}
+                            </p>
+                        )}
+
                         <div className="flex flex-wrap items-center gap-3">
                             <button
                                 type="button"
-                                onClick={handleConvertToSrt}
+                                onClick={handleAddPart}
                                 className="px-6 py-3 rounded-xl font-bold text-sm transition-all bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-lg shadow-orange-900/25 inline-flex items-center gap-2"
                             >
                                 <FileText className="w-4 h-4" />
-                                <span>SRT ပြုလုပ်မည်</span>
+                                <span>ဒီအပိုင်း ထည့်မည်</span>
                             </button>
-                            {srtBlocks.length > 0 && (
-                                <span className="text-xs text-gray-400">
-                                    မူရင်း SRT{uploadedSrtFilename ? ` (${uploadedSrtFilename})` : ''}: စုစုပေါင်း {srtBlocks.length} ကြောင်း
-                                </span>
+
+                            {srtBlocks.length > 0 && missingBlocks.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={handleCopyMissingPart}
+                                    className={`px-4 py-3 rounded-xl font-bold text-xs transition-all inline-flex items-center gap-1.5 ${
+                                        copiedKeys['copy-missing']
+                                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/25'
+                                            : 'bg-gray-800 hover:bg-gray-700 text-white border border-gray-700'
+                                    }`}
+                                >
+                                    {copiedKeys['copy-missing'] ? (
+                                        <span>✓ ကူးပြီး</span>
+                                    ) : (
+                                        <>
+                                            <Copy className="w-3.5 h-3.5" />
+                                            <span>ကျန်သေးသော အပိုင်း ကူးယူမည်</span>
+                                        </>
+                                    )}
+                                </button>
+                            )}
+
+                            {doneCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={handleClearParts}
+                                    className="px-4 py-3 rounded-xl font-bold text-xs transition-colors bg-gray-800 hover:bg-red-950/60 text-red-300 border border-gray-700 hover:border-red-500/40 inline-flex items-center gap-1.5"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    <span>စုထားသမျှ ဖျက်မည်</span>
+                                </button>
                             )}
                         </div>
 
                         {convertError && (
-                            <div className="bg-red-950/25 border border-red-500/30 rounded-2xl p-4 space-y-1.5 text-sm text-red-300">
+                            <div className="bg-red-950/25 border border-red-500/30 rounded-2xl p-4 text-sm text-red-300">
                                 <div className="flex items-start gap-2">
                                     <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                                    <div className="space-y-1">
-                                        {convertError.missingNumbers.length > 0 ? (
-                                            <p className="font-bold text-red-400">
-                                                ပျက်နေသော စာကြောင်း: {convertError.missingNumbers.join(', ')} — Gemini ကို ဒီနံပါတ်တွေပဲ ထပ်ပြန်ခိုင်းပါ
-                                            </p>
-                                        ) : (
-                                            <p className="font-bold text-red-400">
-                                                {convertError.errorTitle || 'SRT ပြုလုပ်၍ မရပါ'}
-                                            </p>
-                                        )}
-                                        {convertError.errorDetail && (
-                                            <p className="text-xs text-red-300">{convertError.errorDetail}</p>
-                                        )}
-                                        {convertError.expectedCount > 0 && (
-                                            <p className="text-xs text-red-200 font-semibold">
-                                                ရှိသင့်သည် {convertError.expectedCount}၊ ရရှိသည် {convertError.receivedCount}
-                                            </p>
-                                        )}
-                                    </div>
+                                    <p className="font-bold text-red-400">{convertError}</p>
                                 </div>
                             </div>
                         )}
