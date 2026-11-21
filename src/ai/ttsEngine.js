@@ -111,7 +111,7 @@ export const synthesizeToFile = async (text, voiceConfig, outPath, timeoutMs = 3
             '-acodec', 'libmp3lame',
             '-ac', '1',
             '-ar', '24000',
-            '-b:a', '96k',
+            '-b:a', '256k',
             outPath
         );
 

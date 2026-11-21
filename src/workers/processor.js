@@ -1513,6 +1513,7 @@ const processRecapPipelineInner = async (jobId) => {
             let measured_TP = '-1.5';
             let measured_thresh = '-24';
             let target_offset = '0';
+            let measureOk = false;
 
             try {
                 console.log(`[LOUDNORM-TWOPASS] Starting Pass 1 analysis on: ${state.ttsAudioPath}`);
@@ -1529,6 +1530,7 @@ const processRecapPipelineInner = async (jobId) => {
                     measured_TP = data.input_tp;
                     measured_thresh = data.input_thresh;
                     target_offset = data.target_offset;
+                    measureOk = true;
                     console.log(`[LOUDNORM-TWOPASS] Pass 1 success. Measured params: I=${measured_I}, LRA=${measured_LRA}, TP=${measured_TP}, thresh=${measured_thresh}, offset=${target_offset}`);
                 } else {
                     console.warn('[LOUDNORM-TWOPASS] Could not find loudnorm JSON output in ffmpeg logs, using defaults.');
@@ -1537,7 +1539,13 @@ const processRecapPipelineInner = async (jobId) => {
                 console.error('[LOUDNORM-TWOPASS] Pass 1 analysis failed, using defaults:', e.message);
             }
 
-            const loudnormFilter = `loudnorm=I=-14:LRA=11:TP=-1.5:measured_I=${measured_I}:measured_LRA=${measured_LRA}:measured_TP=${measured_TP}:measured_thresh=${measured_thresh}:offset=${target_offset}:linear=true`;
+            const TARGET_I = -16;
+            const measuredNum = parseFloat(measured_I);
+            const gainDb = (measureOk && Number.isFinite(measuredNum))
+                ? Math.max(-10, Math.min(12, TARGET_I - measuredNum))
+                : 0;
+            const loudnormFilter = `volume=${gainDb.toFixed(2)}dB,alimiter=limit=0.84:attack=5:release=80:level=disabled,aresample=48000`;
+            console.log(`[AUDIO-NORM] gain=${gainDb.toFixed(2)}dB (measured_I=${measured_I}, target=${TARGET_I}) limiter=-1.5dBFS sr=48000`);
 
             let finalArgs = [];
             console.log(`[AUDIO-MIX] Using TTS narration only (background audio skipped).`);
